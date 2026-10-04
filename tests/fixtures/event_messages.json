@@ -1,0 +1,16 @@
+[
+  {"name":"cca_dinner","text":"CCA dinner Friday 7–9pm at Vivo","extraction":{},"start":"2026-10-09T19:00:00+08:00","end":"2026-10-09T21:00:00+08:00"},
+  {"name":"tomorrow_24h","text":"Project meeting tomorrow 14:00–15:30 at COM1","extraction":{"title":"Project meeting","date_text":"tomorrow","start_time_text":"14:00","end_time_text":"15:30","location":"COM1"},"start":"2026-10-05T14:00:00+08:00","end":"2026-10-05T15:30:00+08:00"},
+  {"name":"explicit_iso","text":"Hackathon 2026-10-17 9am–6pm","extraction":{"title":"Hackathon","date_text":"2026-10-17","start_time_text":"9am","end_time_text":"6pm","location":null},"start":"2026-10-17T09:00:00+08:00","end":"2026-10-17T18:00:00+08:00"},
+  {"name":"numeric_sg_date","text":"Study group 10/10/2026 10:00–12:00","extraction":{"title":"Study group","date_text":"10/10/2026","start_time_text":"10:00","end_time_text":"12:00","location":null},"start":"2026-10-10T10:00:00+08:00","end":"2026-10-10T12:00:00+08:00"},
+  {"name":"month_name","text":"Hall supper 12 Oct 2026 8pm–10pm","extraction":{"title":"Hall supper","date_text":"12 Oct 2026","start_time_text":"8pm","end_time_text":"10pm","location":null},"start":"2026-10-12T20:00:00+08:00","end":"2026-10-12T22:00:00+08:00"},
+  {"name":"noon_range","text":"Lunch Friday 11–1pm","extraction":{"title":"Lunch","start_time_text":"11","end_time_text":"1pm","location":null},"start":"2026-10-09T11:00:00+08:00","end":"2026-10-09T13:00:00+08:00"},
+  {"name":"tonight","text":"Movie tonight 7:30pm–9:45pm","extraction":{"title":"Movie","date_text":"tonight","start_time_text":"7:30pm","end_time_text":"9:45pm","location":null},"start":"2026-10-04T19:30:00+08:00","end":"2026-10-04T21:45:00+08:00"},
+  {"name":"missing_start","text":"Dinner Friday at Vivo","extraction":{"title":"Dinner","start_time_text":null,"end_time_text":null},"question":"start"},
+  {"name":"missing_date","text":"Dinner 7–9pm at Vivo","extraction":{"title":"Dinner","date_text":null},"question":"date"},
+  {"name":"missing_end","text":"Dinner Friday 7pm at Vivo","extraction":{"title":"Dinner","start_time_text":"7pm","end_time_text":null},"question":"end"},
+  {"name":"ambiguous_options","text":"Dinner Friday or Saturday 7–9pm at Vivo","extraction":{"ambiguity":"Friday or Saturday?"},"question":"clarify"},
+  {"name":"overnight_explicit","text":"Games Friday 11pm to Saturday 1am","extraction":{"title":"Games","start_time_text":"11pm","end_time_text":"1am","end_date_text":"Saturday","location":null},"start":"2026-10-09T23:00:00+08:00","end":"2026-10-10T01:00:00+08:00"},
+  {"name":"overnight_unclear","text":"Games Friday 11pm–1am","extraction":{"title":"Games","start_time_text":"11pm","end_time_text":"1am","location":null},"question":"end time"},
+  {"name":"ambiguous_am_pm","text":"Dinner Friday 7–9 at Vivo","extraction":{"start_time_text":"7","end_time_text":"9"},"question":"AM or PM"}
+]

@@ -1,0 +1,58 @@
+from typing import Literal
+from urllib.parse import urlparse
+
+from pydantic import Field, SecretStr, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
+    telegram_bot_token: SecretStr = SecretStr("")
+    openai_api_key: SecretStr = SecretStr("")
+    supabase_url: str = ""
+    supabase_service_role_key: SecretStr = SecretStr("")
+    openai_model: str = "gpt-4o-mini"
+    bot_mode: Literal["polling", "webhook", "disabled"] = "polling"
+    app_base_url: str = ""
+    telegram_webhook_secret: SecretStr = SecretStr("")
+    nusmods_academic_year: str = ""
+    default_event_duration_minutes: int = Field(default=0, ge=0, le=1440)
+    retain_extractions: bool = False
+    extraction_retention_days: int = Field(default=7, ge=1, le=90)
+    pending_ttl_hours: int = Field(default=24, ge=1, le=168)
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    @model_validator(mode="after")
+    def webhook_settings(self):
+        if self.bot_mode == "webhook":
+            parsed = urlparse(self.app_base_url)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise ValueError("Webhook mode requires an HTTPS APP_BASE_URL")
+            import re
+
+            if not re.fullmatch(
+                r"[A-Za-z0-9_-]{16,256}", self.telegram_webhook_secret.get_secret_value()
+            ):
+                raise ValueError("Webhook secret must contain 16–256 letters, digits, _ or -")
+        return self
+
+    def require_credentials(self):
+        missing = [
+            name.upper()
+            for name in (
+                "telegram_bot_token",
+                "openai_api_key",
+                "supabase_url",
+                "supabase_service_role_key",
+            )
+            if not (
+                getattr(self, name).get_secret_value()
+                if isinstance(getattr(self, name), SecretStr)
+                else getattr(self, name)
+            )
+        ]
+        if missing:
+            raise RuntimeError("Configure .env first: " + ", ".join(missing))
+        parsed = urlparse(self.supabase_url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise RuntimeError("SUPABASE_URL must be an HTTPS project URL")

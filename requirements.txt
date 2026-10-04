@@ -1,0 +1,8 @@
+fastapi==0.142.2
+uvicorn==0.54.0
+python-telegram-bot==22.8
+supabase==2.32.0
+openai==2.54.0
+pydantic-settings==2.15.0
+python-dateutil==2.9.0.post0
+httpx==0.28.1

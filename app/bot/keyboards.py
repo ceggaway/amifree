@@ -41,3 +41,12 @@ def choose_keyboard(events: list[Event]) -> InlineKeyboardMarkup:
             for e in events
         ]
     )
+
+
+def page_keyboard(page: int, pages: int) -> InlineKeyboardMarkup:
+    buttons = []
+    if page:
+        buttons.append(InlineKeyboardButton("Previous", callback_data=f"events:{page - 1}"))
+    if page + 1 < pages:
+        buttons.append(InlineKeyboardButton("Next", callback_data=f"events:{page + 1}"))
+    return InlineKeyboardMarkup([buttons])

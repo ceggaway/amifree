@@ -102,16 +102,18 @@ def validate_extraction(
         r"(am|pm)$", (extraction.end_time_text or "").replace(" ", "").lower()
     )
     start_raw = extraction.start_time_text
+    shared_suffix = bool(start_raw and re.fullmatch(r"\d{1,2}", start_raw.strip()))
     start_time = (
-        resolve_time(start_raw, end_meridiem_match[1] if end_meridiem_match else None)
+        resolve_time(
+            start_raw, end_meridiem_match[1] if shared_suffix and end_meridiem_match else None
+        )
         if start_raw
         else existing.start_at.timetz().replace(tzinfo=None)
     )
     end_time = resolve_time(extraction.end_time_text) if extraction.end_time_text else None
     # Shared suffix in ranges: 11–1pm means 11am to 1pm.
     if (
-        start_raw
-        and not re.search(r"[ap]m", start_raw, re.I)
+        shared_suffix
         and end_meridiem_match
         and end_time
         and start_time > end_time

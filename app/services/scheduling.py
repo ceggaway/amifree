@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 
-from app.bot.keyboards import choose_keyboard, confirm_keyboard
+from app.bot.keyboards import choose_keyboard, confirm_keyboard, page_keyboard
 from app.bot.messages import HELP, Reply, details, event_card
 from app.config import Settings
 from app.models.user import User
@@ -96,11 +96,22 @@ class SchedulingService:
                 )
             ]
         if command == "events":
-            events = await self.repo.recent_events(user.id)
-            if not events:
-                return [Reply("No recent events yet. Forward an invitation after setup.")]
-            return [event_card(e, await self.availability(user, e, e.id)) for e in events[:10]]
+            return await self.list_events(user)
         return [Reply("Use /help to see the available commands.")]
+
+    async def list_events(self, user: User, page: int = 0) -> list[Reply]:
+        events = await self.repo.recent_events(user.id)
+        if not events:
+            return [Reply("No upcoming or recent events yet. Forward an invitation after setup.")]
+        pages = (len(events) + 9) // 10
+        page = min(page, pages - 1)
+        replies = [
+            event_card(e, await self.availability(user, e, e.id))
+            for e in events[page * 10 : (page + 1) * 10]
+        ]
+        if pages > 1:
+            replies.append(Reply(f"Events: page {page + 1} of {pages}", page_keyboard(page, pages)))
+        return replies
 
     async def message(
         self, telegram_id: int, message_id: int, text: str, reference: datetime
@@ -273,6 +284,11 @@ class SchedulingService:
 
     async def callback(self, telegram_id: int, data: str) -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
+        if data.startswith("events:"):
+            page = data.removeprefix("events:")
+            if not page.isascii() or not page.isdigit() or len(page) > 8:
+                return [Reply("That page isn't valid. Use /events.")]
+            return await self.list_events(user, int(page))
         parts = data.split(":")
         action = parts[0]
         if action in ("confirm", "dismiss") and len(parts) == 2:

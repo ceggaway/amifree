@@ -128,7 +128,7 @@ Use one replica and one worker for this MVP. Webhook updates are serialized and 
 - Student share-link formats v1/v2/v3 are supported. Missing/stale selections are rejected; the importer does not choose a class. Hidden courses are still imported. TA-specific links are rejected with an explanation.
 - The importer expands listed teaching weeks into dated blocks and accounts for recess after teaching week 6. Special terms and explicit week ranges are supported. Exams require a published duration. Holiday exceptions, ad hoc cancellations and unscheduled classes are only as accurate as NUSMods' published lesson data. Resend a fresh link after timetable changes; reimport replaces old blocks atomically.
 - Coverage spans the imported semester. Outside coverage the bot reports unknown timetable coverage rather than claiming Free; it still detects stored Going clashes.
-- Update matching searches up to 50 events created in the last 30 days. `/events` and candidate choices show at most 10 cards. A vague follow-up requires selection. A new clash appearing after an update preview requires another confirmation.
+- Event discovery includes all upcoming events plus events created in the last 30 days. `/events` has pages of 10 cards, with upcoming events first; candidate choices show at most 10 matches. A vague follow-up requires selection. A new clash appearing after an update preview requires another confirmation.
 - Pending clarification/update/delete state survives restarts in Supabase. It expires after `PENDING_TTL_HOURS` (default 24). One pending action per user is supported; `/cancel` clears it.
 - Optional raw extraction auditing is off (`RETAIN_EXTRACTIONS=false`). Pending state temporarily includes source text. With auditing enabled, records expire after `EXTRACTION_RETENTION_DAYS` (default 7). Cleanup runs at startup and hourly while the backend is running, and stale pending data is cleared when its user next interacts. If the backend is offline, cleanup resumes on restart.
 - Users, structured events and aggregate action records remain until `/delete`. Provider-side Telegram/OpenAI/Supabase retention is separate. HTTP client logs are suppressed to avoid URLs containing bot tokens; application logs report error types and update IDs without raw messages or credentials.
@@ -147,3 +147,9 @@ The bundled `app/data/academic-calendar.json` covers AY2024/25–2026/27 and com
 - `check_availability(candidate, timetable, events, ...)` returns Free, Clash or Unknown; it never calls an LLM.
 - `SchedulingService` manages onboarding, pending state, event previews, versioned RSVP/update actions and Telegram replies. `SupabaseRepository` scopes all event operations to their owner and uses transaction functions for multi-row mutations.
 - FastAPI provides `/healthz`, `/readyz` and the authenticated webhook endpoint. There is no public endpoint for reading a user's schedule.
+
+### Webhook failure recovery
+
+Failed processing or reply delivery returns HTTP 503 so Telegram can retry. The running worker retains reply progress and completed update IDs for its latest 1,000 handled updates. Retries resume unsent replies without repeating completed business operations; duplicate completed updates are acknowledged without additional replies. This cache is in memory and is lost on restart or eviction. Continue to run one worker. Existing database event/message uniqueness and event version checks remain the fallback replay guards; this is not durable exactly-once delivery. A reply accepted by Telegram before a network timeout may be delivered twice on retry.
+
+Times with a colon and no AM/PM suffix are treated as 24-hour time, including mixed ranges such as `07:00–9pm`. Abbreviated ranges such as `7–9pm` still share the suffix.

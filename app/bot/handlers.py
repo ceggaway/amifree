@@ -2,6 +2,7 @@ import logging
 
 from telegram import Update
 from telegram.constants import ChatAction, ChatType
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -11,6 +12,7 @@ from telegram.ext import (
     filters,
 )
 
+from app.bot.delivery import webhook_delivery
 from app.bot.messages import Reply
 from app.services.nusmods import ImportError
 
@@ -19,6 +21,11 @@ ERROR = "I couldn't process that message. Please try again, or send the date/tim
 
 
 async def send(update: Update, replies: list[Reply]):
+    delivery = webhook_delivery.get()
+    if delivery is not None:
+        delivery.replies = replies
+        await delivery.flush(update)
+        return
     for reply in replies:
         await update.effective_message.reply_text(reply.text, reply_markup=reply.keyboard)
 
@@ -41,7 +48,11 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
     service = context.application.bot_data["service"]
     try:
         if operation == "callback":
-            await update.callback_query.answer()
+            try:
+                await update.callback_query.answer()
+            except TelegramError:
+                # Expired callback acknowledgements must not prevent safe replay.
+                pass
             replies = await service.callback(
                 update.effective_user.id, update.callback_query.data or ""
             )
@@ -49,7 +60,10 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
             command = update.effective_message.text.split()[0].split("@")[0].lstrip("/")
             replies = await service.command(update.effective_user.id, command)
         else:
-            await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+            try:
+                await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+            except TelegramError:
+                pass
             message = update.effective_message
             reference = message.forward_origin.date if message.forward_origin else message.date
             replies = await service.message(
@@ -59,6 +73,10 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
     except ImportError as exc:
         await send(update, [Reply(str(exc))])
     except Exception as exc:
+        delivery = webhook_delivery.get()
+        if delivery is not None:
+            delivery.failed = True
+            raise
         # Third-party exception strings can include API URLs/tokens: log types only.
         log.error(
             "bot_request_failed update_id=%s operation=%s error_type=%s",
@@ -94,6 +112,9 @@ async def unsupported(update, context):
 
 
 async def error_handler(update, context):
+    delivery = webhook_delivery.get()
+    if delivery is not None:
+        delivery.failed = True
     log.error(
         "telegram_handler_failed update_id=%s error_type=%s",
         getattr(update, "update_id", None),

@@ -9,7 +9,7 @@ from supabase.lib.client_options import AsyncClientOptions
 from app.config import Settings
 from app.db.supabase import SupabaseRepository
 from app.models.timetable import BusyBlock
-from app.schemas.event import SG
+from app.schemas.event import SG, EventDraft, Status
 from app.services.nusmods import ImportResult
 from app.services.scheduling import SchedulingService
 from tests.conftest import extraction
@@ -21,6 +21,57 @@ pytestmark = pytest.mark.skipif(
     or not (ROOT / "scripts/sql-tests/node_modules/@electric-sql/pglite").exists(),
     reason="Install optional SQL test engine: npm --prefix scripts/sql-tests ci",
 )
+
+
+async def test_old_upcoming_commitment_remains_discoverable():
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        user = await repo.ensure_user(1)
+        start = datetime.now(SG) + timedelta(days=7)
+        draft = EventDraft(
+            title="Future booking", start_at=start, end_at=start + timedelta(hours=1)
+        )
+        event = await repo.create_preview(user.id, 1, draft)
+        await repo.rsvp(user.id, event, Status.GOING)
+        await db.query(
+            "update events set created_at=now()-interval '31 days' where id=$1", [event.id]
+        )
+        assert [e.id for e in await repo.recent_events(user.id)] == [event.id]
+        _, busy = await repo.busy(user.id, draft)
+        assert [e.id for e in busy] == [event.id]
+        other = await repo.ensure_user(2)
+        assert await repo.recent_events(other.id) == []
+        service = SchedulingService(
+            repo,
+            QueueExtractor(extraction(kind="cancel", match_title="Future booking")),
+            None,
+            Settings(_env_file=None, bot_mode="disabled"),
+        )
+        await db.query(
+            "update users set onboarding_status='READY', coverage_start=now(), coverage_end=now()+interval '30 days' where id=$1",
+            [user.id],
+        )
+        assert "Future booking" in (await service.command(1, "events"))[0].text
+        replies = await service.message(1, 2, "Cancel Future booking", datetime.now(SG))
+        assert replies[0].keyboard is not None
+        # Cross the API page size and overlap the upcoming/recent sets: none may
+        # disappear or appear twice when both discovery queries return them.
+        await db.query(
+            "insert into events(user_id,source_message_id,title,start_at,end_at) "
+            "select $1, n+10, 'Booking ' || n, now()+interval '8 days', "
+            "now()+interval '8 days 1 hour' from generate_series(1,501) n",
+            [user.id],
+        )
+        discovered = await repo.recent_events(user.id)
+        assert len(discovered) == len({e.id for e in discovered}) == 502
 
 
 async def test_supabase_repository_connected_to_postgresql(reference):

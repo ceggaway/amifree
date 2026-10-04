@@ -1,6 +1,7 @@
 import asyncio
 import hmac
 import logging
+from collections import OrderedDict
 from contextlib import AsyncExitStack, asynccontextmanager
 
 import httpx
@@ -11,6 +12,7 @@ from supabase.lib.client_options import AsyncClientOptions
 from telegram import BotCommand, Update
 from telegram.ext import Application
 
+from app.bot.delivery import Delivery, webhook_delivery
 from app.bot.handlers import register_handlers
 from app.config import Settings
 from app.db.supabase import SupabaseRepository
@@ -40,6 +42,7 @@ def create_app(
         app.state.service = service
         app.state.telegram = telegram_application
         app.state.webhook_lock = asyncio.Lock()
+        app.state.deliveries = OrderedDict()
         if service is not None:
             app.state.ready = True
             yield
@@ -174,7 +177,30 @@ def create_app(
         except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
             raise HTTPException(400, "Invalid Telegram update") from None
         async with app.state.webhook_lock:
-            await app.state.telegram.process_update(update)
+            # Retain reply progress so a delivery retry does not repeat a successful
+            # business operation (including /delete or a confirmed edit).
+            deliveries = app.state.deliveries
+            delivery = deliveries.get(update.update_id)
+            if delivery is None:
+                delivery = Delivery()
+                token = webhook_delivery.set(delivery)
+                try:
+                    await app.state.telegram.process_update(update)
+                finally:
+                    webhook_delivery.reset(token)
+            else:
+                delivery.failed = False
+                try:
+                    await delivery.flush(update)
+                except Exception:
+                    delivery.failed = True
+            if delivery.replies is not None or not delivery.failed:
+                deliveries[update.update_id] = delivery
+                deliveries.move_to_end(update.update_id)
+                while len(deliveries) > 1000:
+                    deliveries.popitem(last=False)
+            if delivery.failed:
+                raise HTTPException(503, "Update processing or reply delivery failed")
         return {"ok": True}
 
     return app

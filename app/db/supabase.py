@@ -115,18 +115,29 @@ class SupabaseRepository:
         return Event.model_validate(result.data[0]) if result.data else None
 
     async def recent_events(self, user_id: str) -> list[Event]:
-        since = (datetime.now(UTC) - timedelta(days=30)).isoformat()
-        result = (
-            await self.client.table("events")
-            .select("*")
-            .eq("user_id", user_id)
-            .neq("status", "CANCELLED")
-            .gte("created_at", since)
-            .order("created_at", desc=True)
-            .limit(50)
-            .execute()
-        )
-        return [Event.model_validate(e) for e in result.data]
+        now = datetime.now(UTC)
+        # Upcoming events must remain discoverable regardless of when they were saved.
+        # Fetch each set in pages to avoid the hosted API's response row limit.
+        rows = {}
+        for column, cutoff in (("end_at", now), ("created_at", now - timedelta(days=30))):
+            offset = 0
+            while True:
+                batch = (
+                    await self.client.table("events")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .neq("status", "CANCELLED")
+                    .gte(column, cutoff.isoformat())
+                    .order("id")
+                    .range(offset, offset + 499)
+                    .execute()
+                ).data
+                rows.update((row["id"], row) for row in batch)
+                if len(batch) < 500:
+                    break
+                offset += 500
+        events = [Event.model_validate(row) for row in rows.values()]
+        return sorted(events, key=lambda e: (e.end_at < now, e.start_at, e.id))
 
     async def rsvp(self, user_id: str, event: Event, status: Status) -> Event | None:
         result = await self.client.rpc(

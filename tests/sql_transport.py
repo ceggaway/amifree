@@ -53,6 +53,8 @@ class SQLGateway:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # A full 500-row PostgREST page exceeds asyncio's default 64 KiB.
+            limit=8 * 1024 * 1024,
         )
         self.lock = asyncio.Lock()
         line = await asyncio.wait_for(self.process.stdout.readline(), timeout=30)

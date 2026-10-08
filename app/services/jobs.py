@@ -6,9 +6,12 @@ stops a repeated job run, or a retried edit, from messaging anyone twice.
 
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import date, datetime, time, timedelta
 
 from app.bot.messages import Reply, event_card, verdict_line
+from app.schemas.event import SG, Status
 from app.services.change_alerts import describe_change
+from app.services.reminders import enqueue_nightly, summary
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +37,16 @@ class Notifier:
             availability = await self.scheduling.availability(user, event, event.id)
             card = event_card(event, availability)
             return Reply(text + "\n\n" + verdict_line(availability), card.keyboard)
+        if not user.reminders_enabled:
+            return None
+        if row["kind"] == "NIGHTLY":
+            start = datetime.combine(date.fromisoformat(payload["date"]), time.min, SG)
+            # Read at send time, so a plan cancelled since queuing is not announced.
+            events = await self.repo.events_between(
+                start, start + timedelta(days=1), [Status.GOING, Status.SAVED], user.id
+            )
+            text = summary(start, events)
+            return Reply(text) if text else None
         return None
 
     async def deliver(self, limit: int = 50) -> dict[str, int]:
@@ -64,4 +77,8 @@ class Notifier:
         return counts
 
     async def run(self) -> dict[str, int]:
-        return await self.deliver()
+        """One idempotent tick: safe to call from a scheduler as often as wanted."""
+        queued = await enqueue_nightly(
+            self.repo, self.scheduling.clock(), self.scheduling.settings.nightly_hour
+        )
+        return {"queued": queued} | await self.deliver()

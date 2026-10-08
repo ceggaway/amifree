@@ -24,6 +24,7 @@ I never read group chats.
 /plans — upcoming saved plans
 /block — mark yourself busy, e.g. "busy sat 2–6pm" or "work every Wed 6–10pm"
 /blocks — list or remove busy blocks
+/reminders — turn the night-before summary on or off
 /events — every recent card, including unsaved previews
 /cancel — stop a pending clarification or edit
 /deletemydata — delete everything AmIFree stores about you"""

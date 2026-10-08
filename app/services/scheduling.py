@@ -135,6 +135,19 @@ class SchedulingService:
             return await self.list_events(user, plans=True)
         if command in ("event", "plan", "whosfree"):
             return [Reply(f"/{command} works in group chats. Add me to a group and use it there.")]
+        if command == "reminders":
+            choice = args.lower()
+            if choice in ("on", "off"):
+                await self.repo.set_user_flags(user.id, reminders_enabled=choice == "on")
+                return [
+                    Reply(
+                        "Night-before summaries and nudges are on."
+                        if choice == "on"
+                        else "Night-before summaries and nudges are off. Change alerts for plans you saved still arrive."
+                    )
+                ]
+            state = "on" if user.reminders_enabled else "off"
+            return [Reply(f"Reminders are {state}. Send /reminders on or /reminders off.")]
         if command == "block":
             if not args:
                 return [Reply("Tell me when you're busy. " + USAGE)]

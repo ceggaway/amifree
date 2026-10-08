@@ -95,6 +95,7 @@ def create_app(
                     BotCommand("plans", "Upcoming saved plans"),
                     BotCommand("block", "Mark yourself busy: busy sat 2-6pm"),
                     BotCommand("blocks", "Your busy blocks"),
+                    BotCommand("reminders", "Night-before summary on or off"),
                     BotCommand("events", "Recent cards, including previews"),
                     BotCommand("cancel", "Clear pending action"),
                     BotCommand("deletemydata", "Delete everything about me"),
@@ -167,6 +168,19 @@ def create_app(
         except Exception:
             raise HTTPException(503, "Database is unavailable") from None
         return {"status": "ready", "database": "connected"}
+
+    @app.post("/internal/jobs/run")
+    async def run_jobs(request: Request):
+        secret = settings.jobs_secret.get_secret_value()
+        if not secret:
+            raise HTTPException(404, "Jobs endpoint is disabled")
+        provided = request.headers.get("X-Jobs-Secret", "")
+        if not hmac.compare_digest(provided.encode(), secret.encode()):
+            raise HTTPException(403, "Invalid jobs secret")
+        notifier = getattr(app.state.service, "notifier", None)
+        if not app.state.ready or not notifier:
+            raise HTTPException(503, "Bot unavailable")
+        return await notifier.run()
 
     @app.post("/telegram/webhook")
     async def webhook(request: Request):

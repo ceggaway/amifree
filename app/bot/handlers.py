@@ -254,6 +254,7 @@ def register_handlers(application: Application, service):
                 "events",
                 "block",
                 "blocks",
+                "reminders",
                 "cancel",
                 "delete",
                 "deletemydata",

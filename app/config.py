@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     pending_ttl_hours: int = Field(default=24, ge=1, le=168)
     # Other Going plans on the same day before a card warns "Busy day"; 0 disables it.
     busy_day_threshold: int = Field(default=3, ge=0, le=20)
+    # Singapore hour from which the night-before summary may be sent.
+    nightly_hour: int = Field(default=20, ge=0, le=23)
+    # Shared secret for POST /internal/jobs/run; the endpoint is disabled while blank.
+    jobs_secret: SecretStr = SecretStr("")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @model_validator(mode="after")

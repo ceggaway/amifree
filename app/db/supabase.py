@@ -181,6 +181,33 @@ class SupabaseRepository:
         events = [Event.model_validate(row) for row in rows.values()]
         return sorted(events, key=lambda e: (e.end_at < now, e.start_at, e.id))
 
+    async def events_between(
+        self,
+        start: datetime,
+        end: datetime,
+        statuses: list[Status],
+        user_id: str | None = None,
+    ) -> list[Event]:
+        """Events starting in [start, end). Without a user this spans everyone (jobs only)."""
+        rows, offset = [], 0
+        while True:
+            q = (
+                self.client.table("events")
+                .select("*")
+                .gte("start_at", start.isoformat())
+                .lt("start_at", end.isoformat())
+                .in_("status", [s.value for s in statuses])
+                .order("id")
+                .range(offset, offset + 499)
+            )
+            if user_id:
+                q = q.eq("user_id", user_id)
+            batch = (await q.execute()).data
+            rows.extend(batch)
+            if len(batch) < 500:
+                return [Event.model_validate(row) for row in rows]
+            offset += 500
+
     async def rsvp(self, user_id: str, event: Event, status: Status) -> Event | None:
         result = await self.client.rpc(
             "amifree_rsvp",

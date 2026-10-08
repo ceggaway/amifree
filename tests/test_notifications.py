@@ -1,6 +1,11 @@
+from datetime import datetime
+
+import httpx
 from telegram import Update
 
-from app.schemas.event import Status
+from app.config import Settings
+from app.main import create_app
+from app.schemas.event import SG, Status
 from app.services.change_alerts import describe_change
 from app.services.jobs import Notifier, Undeliverable
 from tests.conftest import extraction
@@ -180,3 +185,111 @@ async def test_personal_edits_do_not_alert_anyone(service_factory, reference):
     preview = (await service.message(1, 3, "20:00–22:00", reference))[0]
     await service.callback(1, preview.keyboard.inline_keyboard[0][0].callback_data)
     assert repo.notifications == []
+
+
+def at(service, hour, day=4):
+    service.clock = lambda: datetime(2026, 10, day, hour, tzinfo=SG)
+
+
+async def two_plans_tomorrow(service_factory, reference, **settings):
+    lunch = extraction(
+        title="Lunch", date_text="Monday", start_time_text="12:00", end_time_text="13:00"
+    )
+    dinner = extraction(
+        title="Dinner", date_text="Monday", start_time_text="19:00", end_time_text="21:00"
+    )
+    maybe = extraction(
+        title="Movie",
+        date_text="Monday",
+        start_time_text="22:00",
+        end_time_text="23:00",
+        location=None,
+    )
+    service, repo = service_factory(dinner, lunch, maybe, **settings)
+    outbox = Outbox()
+    service.notifier = Notifier(service, outbox)
+    for n, (text, row, col) in enumerate(
+        (
+            ("Dinner Monday 19:00 21:00", 0, 0),
+            ("Lunch Monday 12:00 13:00", 0, 0),
+            ("Movie Monday 22:00 23:00", 2, 0),
+        )
+    ):
+        card = (await service.message(1, n + 2, text, reference))[0]
+        await service.callback(1, card.keyboard.inline_keyboard[row][col].callback_data)
+    return service, repo, outbox
+
+
+async def test_two_plans_tomorrow_make_one_nightly_message(service_factory, reference):
+    service, repo, outbox = await two_plans_tomorrow(service_factory, reference)
+    # Someone with nothing tomorrow gets nothing.
+    await repo.ensure_user(2)
+    at(service, 19)
+    assert await service.notifier.run() == {"queued": 0, "sent": 0, "failed": 0, "skipped": 0}
+    at(service, 20)
+    assert await service.notifier.run() == {"queued": 1, "sent": 1, "failed": 0, "skipped": 0}
+    ((telegram_id, text),) = outbox.sent
+    assert telegram_id == 1
+    assert text.startswith(
+        "Tomorrow, Mon 5 Oct:\n• 12:00–13:00 Lunch @ Vivo\n• 19:00–21:00 Dinner @ Vivo"
+    )
+    assert "Still undecided: Movie" in text
+    # Repeating the job the same night, or just after midnight, sends nothing more.
+    at(service, 23)
+    assert (await service.notifier.run())["sent"] == 0
+    at(service, 0, day=5)
+    assert await service.notifier.run() == {"queued": 0, "sent": 0, "failed": 0, "skipped": 0}
+    assert len(outbox.sent) == 1
+
+
+async def test_nightly_retries_after_a_transient_failure(service_factory, reference):
+    service, repo, outbox = await two_plans_tomorrow(service_factory, reference)
+    at(service, 21)
+    outbox.errors = [ConnectionError("telegram down")]
+    assert (await service.notifier.run())["failed"] == 1 and outbox.sent == []
+    assert (await service.notifier.run())["sent"] == 1
+    assert (await service.notifier.run())["sent"] == 0 and len(outbox.sent) == 1
+
+
+async def test_reminder_opt_out_and_cancelled_plans(service_factory, reference):
+    service, repo, outbox = await two_plans_tomorrow(service_factory, reference, nightly_hour=18)
+    assert "Reminders are on" in (await service.command(1, "reminders"))[0].text
+    assert "are off" in (await service.command(1, "reminders", "off"))[0].text
+    at(service, 18)
+    assert (await service.notifier.run())["skipped"] == 1 and outbox.sent == []
+    # A second user's only plan is declined after the summary was queued.
+    service.extractor.items.append(
+        extraction(title="Run", date_text="Monday", start_time_text="07:00", end_time_text="08:00")
+    )
+    card = (await service.message(2, 9, "Run Monday 07:00 08:00", reference))[0]
+    going = await service.callback(2, card.keyboard.inline_keyboard[0][0].callback_data)
+    from app.services.reminders import enqueue_nightly
+
+    assert await enqueue_nightly(repo, service.clock(), 18) == 1
+    await service.callback(2, going[1].keyboard.inline_keyboard[1][0].callback_data)
+    assert (await service.notifier.run())["skipped"] == 1 and outbox.sent == []
+
+
+async def test_jobs_endpoint_requires_its_secret(service_factory, reference):
+    service, repo, outbox = await two_plans_tomorrow(service_factory, reference)
+    at(service, 20)
+    disabled = create_app(Settings(_env_file=None, bot_mode="disabled"), service=service)
+    app = create_app(
+        Settings(_env_file=None, bot_mode="disabled", jobs_secret="job-secret-123"), service=service
+    )
+    for target, headers, expected in (
+        (disabled, {"X-Jobs-Secret": "job-secret-123"}, 404),
+        (app, {}, 403),
+        (app, {"X-Jobs-Secret": "wrong"}, 403),
+        (app, {"X-Jobs-Secret": "job-secret-123"}, 200),
+    ):
+        async with (
+            target.router.lifespan_context(target),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(target), base_url="http://test"
+            ) as client,
+        ):
+            response = await client.post("/internal/jobs/run", headers=headers)
+            assert response.status_code == expected
+    assert response.json() == {"queued": 1, "sent": 1, "failed": 0, "skipped": 0}
+    assert len(outbox.sent) == 1

@@ -90,6 +90,15 @@ class MemoryRepository:
             if e.user_id == user_id and e.status != Status.CANCELLED
         ]
 
+    async def events_between(self, start, end, statuses, user_id=None):
+        return [
+            e.model_copy(deep=True)
+            for e in self.events.values()
+            if start <= e.start_at < end
+            and e.status in statuses
+            and (user_id is None or e.user_id == user_id)
+        ]
+
     async def rsvp(self, user_id, event, status):
         e = self.events.get(event.id)
         if not e or e.user_id != user_id or e.version != event.version:

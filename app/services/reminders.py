@@ -1,0 +1,46 @@
+"""Night-before summary: one message listing tomorrow's Going plans with venues."""
+
+from datetime import datetime, time, timedelta
+
+from app.schemas.event import SG, Event, Status
+
+
+def tomorrow_window(now: datetime) -> tuple[datetime, datetime]:
+    day = now.astimezone(SG).date() + timedelta(days=1)
+    start = datetime.combine(day, time.min, SG)
+    return start, start + timedelta(days=1)
+
+
+async def enqueue_nightly(repo, now: datetime, hour: int) -> int:
+    """Queue at most one summary per user per day, from `hour` until midnight Singapore time.
+
+    A run that happens after midnight does nothing: "tomorrow" would be the wrong day.
+    """
+    if now.astimezone(SG).hour < hour:
+        return 0
+    start, end = tomorrow_window(now)
+    users = {e.user_id for e in await repo.events_between(start, end, [Status.GOING])}
+    queued = 0
+    for user_id in sorted(users):
+        queued += await repo.enqueue_notification(
+            user_id, "NIGHTLY", start.date().isoformat(), {"date": start.date().isoformat()}
+        )
+    return queued
+
+
+def summary(day: datetime, events: list[Event]) -> str | None:
+    going = sorted((e for e in events if e.status == Status.GOING), key=lambda e: e.start_at)
+    if not going:
+        return None
+
+    def line(e: Event) -> str:
+        venue = f" @ {e.location[:80]}" if e.location else ""
+        return f"• {e.start_at:%H:%M}–{e.end_at:%H:%M} {e.title[:80]}{venue}"
+
+    text = f"Tomorrow, {day:%a %-d %b}:\n" + "\n".join(line(e) for e in going[:15])
+    if len(going) > 15:
+        text += f"\n+ {len(going) - 15} more"
+    undecided = [e for e in events if e.status == Status.SAVED]
+    if undecided:
+        text += "\n\nStill undecided: " + ", ".join(e.title[:40] for e in undecided[:5])
+    return text + "\n\n/plans for details. /reminders off stops these summaries."

@@ -263,6 +263,20 @@ async def test_change_outbox_in_postgresql(reference):
         updated = await repo.update_group_event(organiser.id, card, later)
         assert updated.version == 2 and updated.start_at.hour == 20
         assert await repo.update_group_event(organiser.id, card, later) is None  # stale version
+        # The nightly job reads Going plans across users for one Singapore day.
+        day = datetime(2026, 10, 9, tzinfo=SG)
+        found = await repo.events_between(day, day + timedelta(days=1), [Status.GOING])
+        assert sorted(e.user_id for e in found) == sorted([organiser.id, going.id])
+        mine = await repo.events_between(
+            day, day + timedelta(days=1), [Status.GOING, Status.DECLINED], declined.id
+        )
+        assert [e.status for e in mine] == [Status.DECLINED]
+        assert (
+            await repo.events_between(
+                day + timedelta(days=1), day + timedelta(days=2), [Status.GOING]
+            )
+            == []
+        )
         rows = await repo.claim_notifications()
         assert [(r["user_id"], r["kind"], r["status"]) for r in rows] == [
             (going.id, "CHANGE", "sending")

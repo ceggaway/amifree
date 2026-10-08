@@ -17,7 +17,7 @@ from app.bot.messages import HELP, Reply, details, event_card
 from app.config import Settings
 from app.models.timetable import BlockRule
 from app.models.user import User
-from app.schemas.event import SG, Event, EventDraft, Extraction, Status
+from app.schemas.event import SG, Event, EventDraft, Extraction, GroupEvent, Status
 from app.services.availability import check_availability
 from app.services.date_resolution import Clarification, validate_extraction
 from app.services.event_updates import match_updates
@@ -47,6 +47,15 @@ class SchedulingService:
         self.groups = GroupEventService(self)
         # Set by the bot layer: re-renders a group card after its headcount changes.
         self.on_group_change = None
+        # Set at startup: the outbox worker that sends reminders, alerts and nudges.
+        self.notifier = None
+
+    async def flush_notifications(self):
+        if self.notifier:
+            try:
+                await self.notifier.deliver()
+            except Exception as exc:
+                log.warning("notification_flush_failed error_type=%s", type(exc).__name__)
 
     async def group_changed(self, group_event_id: str | None):
         if group_event_id and self.on_group_change:
@@ -92,6 +101,11 @@ class SchedulingService:
             return [Reply(HELP)]
         if command == "start":
             await self.safe_action(user.id, "start")
+            if user.dm_blocked:
+                # They are talking to the bot again, so DMs can be delivered.
+                await self.repo.set_user_flags(user.id, dm_blocked=False)
+            if args.startswith(("edit_", "cancel_")):
+                return await self.groups.begin_change(user, args)
             if user.onboarding_status == "READY":
                 return [
                     Reply(
@@ -250,8 +264,14 @@ class SchedulingService:
             "extraction": extracted.model_dump(mode="json"),
         }
         if pending and pending.get("event_id"):
-            state.update({"event_id": pending["event_id"], "base_version": pending["base_version"]})
-            existing = await self.repo.get_event(user.id, state["event_id"])
+            state.update(
+                {
+                    "event_id": pending["event_id"],
+                    "base_version": pending["base_version"],
+                    "group": pending.get("group", False),
+                }
+            )
+            existing = await self.load_target(user, state)
             if not existing or existing.version != state["base_version"]:
                 await self.repo.set_pending(user.id, None)
                 return [
@@ -309,8 +329,71 @@ class SchedulingService:
         )
         return [event_card(event, availability)]
 
+    async def load_target(self, user: User, pending: dict) -> Event | GroupEvent | None:
+        """The plan a pending edit applies to: the user's own event, or a card they organise."""
+        if pending.get("group"):
+            event = await self.repo.get_group_event(pending["event_id"])
+            if event and event.creator_user_id == user.id and event.status == "ACTIVE":
+                return event
+            return None
+        return await self.repo.get_event(user.id, pending["event_id"])
+
+    async def own_id(self, user: User, target: Event | GroupEvent) -> str | None:
+        """The user's own row for this plan, excluded from their clash check."""
+        if isinstance(target, GroupEvent):
+            linked = await self.repo.linked_event(user.id, target.id)
+            return linked.id if linked else None
+        return target.id
+
+    async def begin_change(
+        self, user: User, event: Event | GroupEvent, cancel: bool = False
+    ) -> list[Reply]:
+        group = isinstance(event, GroupEvent)
+        state = {"event_id": event.id, "base_version": event.version, "group": group}
+        if cancel:
+            state.update({"stage": "confirm", "cancel": True, "nonce": secrets.token_hex(8)})
+            await self.repo.set_pending(user.id, state)
+            return [
+                Reply(
+                    "Cancel this event for everyone?\n\n" + details(event),
+                    confirm_keyboard(state["nonce"], "Confirm cancellation"),
+                )
+            ]
+        # A complete baseline allows the extractor to retain unchanged fields.
+        base = Extraction(
+            kind="new",
+            title=event.title,
+            date_text=event.start_at.date().isoformat(),
+            start_time_text=event.start_at.strftime("%H:%M"),
+            end_time_text=event.end_at.strftime("%H:%M"),
+            end_date_text=event.end_at.date().isoformat(),
+            location=event.location,
+            notes=event.notes,
+            match_title=event.title,
+            ambiguity=None,
+        )
+        state.update(
+            {
+                "stage": "clarify",
+                "source": details(event) + "\n" + base.model_dump_json(),
+                "reference": self.clock().astimezone(SG).isoformat(),
+                "use_next_message_reference": True,
+                "message_id": event.source_message_id,
+                "extraction": base.model_dump(mode="json"),
+            }
+        )
+        await self.repo.set_pending(user.id, state)
+        scope = " Everyone who saved it will be told what changed." if group else ""
+        return [
+            Reply(
+                "Send the corrected title, date, start/end time or venue. I will show a preview before applying it."
+                + scope
+                + "\n/cancel to keep this event unchanged."
+            )
+        ]
+
     async def prepare(
-        self, user: User, extraction: Extraction, state: dict, existing: Event
+        self, user: User, extraction: Extraction, state: dict, existing: Event | GroupEvent
     ) -> list[Reply]:
         state.update({"event_id": existing.id, "base_version": existing.version})
         if extraction.kind == "cancel":
@@ -341,7 +424,7 @@ class SchedulingService:
                 "nonce": secrets.token_hex(8),
             }
         )
-        availability = await self.availability(user, draft, existing.id)
+        availability = await self.availability(user, draft, await self.own_id(user, existing))
         state["availability_snapshot"] = self.availability_snapshot(availability)
         await self.repo.set_pending(user.id, state)
         clash = (
@@ -398,13 +481,15 @@ class SchedulingService:
                 ]
             if pending["stage"] != "confirm":
                 return [Reply("That action is no longer available.")]
-            event = await self.repo.get_event(user.id, pending["event_id"])
+            event = await self.load_target(user, pending)
             if not event or event.version != pending["base_version"]:
                 await self.repo.set_pending(user.id, None)
                 return [Reply("That event changed. Use /events to review its latest state.")]
             draft = EventDraft.model_validate(pending["draft"]) if not pending["cancel"] else None
             if draft is not None:
-                current = self.availability_snapshot(await self.availability(user, draft, event.id))
+                current = self.availability_snapshot(
+                    await self.availability(user, draft, await self.own_id(user, event))
+                )
                 previous = pending.get("availability_snapshot")
                 if (
                     previous is None
@@ -420,10 +505,26 @@ class SchedulingService:
                         ),
                         *refreshed,
                     ]
-            result = await self.repo.update_event(user.id, event, draft, pending["cancel"])
+            if pending.get("group"):
+                result = await self.repo.update_group_event(
+                    user.id, event, draft, pending["cancel"]
+                )
+            else:
+                result = await self.repo.update_event(user.id, event, draft, pending["cancel"])
             await self.repo.set_pending(user.id, None)
             if not result:
                 return [Reply("That event changed. Use /events to open its latest card.")]
+            if pending.get("group"):
+                await self.group_changed(result.id)
+                # Alerts were queued with the change; deliver them now rather than on the next tick.
+                await self.flush_notifications()
+                return [
+                    Reply(
+                        "Event cancelled for everyone. Members who saved it are being told."
+                        if pending["cancel"]
+                        else "Event updated. Everyone who saved it gets one message with the change."
+                    )
+                ]
             return [
                 Reply("Event cancelled." if pending["cancel"] else "Event updated."),
                 event_card(result, await self.availability(user, result, result.id)),
@@ -449,37 +550,7 @@ class SchedulingService:
         if action == "edit" and event.group_event_id:
             return [Reply("Only the organiser can edit this plan, from its card in the group.")]
         if action == "edit":
-            # A complete baseline allows the extractor to retain unchanged fields.
-            base = Extraction(
-                kind="new",
-                title=event.title,
-                date_text=event.start_at.date().isoformat(),
-                start_time_text=event.start_at.strftime("%H:%M"),
-                end_time_text=event.end_at.strftime("%H:%M"),
-                end_date_text=event.end_at.date().isoformat(),
-                location=event.location,
-                notes=event.notes,
-                match_title=event.title,
-                ambiguity=None,
-            )
-            await self.repo.set_pending(
-                user.id,
-                {
-                    "stage": "clarify",
-                    "source": details(event) + "\n" + base.model_dump_json(),
-                    "reference": self.clock().astimezone(SG).isoformat(),
-                    "use_next_message_reference": True,
-                    "message_id": event.source_message_id,
-                    "extraction": base.model_dump(mode="json"),
-                    "event_id": event.id,
-                    "base_version": event.version,
-                },
-            )
-            return [
-                Reply(
-                    "Send the corrected title, date, start/end time or venue. I will show a preview before applying it.\n/cancel to keep this event unchanged."
-                )
-            ]
+            return await self.begin_change(user, event)
         if action == "save":
             result = await self.repo.save(user.id, event)
             if not result:

@@ -34,6 +34,8 @@ def group_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
         [
             [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")],
             [button("Am I free?", "free"), button("Save", "save")],
+            # Organiser only; everyone else gets a private refusal.
+            [button("Edit", "edit"), button("Cancel event", "cancel")],
         ]
     )
 

@@ -36,8 +36,17 @@ RPC_PARAMS = {
         "p_version",
         "p_cancel",
     ],
+    "amifree_enqueue_notification": ["p_user_id", "p_kind", "p_key", "p_payload"],
+    "amifree_claim_notifications": ["p_limit"],
+    "amifree_finish_notification": ["p_id", "p_ok", "p_permanent"],
 }
-VOID_RPCS = {"amifree_cleanup", "amifree_import_timetable", "amifree_touch_member"}
+VOID_RPCS = {
+    "amifree_cleanup",
+    "amifree_import_timetable",
+    "amifree_touch_member",
+    "amifree_finish_notification",
+}
+SCALAR_RPCS = {"amifree_enqueue_notification"}
 TABLES = {
     "users",
     "events",
@@ -48,6 +57,7 @@ TABLES = {
     "group_events",
     "group_members",
     "event_changes",
+    "notification_logs",
 }
 COLUMNS = {
     "id",
@@ -75,6 +85,8 @@ COLUMNS = {
     "group_event_id",
     "chat_id",
     "message_id",
+    "reminders_enabled",
+    "dm_blocked",
 }
 
 
@@ -118,10 +130,9 @@ class SQLGateway:
             rows = await self.query(
                 f"select * from {endpoint}({placeholders})", [body[p] for p in params]
             )
-            return httpx.Response(
-                200,
-                json=None if endpoint in VOID_RPCS else rows,
-            )
+            if endpoint in SCALAR_RPCS:
+                return httpx.Response(200, json=rows[0][endpoint])
+            return httpx.Response(200, json=None if endpoint in VOID_RPCS else rows)
         assert endpoint in TABLES
         values, conditions = [], []
         for key, value in request.url.params.multi_items():

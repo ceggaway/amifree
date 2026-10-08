@@ -15,6 +15,7 @@ class MemoryRepository:
         self.rules = {}
         self.group_events = {}
         self.members = set()
+        self.notifications = []
         self.events = {}
         self.actions = []
         self.available = True
@@ -179,6 +180,86 @@ class MemoryRepository:
                 counts[e.status.value] = counts.get(e.status.value, 0) + 1
         return counts
 
+    async def update_group_event(self, user_id, event, draft, cancel=False):
+        g = self.group_events.get(event.id)
+        if (
+            not g
+            or g.creator_user_id != user_id
+            or g.version != event.version
+            or g.status != "ACTIVE"
+        ):
+            return None
+        before = g.model_dump(mode="json")
+        if cancel:
+            g.status = "CANCELLED"
+        else:
+            for k, v in draft.model_dump().items():
+                setattr(g, k, v)
+        g.version += 1
+        after = g.model_dump(mode="json")
+        for e in self.events.values():
+            if e.group_event_id != g.id or e.status == Status.CANCELLED:
+                continue
+            if e.user_id != user_id and e.status in (Status.GOING, Status.MAYBE, Status.SAVED):
+                await self.enqueue_notification(
+                    e.user_id,
+                    "CHANGE",
+                    f"{g.id}:{g.version}",
+                    {
+                        "group_event_id": g.id,
+                        "event_id": e.id,
+                        "cancelled": cancel,
+                        "before": before,
+                        "after": after,
+                    },
+                )
+            for k in EventDraft.model_fields:
+                setattr(e, k, getattr(g, k))
+            if cancel:
+                e.status = Status.CANCELLED
+            e.version += 1
+        return g.model_copy(deep=True)
+
+    async def get_user(self, user_id):
+        user = next((u for u in self.users.values() if u.id == user_id), None)
+        return user.model_copy(deep=True) if user else None
+
+    async def set_user_flags(self, user_id, **flags):
+        for key, value in flags.items():
+            setattr(self.user(user_id), key, value)
+
+    async def enqueue_notification(self, user_id, kind, key, payload):
+        if any(
+            (n["user_id"], n["kind"], n["dedupe_key"]) == (user_id, kind, key)
+            for n in self.notifications
+        ):
+            return False
+        self.notifications.append(
+            {
+                "id": str(uuid4()),
+                "user_id": user_id,
+                "kind": kind,
+                "dedupe_key": key,
+                "payload": payload,
+                "status": "pending",
+                "attempts": 0,
+            }
+        )
+        return True
+
+    async def claim_notifications(self, limit=50):
+        due = [n for n in self.notifications if n["status"] == "pending"][:limit]
+        for n in due:
+            n["status"], n["attempts"] = "sending", n["attempts"] + 1
+        return [dict(n) for n in due]
+
+    async def finish_notification(self, notification_id, ok, permanent):
+        n = next(n for n in self.notifications if n["id"] == notification_id)
+        if ok:
+            n["status"] = "sent"
+        else:
+            n["status"] = "failed" if permanent or n["attempts"] >= 5 else "pending"
+
     async def action(self, user_id, kind, event_id=None, metadata=None):
         self.actions.append((user_id, kind, event_id, metadata))
 
@@ -191,6 +272,7 @@ class MemoryRepository:
         self.blocks.pop(user_id, None)
         self.rules.pop(user_id, None)
         self.members = {m for m in self.members if m[1] != user_id}
+        self.notifications = [n for n in self.notifications if n["user_id"] != user_id]
         for g in self.group_events.values():
             if g.creator_user_id == user_id:
                 g.creator_user_id = None

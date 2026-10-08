@@ -13,3 +13,5 @@ class User(BaseModel):
     coverage_start: datetime | None = None
     coverage_end: datetime | None = None
     pending: dict | None = None
+    reminders_enabled: bool = True
+    dm_blocked: bool = False

@@ -30,7 +30,7 @@ class GroupResult:
     card: Reply | None = None  # replaces the bot's own card message
     post: Reply | None = None  # a new message in the group
     group_event_id: str | None = None  # set when `post` is a new card to record
-    url: str | None = None  # opens the private chat with a start parameter
+    start: str | None = None  # opens the private chat with this /start parameter
 
 
 def parse_id(value: str) -> str | None:
@@ -80,6 +80,17 @@ class GroupEventService:
         await self.scheduling.safe_action(user.id, "group_event")
         return GroupResult(post=await self.render(event), group_event_id=event.id)
 
+    async def begin_change(self, user, payload: str) -> list[Reply]:
+        """Handle /start edit_<id> or cancel_<id>, reached from the card's organiser buttons."""
+        action, _, raw = payload.partition("_")
+        event_id = parse_id(raw)
+        event = await self.repo.get_group_event(event_id) if event_id else None
+        if not event or event.creator_user_id != user.id:
+            return [Reply("Only the organiser can change that card.")]
+        if event.status != "ACTIVE":
+            return [Reply("That event was already cancelled.")]
+        return await self.scheduling.begin_change(user, event, cancel=action == "cancel")
+
     async def posted(self, group_event_id: str, message_id: int):
         await self.repo.set_group_message(group_event_id, message_id)
 
@@ -97,6 +108,11 @@ class GroupEventService:
         if event.status == "CANCELLED":
             return GroupResult(alert="This event was cancelled.", card=await self.render(event))
         action = parts[1]
+        if action in ("edit", "cancel"):
+            if event.creator_user_id != user.id:
+                return GroupResult(alert="Only the organiser can change this card.")
+            # Editing happens in the organiser's private chat, then updates this card.
+            return GroupResult(start=f"{action}_{event.id}")
         linked = await self.repo.linked_event(user.id, event.id)
         availability = await self.scheduling.availability(
             user, event, linked.id if linked else None

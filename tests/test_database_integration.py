@@ -230,3 +230,60 @@ async def test_group_cards_in_postgresql(reference):
         kept = await repo.get_group_event(card.id)
         assert kept and kept.creator_user_id is None
         assert await repo.group_counts(card.id) == {"GOING": 1}
+
+
+async def test_change_outbox_in_postgresql(reference):
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        organiser, going, declined = [await repo.ensure_user(n) for n in (1, 2, 3)]
+        draft = EventDraft(
+            title="Dinner",
+            start_at=datetime(2026, 10, 9, 19, tzinfo=SG),
+            end_at=datetime(2026, 10, 9, 21, tzinfo=SG),
+        )
+        card = await repo.create_group_event(organiser.id, -500, 10, draft)
+        await repo.group_rsvp(organiser.id, card, Status.GOING)
+        await repo.group_rsvp(going.id, card, Status.GOING)
+        await repo.group_rsvp(declined.id, card, Status.DECLINED)
+        later = draft.model_copy(
+            update={
+                "start_at": draft.start_at + timedelta(hours=1),
+                "end_at": draft.end_at + timedelta(hours=1),
+            }
+        )
+        assert await repo.update_group_event(going.id, card, later) is None
+        updated = await repo.update_group_event(organiser.id, card, later)
+        assert updated.version == 2 and updated.start_at.hour == 20
+        assert await repo.update_group_event(organiser.id, card, later) is None  # stale version
+        rows = await repo.claim_notifications()
+        assert [(r["user_id"], r["kind"], r["status"]) for r in rows] == [
+            (going.id, "CHANGE", "sending")
+        ]
+        assert rows[0]["payload"]["before"]["start_at"] != rows[0]["payload"]["after"]["start_at"]
+        assert await repo.claim_notifications() == []
+        # A failed send returns to the queue with a backoff, then succeeds exactly once.
+        await repo.finish_notification(rows[0]["id"], False, False)
+        assert await repo.claim_notifications() == []
+        await db.query("update notification_logs set next_attempt_at=now()-interval '1 minute'")
+        retry = await repo.claim_notifications()
+        assert retry[0]["attempts"] == 2
+        await repo.finish_notification(retry[0]["id"], True, False)
+        assert (await db.query("select status,sent_at from notification_logs"))[0][
+            "status"
+        ] == "sent"
+        assert await repo.enqueue_notification(going.id, "NIGHTLY", "2026-10-09", {"n": 1})
+        assert not await repo.enqueue_notification(going.id, "NIGHTLY", "2026-10-09", {"n": 2})
+        await repo.set_user_flags(going.id, dm_blocked=True, reminders_enabled=False)
+        user = await repo.get_user(going.id)
+        assert user.dm_blocked and not user.reminders_enabled
+        assert await repo.get_user(str(organiser.id)[:-4] + "0000") is None
+        await repo.delete_user(going.id)
+        assert await db.query("select * from notification_logs") == []

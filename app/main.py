@@ -115,24 +115,34 @@ def create_app(
                     allowed_updates=["message", "callback_query"],
                 )
 
-            async def retention_loop():
+            async def retention():
+                await repo.cleanup(settings.extraction_retention_days)
+
+            async def periodic(seconds, job, name):
                 while True:
-                    await asyncio.sleep(3600)
+                    await asyncio.sleep(seconds)
                     try:
-                        await repo.cleanup(settings.extraction_retention_days)
+                        await job()
                     except Exception as exc:
-                        log.warning("retention_cleanup_failed error_type=%s", type(exc).__name__)
+                        log.warning("%s_failed error_type=%s", name, type(exc).__name__)
 
-            task = asyncio.create_task(retention_loop())
+            # The in-process tick is best effort: a sleeping or restarting instance misses
+            # runs, so production should also call POST /internal/jobs/run from a scheduler.
+            tasks = [
+                asyncio.create_task(periodic(3600, retention, "retention_cleanup")),
+                asyncio.create_task(periodic(60, app.state.service.notifier.run, "jobs")),
+            ]
 
-            async def stop_retention():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            async def stop_tasks():
+                for task in tasks:
+                    task.cancel()
+                for task in tasks:
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
-            stack.push_async_callback(stop_retention)
+            stack.push_async_callback(stop_tasks)
             app.state.ready = True
             log.info("AmIFree ready mode=%s", settings.bot_mode)
             try:

@@ -26,6 +26,7 @@ class SupabaseRepository:
             "user_actions",
             "manual_busy_blocks",
             "group_events",
+            "notification_logs",
         ):
             await self.client.table(table).select("id").limit(1).execute()
 
@@ -274,6 +275,45 @@ class SupabaseRepository:
             "amifree_group_counts", {"p_group_event_id": group_event_id}
         ).execute()
         return {row["status"]: row["n"] for row in result.data or []}
+
+    async def update_group_event(
+        self, user_id: str, event: GroupEvent, draft: EventDraft | None, cancel=False
+    ) -> GroupEvent | None:
+        result = await self.client.rpc(
+            "amifree_update_group_event",
+            {
+                "p_user_id": user_id,
+                "p_group_event_id": event.id,
+                "p_draft": draft.model_dump(mode="json") if draft else {},
+                "p_version": event.version,
+                "p_cancel": cancel,
+            },
+        ).execute()
+        return GroupEvent.model_validate(result.data[0]) if result.data else None
+
+    async def get_user(self, user_id: str) -> User | None:
+        result = await self.client.table("users").select("*").eq("id", user_id).limit(1).execute()
+        return User.model_validate(result.data[0]) if result.data else None
+
+    async def set_user_flags(self, user_id: str, **flags: bool):
+        await self.client.table("users").update(flags).eq("id", user_id).execute()
+
+    async def enqueue_notification(self, user_id: str, kind: str, key: str, payload: dict) -> bool:
+        result = await self.client.rpc(
+            "amifree_enqueue_notification",
+            {"p_user_id": user_id, "p_kind": kind, "p_key": key, "p_payload": payload},
+        ).execute()
+        return bool(result.data)
+
+    async def claim_notifications(self, limit: int = 50) -> list[dict]:
+        result = await self.client.rpc("amifree_claim_notifications", {"p_limit": limit}).execute()
+        return result.data or []
+
+    async def finish_notification(self, notification_id: str, ok: bool, permanent: bool):
+        await self.client.rpc(
+            "amifree_finish_notification",
+            {"p_id": notification_id, "p_ok": ok, "p_permanent": permanent},
+        ).execute()
 
     async def action(
         self, user_id: str, kind: str, event_id: str | None = None, metadata: dict | None = None

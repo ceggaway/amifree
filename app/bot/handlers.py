@@ -2,7 +2,7 @@ import logging
 
 from telegram import Update
 from telegram.constants import ChatAction, ChatType
-from telegram.error import BadRequest, TelegramError
+from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -14,6 +14,7 @@ from telegram.ext import (
 
 from app.bot.delivery import webhook_delivery
 from app.bot.messages import Reply
+from app.services.jobs import Notifier, Undeliverable
 from app.services.nusmods import ImportError
 
 log = logging.getLogger(__name__)
@@ -89,7 +90,12 @@ async def deliver_group(update: Update, service, result):
     query = update.callback_query
     if query:
         try:
-            await query.answer(result.alert, show_alert=bool(result.alert), url=result.url)
+            url = (
+                f"https://t.me/{query.get_bot().username}?start={result.start}"
+                if result.start
+                else None
+            )
+            await query.answer(result.alert, show_alert=bool(result.alert), url=url)
         except TelegramError:
             pass
         if result.card:
@@ -205,8 +211,23 @@ async def error_handler(update, context):
     )
 
 
+def attach_notifier(application: Application, service) -> Notifier:
+    """Give the outbox worker a way to DM users through this bot."""
+
+    async def send_dm(telegram_id: int, reply: Reply):
+        try:
+            await application.bot.send_message(telegram_id, reply.text, reply_markup=reply.keyboard)
+        except (Forbidden, BadRequest) as exc:
+            # Blocked, or the user never opened a private chat with the bot.
+            raise Undeliverable from exc
+
+    service.notifier = Notifier(service, send_dm)
+    return service.notifier
+
+
 def register_handlers(application: Application, service):
     application.bot_data["service"] = service
+    attach_notifier(application, service)
 
     async def refresh_card(group_event_id: str):
         event = await service.repo.get_group_event(group_event_id)

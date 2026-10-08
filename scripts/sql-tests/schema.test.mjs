@@ -108,7 +108,7 @@ await check('anonymous/authenticated users cannot read tables or invoke RPCs', a
   await db.exec('reset role; set role service_role;');
 });
 const TABLES = ['users','events','timetable_blocks','event_extractions','user_actions','manual_busy_blocks'];
-const SHARED = ['group_events','group_members','event_changes'];
+const SHARED = ['group_events','group_members','event_changes','notification_logs'];
 await check('every table has RLS enabled', async () => {
   const result=await q("select relname,relrowsecurity from pg_class where relnamespace='public'::regnamespace and relname=any($1::text[])",[[...TABLES,...SHARED]]);
   assert.equal(result.rows.length,TABLES.length+SHARED.length); assert.ok(result.rows.every(r=>r.relrowsecurity));
@@ -141,12 +141,25 @@ await check('group cards: organiser-only edits propagate to members and record a
   assert.ok(rows.every(r=>new Date(r.start_at).getTime()===new Date(moved.start_at).getTime()));
   const change = await one('select * from event_changes where group_event_id=$1',[card.id]);
   assert.equal(change.version,2); assert.notEqual(change.before.start_at,change.after.start_at);
+  // The change queued one alert for the member who kept the plan: not the decliner or organiser.
+  const queued = (await q("select user_id,dedupe_key from notification_logs where kind='CHANGE'")).rows;
+  assert.deepEqual(queued,[{user_id:other.id,dedupe_key:`${card.id}:2`}]);
   await one('select * from amifree_update_group_event($1,$2,$3,$4,$5)',[user.id,card.id,'{}',2,true]);
+  assert.equal((await one("select count(*)::int n from notification_logs where kind='CHANGE' and user_id=$1",[other.id])).n,2);
+  const claimed = (await q('select * from amifree_claim_notifications(10)')).rows;
+  assert.equal(claimed.length,2); assert.ok(claimed.every(r=>r.status==='sending' && r.attempts===1));
+  assert.equal((await q('select * from amifree_claim_notifications(10)')).rows.length,0);
+  await q('select amifree_finish_notification($1,$2,$3)',[claimed[0].id,true,false]);
+  await q('select amifree_finish_notification($1,$2,$3)',[claimed[1].id,false,true]);
+  assert.deepEqual((await q('select status from notification_logs order by status')).rows.map(r=>r.status),['failed','sent']);
+  await assert.rejects(q("insert into notification_logs(user_id,kind,dedupe_key) values($1,'CHANGE',$2)",[other.id,`${card.id}:2`]));
   assert.equal((await one("select count(*)::int n from events where group_event_id=$1 and status='CANCELLED'",[card.id])).n,2);
   assert.equal((await q('select * from amifree_group_rsvp($1,$2,$3)',[other.id,card.id,'GOING'])).rows.length,0);
   await db.exec('reset role; set role anon;');
   await assert.rejects(q('select * from group_events'));
   await assert.rejects(q('select * from amifree_group_counts($1)',[card.id]));
+  await assert.rejects(q('select * from notification_logs'));
+  await assert.rejects(q('select * from amifree_claim_notifications(1)'));
   await db.exec('reset role; set role service_role;');
   await q('delete from users where id=$1',[third.id]);
 });

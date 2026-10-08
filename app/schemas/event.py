@@ -65,3 +65,16 @@ class Event(EventDraft):
     source_message_id: int | None = None
     group_event_id: str | None = None
     created_at: datetime | None = None
+
+
+class GroupEvent(EventDraft):
+    """The shared card. Members' attendance lives in their own linked Event rows."""
+
+    id: str
+    chat_id: int
+    source_message_id: int | None = None
+    message_id: int | None = None
+    creator_user_id: str | None = None
+    status: Literal["ACTIVE", "CANCELLED"] = "ACTIVE"
+    version: int = 1
+    created_at: datetime | None = None

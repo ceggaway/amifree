@@ -6,7 +6,7 @@ from supabase import AsyncClient
 
 from app.models.timetable import BlockRule, BusyBlock
 from app.models.user import User
-from app.schemas.event import SG, Event, EventDraft, Status
+from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
 from app.services.nusmods import ImportResult
 from app.services.quick_blocks import expand_blocks
 
@@ -25,6 +25,7 @@ class SupabaseRepository:
             "event_extractions",
             "user_actions",
             "manual_busy_blocks",
+            "group_events",
         ):
             await self.client.table(table).select("id").limit(1).execute()
 
@@ -212,6 +213,67 @@ class SupabaseRepository:
             },
         ).execute()
         return Event.model_validate(result.data[0]) if result.data else None
+
+    async def create_group_event(
+        self, user_id: str, chat_id: int, message_id: int, draft: EventDraft
+    ) -> GroupEvent:
+        result = await self.client.rpc(
+            "amifree_create_group_event",
+            {
+                "p_user_id": user_id,
+                "p_chat_id": chat_id,
+                "p_source_message_id": message_id,
+                "p_draft": draft.model_dump(mode="json"),
+            },
+        ).execute()
+        return GroupEvent.model_validate(result.data[0])
+
+    async def set_group_message(self, group_event_id: str, message_id: int):
+        await (
+            self.client.table("group_events")
+            .update({"message_id": message_id})
+            .eq("id", group_event_id)
+            .execute()
+        )
+
+    async def get_group_event(self, group_event_id: str) -> GroupEvent | None:
+        result = (
+            await self.client.table("group_events")
+            .select("*")
+            .eq("id", group_event_id)
+            .limit(1)
+            .execute()
+        )
+        return GroupEvent.model_validate(result.data[0]) if result.data else None
+
+    async def touch_member(self, chat_id: int, user_id: str):
+        await self.client.rpc(
+            "amifree_touch_member", {"p_chat_id": chat_id, "p_user_id": user_id}
+        ).execute()
+
+    async def linked_event(self, user_id: str, group_event_id: str) -> Event | None:
+        result = (
+            await self.client.table("events")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("group_event_id", group_event_id)
+            .limit(1)
+            .execute()
+        )
+        return Event.model_validate(result.data[0]) if result.data else None
+
+    async def group_rsvp(self, user_id: str, event: GroupEvent, status: Status) -> Event | None:
+        result = await self.client.rpc(
+            "amifree_group_rsvp",
+            {"p_user_id": user_id, "p_group_event_id": event.id, "p_status": status.value},
+        ).execute()
+        return Event.model_validate(result.data[0]) if result.data else None
+
+    async def group_counts(self, group_event_id: str) -> dict[str, int]:
+        result = await self.client.rpc(
+            "amifree_group_counts", {"p_group_event_id": group_event_id}
+        ).execute()
+        return {row["status"]: row["n"] for row in result.data or []}
 
     async def action(
         self, user_id: str, kind: str, event_id: str | None = None, metadata: dict | None = None

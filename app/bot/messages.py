@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 from telegram import InlineKeyboardMarkup
 
-from app.bot.keyboards import event_keyboard
-from app.schemas.event import Event, EventDraft, Status
+from app.bot.keyboards import event_keyboard, group_keyboard
+from app.schemas.event import Event, EventDraft, GroupEvent, Status
 from app.services.availability import Availability
 
 HELP = """Forward me a plan and I'll save it and tell you if it clashes.
@@ -67,6 +67,32 @@ def verdict_line(availability: Availability) -> str:
     if availability.busy_day:
         return f"ℹ️ Busy day: no clashes, but you have {availability.day_count} other plans that day"
     return "✅ No clashes found"
+
+
+def private_verdict(availability: Availability, prefix: str = "") -> str:
+    """A short popup for one member; Telegram limits callback alerts to 200 characters."""
+    note = "\nOnly you can see this."
+    text = (prefix + "\n" if prefix else "") + verdict_line(availability)
+    if availability.conflicts:
+        first = availability.conflicts[0]
+        text += f" ({first.start_at:%H:%M}–{first.end_at:%H:%M})"
+    if availability.possible:
+        text += f"\nPossible overlap with {availability.possible[0].title[:40]}."
+    return text[: 200 - len(note)] + note
+
+
+def group_card(event: GroupEvent, counts: dict[str, int]) -> Reply:
+    """The shared card: details and a headcount, never anyone's schedule or name."""
+    if event.status == "CANCELLED":
+        return Reply("❌ Cancelled\n" + details(event))
+    body = (
+        "📅 "
+        + details(event)
+        + f"\n\nGoing {counts.get('GOING', 0)} · Maybe {counts.get('MAYBE', 0)}"
+        + f" · Can't {counts.get('DECLINED', 0)}"
+        + "\nAm I free? shows a private check that only you can see."
+    )
+    return Reply(body, group_keyboard(event))
 
 
 def event_card(event: Event, availability: Availability) -> Reply:

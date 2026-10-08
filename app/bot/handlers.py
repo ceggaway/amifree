@@ -2,7 +2,7 @@ import logging
 
 from telegram import Update
 from telegram.constants import ChatAction, ChatType
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -17,6 +17,8 @@ from app.bot.messages import Reply
 from app.services.nusmods import ImportError
 
 log = logging.getLogger(__name__)
+GROUP_COMMANDS = {"event", "plan", "whosfree"}
+PRIVATE_ONLY = "Please use AmIFree in a private chat. Open the bot and send /start."
 ERROR = "I couldn't process that message. Please try again, or send the date/time manually. /cancel clears a pending draft."
 
 
@@ -34,16 +36,7 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
     if not update.effective_user or not update.effective_chat:
         return
     if update.effective_chat.type != ChatType.PRIVATE:
-        # Never show personal details or handle private RSVP callbacks in groups.
-        if update.callback_query:
-            await update.callback_query.answer(
-                "Open a private chat with AmIFree to check availability.", show_alert=True
-            )
-        else:
-            await send(
-                update,
-                [Reply("Please use AmIFree in a private chat. Open the bot and send /start.")],
-            )
+        await group_dispatch(update, context, operation)
         return
     service = context.application.bot_data["service"]
     try:
@@ -57,9 +50,8 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
                 update.effective_user.id, update.callback_query.data or ""
             )
         elif operation == "command":
-            head, _, args = update.effective_message.text.partition(" ")
-            command = head.split("@")[0].lstrip("/").lower()
-            replies = await service.command(update.effective_user.id, command, args.strip())
+            name, args = split_command(update.effective_message.text)
+            replies = await service.command(update.effective_user.id, name, args)
         else:
             try:
                 await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
@@ -86,6 +78,96 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
             type(exc).__name__,
         )
         await send(update, [Reply(ERROR)])
+
+
+def split_command(text: str) -> tuple[str, str]:
+    head, _, args = text.partition(" ")
+    return head.split("@")[0].lstrip("/").lower(), args.strip()
+
+
+async def deliver_group(update: Update, service, result):
+    query = update.callback_query
+    if query:
+        try:
+            await query.answer(result.alert, show_alert=bool(result.alert), url=result.url)
+        except TelegramError:
+            pass
+        if result.card:
+            try:
+                await query.edit_message_text(result.card.text, reply_markup=result.card.keyboard)
+            except BadRequest:
+                # Telegram rejects an edit that leaves the card unchanged.
+                pass
+    if result.post:
+        sent = await update.effective_message.reply_text(
+            result.post.text, reply_markup=result.post.keyboard
+        )
+        if result.group_event_id:
+            await service.groups.posted(result.group_event_id, sent.message_id)
+
+
+async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation: str):
+    """Groups: only explicit commands and taps on the bot's own cards are handled.
+
+    Ordinary group messages are never read, stored or answered. Anything personal goes
+    back as a callback alert that only the person who tapped can see.
+    """
+    service = context.application.bot_data["service"]
+    query, message = update.callback_query, update.effective_message
+    try:
+        if operation == "callback":
+            data = query.data or ""
+            if not data.startswith(("g:", "p:")):
+                await query.answer(
+                    "Open a private chat with AmIFree to check availability.", show_alert=True
+                )
+                return
+            handler = service.groups if data.startswith("g:") else service.polls
+            result = await handler.callback(
+                update.effective_user.id, update.effective_chat.id, data
+            )
+        elif operation == "command":
+            name, args = split_command(message.text)
+            if name not in GROUP_COMMANDS:
+                await send(update, [Reply(PRIVATE_ONLY)])
+                return
+            if name == "whosfree":
+                result = await service.polls.create(
+                    update.effective_user.id, update.effective_chat.id, message.message_id, args
+                )
+            else:
+                source = message.reply_to_message if not args else None
+                text = args or (source.text or source.caption or "" if source else "")
+                origin = source.forward_origin if source else None
+                reference = origin.date if origin else (source.date if source else message.date)
+                result = await service.groups.create(
+                    update.effective_user.id,
+                    update.effective_chat.id,
+                    message.message_id,
+                    text,
+                    reference,
+                )
+        else:
+            return
+        await deliver_group(update, service, result)
+    except Exception as exc:
+        delivery = webhook_delivery.get()
+        if delivery is not None:
+            delivery.failed = True
+            raise
+        log.error(
+            "group_request_failed update_id=%s operation=%s error_type=%s",
+            update.update_id,
+            operation,
+            type(exc).__name__,
+        )
+        try:
+            if query:
+                await query.answer("Something went wrong. Please try again.", show_alert=True)
+            else:
+                await message.reply_text("I couldn't make that card. Please try again.")
+        except TelegramError:
+            pass
 
 
 async def command(update, context):
@@ -125,6 +207,23 @@ async def error_handler(update, context):
 
 def register_handlers(application: Application, service):
     application.bot_data["service"] = service
+
+    async def refresh_card(group_event_id: str):
+        event = await service.repo.get_group_event(group_event_id)
+        if not event or not event.message_id:
+            return
+        card = await service.groups.render(event)
+        try:
+            await application.bot.edit_message_text(
+                card.text,
+                chat_id=event.chat_id,
+                message_id=event.message_id,
+                reply_markup=card.keyboard,
+            )
+        except TelegramError:
+            pass
+
+    service.on_group_change = refresh_card
     application.add_handler(
         CommandHandler(
             [

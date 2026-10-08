@@ -25,7 +25,19 @@ RPC_PARAMS = {
     "amifree_update_event": ["p_user_id", "p_event_id", "p_draft", "p_version", "p_cancel"],
     "amifree_cleanup": ["p_retention_days"],
     "amifree_save": ["p_user_id", "p_event_id", "p_version"],
+    "amifree_create_group_event": ["p_user_id", "p_chat_id", "p_source_message_id", "p_draft"],
+    "amifree_touch_member": ["p_chat_id", "p_user_id"],
+    "amifree_group_rsvp": ["p_user_id", "p_group_event_id", "p_status"],
+    "amifree_group_counts": ["p_group_event_id"],
+    "amifree_update_group_event": [
+        "p_user_id",
+        "p_group_event_id",
+        "p_draft",
+        "p_version",
+        "p_cancel",
+    ],
 }
+VOID_RPCS = {"amifree_cleanup", "amifree_import_timetable", "amifree_touch_member"}
 TABLES = {
     "users",
     "events",
@@ -33,6 +45,9 @@ TABLES = {
     "event_extractions",
     "user_actions",
     "manual_busy_blocks",
+    "group_events",
+    "group_members",
+    "event_changes",
 }
 COLUMNS = {
     "id",
@@ -57,6 +72,9 @@ COLUMNS = {
     "end_time",
     "start_date",
     "until_date",
+    "group_event_id",
+    "chat_id",
+    "message_id",
 }
 
 
@@ -102,7 +120,7 @@ class SQLGateway:
             )
             return httpx.Response(
                 200,
-                json=None if endpoint in ("amifree_cleanup", "amifree_import_timetable") else rows,
+                json=None if endpoint in VOID_RPCS else rows,
             )
         assert endpoint in TABLES
         values, conditions = [], []

@@ -108,9 +108,10 @@ await check('anonymous/authenticated users cannot read tables or invoke RPCs', a
   await db.exec('reset role; set role service_role;');
 });
 const TABLES = ['users','events','timetable_blocks','event_extractions','user_actions','manual_busy_blocks'];
+const SHARED = ['group_events','group_members','event_changes'];
 await check('every table has RLS enabled', async () => {
-  const result=await q("select relname,relrowsecurity from pg_class where relnamespace='public'::regnamespace and relname=any($1::text[])",[TABLES]);
-  assert.equal(result.rows.length,TABLES.length); assert.ok(result.rows.every(r=>r.relrowsecurity));
+  const result=await q("select relname,relrowsecurity from pg_class where relnamespace='public'::regnamespace and relname=any($1::text[])",[[...TABLES,...SHARED]]);
+  assert.equal(result.rows.length,TABLES.length+SHARED.length); assert.ok(result.rows.every(r=>r.relrowsecurity));
 });
 await check('manual blocks reject malformed rules and survive a timetable reimport', async () => {
   const weekly = "insert into manual_busy_blocks(user_id,title,kind,weekday,start_time,end_time,start_date) values($1,'Work','WEEKLY',2,$2,$3,'2026-10-07')";
@@ -124,12 +125,43 @@ await check('manual blocks reject malformed rules and survive a timetable reimpo
   await assert.rejects(q('select * from amifree_save($1,$2,$3)',[user.id,event.id,1]));
   await db.exec('reset role; set role service_role;');
 });
+await check('group cards: organiser-only edits propagate to members and record a change', async () => {
+  const third = await one('select * from amifree_ensure_user($1)', [1003]);
+  const card = await one('select * from amifree_create_group_event($1,$2,$3,$4)',[user.id,-500,10,JSON.stringify(draft)]);
+  for (const [who,status] of [[other.id,'GOING'],[third.id,'DECLINED']]) await q('select * from amifree_group_rsvp($1,$2,$3)',[who,card.id,status]);
+  await assert.rejects(q('select * from amifree_group_rsvp($1,$2,$3)',[other.id,card.id,'CANCELLED']));
+  const moved = {...draft,start_at:'2026-10-09T20:00:00+08:00',end_at:'2026-10-09T22:00:00+08:00'};
+  // A member, and a stale version, cannot change the shared card.
+  assert.equal((await q('select * from amifree_update_group_event($1,$2,$3,$4,$5)',[other.id,card.id,JSON.stringify(moved),1,false])).rows.length,0);
+  assert.equal((await q('select * from amifree_update_group_event($1,$2,$3,$4,$5)',[user.id,card.id,JSON.stringify(moved),9,false])).rows.length,0);
+  const updated = await one('select * from amifree_update_group_event($1,$2,$3,$4,$5)',[user.id,card.id,JSON.stringify(moved),1,false]);
+  assert.equal(updated.version,2);
+  const rows = (await q('select status,start_at from events where group_event_id=$1 order by status',[card.id])).rows;
+  assert.deepEqual(rows.map(r=>r.status),['DECLINED','GOING']);
+  assert.ok(rows.every(r=>new Date(r.start_at).getTime()===new Date(moved.start_at).getTime()));
+  const change = await one('select * from event_changes where group_event_id=$1',[card.id]);
+  assert.equal(change.version,2); assert.notEqual(change.before.start_at,change.after.start_at);
+  await one('select * from amifree_update_group_event($1,$2,$3,$4,$5)',[user.id,card.id,'{}',2,true]);
+  assert.equal((await one("select count(*)::int n from events where group_event_id=$1 and status='CANCELLED'",[card.id])).n,2);
+  assert.equal((await q('select * from amifree_group_rsvp($1,$2,$3)',[other.id,card.id,'GOING'])).rows.length,0);
+  await db.exec('reset role; set role anon;');
+  await assert.rejects(q('select * from group_events'));
+  await assert.rejects(q('select * from amifree_group_counts($1)',[card.id]));
+  await db.exec('reset role; set role service_role;');
+  await q('delete from users where id=$1',[third.id]);
+});
 await check('user deletion cascades to all personal data', async () => {
   await q('delete from users where id=$1',[user.id]);
   for (const table of TABLES.filter(t => t !== 'users')) {
     assert.equal((await one(`select count(*)::int n from ${table} where user_id=$1`,[user.id])).n,0);
   }
   assert.equal((await one('select count(*)::int n from users where id=$1',[other.id])).n,1);
+  // Shared cards outlive their organiser; other members keep their linked plans.
+  const orphan = await one('select creator_user_id from group_events');
+  assert.equal(orphan.creator_user_id,null);
+  assert.equal((await one('select count(*)::int n from events where group_event_id is not null')).n,1);
+  await q('delete from group_events');
+  await q('delete from events');
 });
 await check('development seed is reproducible and scoped to synthetic users', async () => {
   const seed = await readFile(new URL('../../app/db/seed.sql', import.meta.url), 'utf8');

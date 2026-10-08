@@ -21,6 +21,7 @@ from app.schemas.event import SG, Event, EventDraft, Extraction, Status
 from app.services.availability import check_availability
 from app.services.date_resolution import Clarification, validate_extraction
 from app.services.event_updates import match_updates
+from app.services.group_events import GroupEventService
 from app.services.quick_blocks import MAX_RULES, USAGE, describe, parse_block
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,16 @@ class SchedulingService:
             settings,
         )
         self.clock = clock or (lambda: datetime.now(SG))
+        self.groups = GroupEventService(self)
+        # Set by the bot layer: re-renders a group card after its headcount changes.
+        self.on_group_change = None
+
+    async def group_changed(self, group_event_id: str | None):
+        if group_event_id and self.on_group_change:
+            try:
+                await self.on_group_change(group_event_id)
+            except Exception as exc:
+                log.warning("group_card_refresh_failed error_type=%s", type(exc).__name__)
 
     @staticmethod
     def availability_snapshot(availability) -> dict:
@@ -108,6 +119,8 @@ class SchedulingService:
             return await self.list_events(user)
         if command == "plans":
             return await self.list_events(user, plans=True)
+        if command in ("event", "plan", "whosfree"):
+            return [Reply(f"/{command} works in group chats. Add me to a group and use it there.")]
         if command == "block":
             if not args:
                 return [Reply("Tell me when you're busy. " + USAGE)]
@@ -248,7 +261,11 @@ class SchedulingService:
                 ]
             return await self.prepare(user, extracted, state, existing)
         if extracted.kind in ("update", "cancel"):
-            candidates = match_updates(extracted, await self.repo.recent_events(user.id))
+            # Shared group plans are changed once by their organiser, never per member.
+            candidates = match_updates(
+                extracted,
+                [e for e in await self.repo.recent_events(user.id) if not e.group_event_id],
+            )
             if not candidates:
                 return [
                     Reply(
@@ -429,6 +446,8 @@ class SchedulingService:
             return await self.prepare(
                 user, Extraction.model_validate(pending["extraction"]), pending, event
             )
+        if action == "edit" and event.group_event_id:
+            return [Reply("Only the organiser can edit this plan, from its card in the group.")]
         if action == "edit":
             # A complete baseline allows the extractor to retain unchanged fields.
             base = Extraction(
@@ -465,6 +484,7 @@ class SchedulingService:
             result = await self.repo.save(user.id, event)
             if not result:
                 return [Reply("That event changed. Use /plans to see the latest card.")]
+            await self.group_changed(result.group_event_id)
             return [
                 Reply("Saved. Find it any time with /plans."),
                 event_card(result, await self.availability(user, result, result.id)),
@@ -488,6 +508,7 @@ class SchedulingService:
         result = await self.repo.rsvp(user.id, event, statuses[action])
         if not result:
             return [Reply("That event changed. Use /events to see the latest card.")]
+        await self.group_changed(result.group_event_id)
         text = {
             Status.GOING: "Added to your AmIFree commitments.",
             Status.MAYBE: "Marked Maybe. This won't block your availability.",

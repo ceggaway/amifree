@@ -1,6 +1,6 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.schemas.event import Event, Status
+from app.schemas.event import Event, GroupEvent, Status
 
 
 def event_keyboard(
@@ -23,6 +23,19 @@ def event_keyboard(
         rows.append([button("Attend this one", go)])
         rows.extend([button(f"Attend {other.title[:40]}", "go", other)] for other in possible[:3])
     return InlineKeyboardMarkup(rows)
+
+
+def group_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
+    # No version in the data: a tap always applies to the card's latest state.
+    def button(label, action):
+        return InlineKeyboardButton(label, callback_data=f"g:{action}:{event.id}")
+
+    return InlineKeyboardMarkup(
+        [
+            [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")],
+            [button("Am I free?", "free"), button("Save", "save")],
+        ]
+    )
 
 
 def confirm_keyboard(nonce: str, label="Confirm update") -> InlineKeyboardMarkup:

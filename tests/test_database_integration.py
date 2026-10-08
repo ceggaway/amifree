@@ -184,3 +184,49 @@ async def test_manual_blocks_in_postgresql_survive_reimport(reference):
         assert [e.id for e in (await repo.busy(user.id, wednesday))[1]] == [event.id]
         await repo.delete_user(user.id)
         assert await db.query("select * from manual_busy_blocks") == []
+
+
+async def test_group_cards_in_postgresql(reference):
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        organiser, member, outsider = [await repo.ensure_user(n) for n in (1, 2, 3)]
+        draft = EventDraft(
+            title="Dinner",
+            start_at=datetime(2026, 10, 9, 19, tzinfo=SG),
+            end_at=datetime(2026, 10, 9, 21, tzinfo=SG),
+            location="Vivo",
+        )
+        card = await repo.create_group_event(organiser.id, -500, 10, draft)
+        assert (await repo.create_group_event(organiser.id, -500, 10, draft)).id == card.id
+        await repo.set_group_message(card.id, 77)
+        assert (await repo.get_group_event(card.id)).message_id == 77
+        assert await repo.linked_event(member.id, card.id) is None
+        going = await repo.group_rsvp(member.id, card, Status.GOING)
+        assert going.status == Status.GOING and going.group_event_id == card.id
+        assert going.source_message_id is None and going.location == "Vivo"
+        # Saving keeps the answer; a new answer replaces it on the same row.
+        assert (await repo.group_rsvp(member.id, card, Status.SAVED)).status == Status.GOING
+        await repo.group_rsvp(organiser.id, card, Status.MAYBE)
+        assert await repo.group_counts(card.id) == {"GOING": 1, "MAYBE": 1}
+        assert (await repo.group_rsvp(member.id, card, Status.DECLINED)).id == going.id
+        assert await repo.group_counts(card.id) == {"DECLINED": 1, "MAYBE": 1}
+        await repo.touch_member(-500, outsider.id)
+        await repo.touch_member(-500, outsider.id)
+        assert len(await db.query("select * from group_members where chat_id=-500")) == 3
+        # The linked row behaves as the member's own plan.
+        await repo.group_rsvp(member.id, card, Status.GOING)
+        assert [e.id for e in (await repo.busy(member.id, draft))[1]] == [going.id]
+        assert [e.id for e in await repo.recent_events(member.id)] == [going.id]
+        # Deleting the organiser keeps the shared card and other members' plans.
+        await repo.delete_user(organiser.id)
+        kept = await repo.get_group_event(card.id)
+        assert kept and kept.creator_user_id is None
+        assert await repo.group_counts(card.id) == {"GOING": 1}

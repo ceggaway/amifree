@@ -24,8 +24,16 @@ RPC_PARAMS = {
     "amifree_rsvp": ["p_user_id", "p_event_id", "p_status", "p_version"],
     "amifree_update_event": ["p_user_id", "p_event_id", "p_draft", "p_version", "p_cancel"],
     "amifree_cleanup": ["p_retention_days"],
+    "amifree_save": ["p_user_id", "p_event_id", "p_version"],
 }
-TABLES = {"users", "events", "timetable_blocks", "event_extractions", "user_actions"}
+TABLES = {
+    "users",
+    "events",
+    "timetable_blocks",
+    "event_extractions",
+    "user_actions",
+    "manual_busy_blocks",
+}
 COLUMNS = {
     "id",
     "user_id",
@@ -96,7 +104,15 @@ class SQLGateway:
                 continue
             assert key in COLUMNS
             op, operand = value.split(".", 1)
-            operator = {"eq": "=", "neq": "<>", "lt": "<", "gt": ">", "gte": ">="}[op]
+            if op == "in":
+                items = [item.strip('"') for item in operand.strip("()").split(",")]
+                marks = []
+                for item in items:
+                    values.append(item)
+                    marks.append(f"${len(values)}")
+                conditions.append(f"{key} in ({','.join(marks)})")
+                continue
+            operator = {"eq": "=", "neq": "<>", "lt": "<", "gt": ">", "gte": ">=", "lte": "<="}[op]
             values.append(operand)
             conditions.append(f"{key}{operator}${len(values)}")
         where = " where " + " and ".join(conditions) if conditions else ""

@@ -6,20 +6,33 @@ from app.bot.keyboards import event_keyboard
 from app.schemas.event import Event, EventDraft, Status
 from app.services.availability import Availability
 
-HELP = """Forward me an event and I'll tell you if you're free.
+HELP = """Forward me a plan and I'll save it and tell you if it clashes.
 
-1. Send your NUSMods Share/Sync link.
-2. Forward a text invitation with a date and time.
-3. Review the details, then tap Going, Maybe, or Can't make it.
+1. Forward a text invitation with a date and time.
+2. Check the card, then tap Save, Going, Maybe, or Can't make it.
+3. Optional: send your NUSMods Share/Sync link so classes and exams are checked too.
 
-I check your imported classes, exams and AmIFree Going commitments.
-Google Calendar and group scheduling aren't connected in this version.
+I check your AmIFree Going plans, your busy blocks and any imported NUSMods timetable.
+Outside calendars such as Google Calendar aren't connected, so "No clashes found"
+only covers what AmIFree knows about.
 
-/start — setup or readiness
+Privacy: I only act on messages you send or forward to me, commands and button taps.
+I never read group chats.
+
+/start — getting started
 /help — this guide
-/events — recent event cards
+/plans — upcoming saved plans
+/events — every recent card, including unsaved previews
 /cancel — stop a pending clarification or edit
-/delete — delete your timetable, events and analytics"""
+/deletemydata — delete everything AmIFree stores about you"""
+
+STATUS_LABELS = {
+    Status.PREVIEW: "Not saved yet",
+    Status.SAVED: "Saved (not decided)",
+    Status.GOING: "Going",
+    Status.MAYBE: "Maybe",
+    Status.DECLINED: "Can't make it",
+}
 
 
 @dataclass
@@ -42,15 +55,22 @@ def details(draft: EventDraft) -> str:
     return result
 
 
+def verdict_line(availability: Availability) -> str:
+    """The first line of every card: clash, busy day, or no clashes."""
+    if availability.conflicts:
+        names = availability.conflicts[0].title[:100]
+        if len(availability.conflicts) > 1:
+            names += f" and {len(availability.conflicts) - 1} more"
+        return "⚠️ Clashes with " + names
+    if availability.busy_day:
+        return f"ℹ️ Busy day: no clashes, but you have {availability.day_count} other plans that day"
+    return "✅ No clashes found"
+
+
 def event_card(event: Event, availability: Availability) -> Reply:
     if event.status == Status.CANCELLED:
         return Reply("Cancelled\n" + details(event))
-    heading = {
-        "FREE": "✅ You're free",
-        "CLASH": "⚠️ Clash detected",
-        "UNKNOWN": "⚠️ Timetable coverage unavailable for this date",
-    }[availability.verdict]
-    body = heading + "\n\n" + details(event)
+    body = verdict_line(availability) + "\n\n" + details(event)
     if availability.conflicts:
         body += "\n\nConflicts:\n" + "\n".join(
             f"• {b.title[:150]}: {b.start_at:%d %b %H:%M}–{b.end_at:%H:%M}"
@@ -58,7 +78,19 @@ def event_card(event: Event, availability: Availability) -> Reply:
         )
         if len(availability.conflicts) > 5:
             body += f"\n+ {len(availability.conflicts) - 5} more"
-    if not availability.covered:
-        body += "\nThis is outside your imported semester. Only Going commitments can be checked."
-    body += "\n\nStatus: " + event.status.value.capitalize()
-    return Reply(body, event_keyboard(event, bool(availability.conflicts)))
+        if availability.busy_day:
+            body += f"\nℹ️ Busy day: {availability.day_count} other plans that day."
+    if availability.possible:
+        body += (
+            "\n\nPossible overlap with "
+            + ", ".join(e.title[:60] for e in availability.possible[:3])
+            + ". Which will you attend?"
+        )
+    body += "\n\nChecked: your Going plans and busy blocks"
+    body += (
+        " and NUSMods timetable."
+        if availability.covered
+        else ". No NUSMods timetable covers this date."
+    )
+    body += "\nStatus: " + STATUS_LABELS[event.status]
+    return Reply(body, event_keyboard(event, bool(availability.conflicts), availability.possible))

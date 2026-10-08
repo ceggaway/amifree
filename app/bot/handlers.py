@@ -57,8 +57,9 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
                 update.effective_user.id, update.callback_query.data or ""
             )
         elif operation == "command":
-            command = update.effective_message.text.split()[0].split("@")[0].lstrip("/")
-            replies = await service.command(update.effective_user.id, command)
+            head, _, args = update.effective_message.text.partition(" ")
+            command = head.split("@")[0].lstrip("/").lower()
+            replies = await service.command(update.effective_user.id, command, args.strip())
         else:
             try:
                 await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
@@ -125,7 +126,9 @@ async def error_handler(update, context):
 def register_handlers(application: Application, service):
     application.bot_data["service"] = service
     application.add_handler(
-        CommandHandler(["start", "help", "events", "cancel", "delete"], command)
+        CommandHandler(
+            ["start", "help", "plans", "events", "cancel", "delete", "deletemydata"], command
+        )
     )
     application.add_handler(CallbackQueryHandler(callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message))

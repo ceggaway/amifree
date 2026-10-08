@@ -55,7 +55,7 @@ async def test_webhook_to_telegram_complete_flow(service_factory, reference):
             ),
         )
         first = transport.sent[-1]
-        assert "You're free" in first["text"]
+        assert "No clashes found" in first["text"]
         markup = first["reply_markup"]
         if isinstance(markup, str):
             markup = json.loads(markup)
@@ -69,7 +69,7 @@ async def test_webhook_to_telegram_complete_flow(service_factory, reference):
                 "CCA dinner Friday 7–9pm at Vivo", 4, forward_timestamp=int(reference.timestamp())
             ),
         )
-        assert "Clash detected" in transport.sent[-1]["text"]
+        assert "Clashes with" in transport.sent[-1]["text"]
         assert len(repo.events) == 2
         assert service.extractor.calls[0][1] == reference
         assert any(name == "answerCallbackQuery" for name, _ in transport.calls)

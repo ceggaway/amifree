@@ -71,7 +71,7 @@ def create_app(
                 await repo.cleanup(settings.extraction_retention_days)
             except Exception:
                 raise RuntimeError(
-                    "Supabase startup check failed. Apply app/db/schema.sql and check your connection credentials."
+                    "Supabase startup check failed. Apply app/db/schema.sql, then app/db/migrations/*.sql in order, and check your connection credentials."
                 ) from None
             app.state.service = SchedulingService(
                 repo,
@@ -90,11 +90,12 @@ def create_app(
             await stack.enter_async_context(bot_app)
             await bot_app.bot.set_my_commands(
                 [
-                    BotCommand("start", "Set up or check readiness"),
+                    BotCommand("start", "Getting started"),
                     BotCommand("help", "How AmIFree works"),
-                    BotCommand("events", "Recent events"),
+                    BotCommand("plans", "Upcoming saved plans"),
+                    BotCommand("events", "Recent cards, including previews"),
                     BotCommand("cancel", "Clear pending action"),
-                    BotCommand("delete", "Delete my data"),
+                    BotCommand("deletemydata", "Delete everything about me"),
                 ]
             )
             await bot_app.start()

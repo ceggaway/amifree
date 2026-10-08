@@ -57,6 +57,7 @@ class SchedulingService:
             exclude_event_id=exclude,
             coverage_start=user.coverage_start,
             coverage_end=user.coverage_end,
+            busy_day_threshold=self.settings.busy_day_threshold,
         )
 
     async def safe_action(self, user_id, kind, event_id=None, metadata=None):
@@ -66,7 +67,7 @@ class SchedulingService:
         except Exception as exc:
             log.warning("analytics_failed error_type=%s action=%s", type(exc).__name__, kind)
 
-    async def command(self, telegram_id: int, command: str) -> list[Reply]:
+    async def command(self, telegram_id: int, command: str, args: str = "") -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
         if command == "help":
             return [Reply(HELP)]
@@ -75,34 +76,48 @@ class SchedulingService:
             if user.onboarding_status == "READY":
                 return [
                     Reply(
-                        f"You're ready. Timetable: {user.academic_year}, semester {user.semester}.\nForward me an event message. Send a fresh NUSMods link to replace your timetable.\n/help for commands."
+                        f"You're ready. Timetable: {user.academic_year}, semester {user.semester}.\nForward me a plan and tap Save. Send a fresh NUSMods link to replace your timetable.\n/plans lists what you've saved. /help for commands."
                     )
                 ]
             return [
                 Reply(
-                    "Forward me an event and I'll tell you if you're free.\n\nSend your NUSMods Share/Sync link to set up AmIFree.\n/help for more information."
+                    "Forward me a plan and I'll save it and tell you if it clashes.\n\nOptional: send your NUSMods Share/Sync link so your classes and exams are checked too.\nI only act on what you send me, commands and button taps. /help for more."
                 )
             ]
         if command == "cancel":
             await self.repo.set_pending(user.id, None)
             return [Reply("Pending action cleared. Forward an event when you're ready.")]
-        if command == "delete":
+        if command in ("delete", "deletemydata"):
             nonce = secrets.token_hex(8)
             await self.repo.set_pending(user.id, {"stage": "delete", "nonce": nonce})
             return [
                 Reply(
-                    "Delete all your AmIFree timetable, events, pending messages and analytics? This cannot be undone.",
+                    "Delete all your AmIFree timetable, plans, busy blocks, reminders, pending messages and analytics? This cannot be undone.",
                     confirm_keyboard(nonce, "Delete my data"),
                 )
             ]
         if command == "events":
             return await self.list_events(user)
+        if command == "plans":
+            return await self.list_events(user, plans=True)
         return [Reply("Use /help to see the available commands.")]
 
-    async def list_events(self, user: User, page: int = 0) -> list[Reply]:
+    async def list_events(self, user: User, page: int = 0, plans: bool = False) -> list[Reply]:
         events = await self.repo.recent_events(user.id)
+        if plans:
+            # Plans are what the user chose to keep; previews and declines stay in /events.
+            now = self.clock()
+            events = [
+                e
+                for e in events
+                if e.end_at >= now and e.status in (Status.SAVED, Status.GOING, Status.MAYBE)
+            ]
+            if not events:
+                return [Reply("No upcoming plans yet. Forward a plan and tap Save.")]
         if not events:
-            return [Reply("No upcoming or recent events yet. Forward an invitation after setup.")]
+            return [
+                Reply("No upcoming or recent events yet. Forward an invitation to get started.")
+            ]
         pages = (len(events) + 9) // 10
         page = min(page, pages - 1)
         replies = [
@@ -110,7 +125,10 @@ class SchedulingService:
             for e in events[page * 10 : (page + 1) * 10]
         ]
         if pages > 1:
-            replies.append(Reply(f"Events: page {page + 1} of {pages}", page_keyboard(page, pages)))
+            label, prefix = ("Plans", "plans") if plans else ("Events", "events")
+            replies.append(
+                Reply(f"{label}: page {page + 1} of {pages}", page_keyboard(page, pages, prefix))
+            )
         return replies
 
     async def message(
@@ -128,11 +146,9 @@ class SchedulingService:
             await self.repo.import_timetable(user.id, result)
             return [
                 Reply(
-                    f"Setup complete. Imported {len(result.blocks)} class/exam busy periods for {result.academic_year}, semester {result.semester}.\nCoverage: {result.coverage_start:%d %b %Y}–{result.coverage_end:%d %b %Y}.\nForward me an event message. Only this timetable and your Going commitments are checked."
+                    f"Setup complete. Imported {len(result.blocks)} class/exam busy periods for {result.academic_year}, semester {result.semester}.\nCoverage: {result.coverage_start:%d %b %Y}–{result.coverage_end:%d %b %Y}.\nForward me a plan. I check this timetable, your busy blocks and your Going plans."
                 )
             ]
-        if user.onboarding_status != "READY":
-            return [Reply("Send your NUSMods Share/Sync link first to set up AmIFree.")]
         pending = user.pending
         if pending and pending["stage"] in ("confirm", "choose", "delete"):
             return [
@@ -284,11 +300,11 @@ class SchedulingService:
 
     async def callback(self, telegram_id: int, data: str) -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
-        if data.startswith("events:"):
-            page = data.removeprefix("events:")
+        if data.startswith(("events:", "plans:")):
+            prefix, _, page = data.partition(":")
             if not page.isascii() or not page.isdigit() or len(page) > 8:
-                return [Reply("That page isn't valid. Use /events.")]
-            return await self.list_events(user, int(page))
+                return [Reply(f"That page isn't valid. Use /{prefix}.")]
+            return await self.list_events(user, int(page), plans=prefix == "plans")
         parts = data.split(":")
         action = parts[0]
         if action in ("confirm", "dismiss") and len(parts) == 2:
@@ -382,6 +398,14 @@ class SchedulingService:
                 Reply(
                     "Send the corrected title, date, start/end time or venue. I will show a preview before applying it.\n/cancel to keep this event unchanged."
                 )
+            ]
+        if action == "save":
+            result = await self.repo.save(user.id, event)
+            if not result:
+                return [Reply("That event changed. Use /plans to see the latest card.")]
+            return [
+                Reply("Saved. Find it any time with /plans."),
+                event_card(result, await self.availability(user, result, result.id)),
             ]
         statuses = {
             "go": Status.GOING,

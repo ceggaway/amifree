@@ -113,12 +113,12 @@ async def test_supabase_repository_connected_to_postgresql(reference):
                 uid, 1, "https://nusmods.com/timetable/sem-1/share?CS3216=LEC:1", reference
             )
         first = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-        assert "You're free" in first.text
+        assert "No clashes found" in first.text
         await service.callback(1, first.keyboard.inline_keyboard[0][0].callback_data)
         second = (await service.message(1, 3, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-        assert "Clash detected" in second.text
+        assert "Clashes with" in second.text
         other = (await service.message(2, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-        assert "You're free" in other.text
+        assert "No clashes found" in other.text
         assert (
             "isn't available to you"
             in (await service.callback(2, first.keyboard.inline_keyboard[0][0].callback_data))[

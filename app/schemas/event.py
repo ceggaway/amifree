@@ -26,6 +26,7 @@ class Extraction(BaseModel):
 
 class Status(StrEnum):
     PREVIEW = "PREVIEW"
+    SAVED = "SAVED"
     GOING = "GOING"
     MAYBE = "MAYBE"
     DECLINED = "DECLINED"
@@ -62,4 +63,5 @@ class Event(EventDraft):
     status: Status = Status.PREVIEW
     version: int = 1
     source_message_id: int | None = None
+    group_event_id: str | None = None
     created_at: datetime | None = None

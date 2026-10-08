@@ -43,7 +43,7 @@ class MemoryRepository:
         return self.blocks.get(user_id, []), [
             e.model_copy(deep=True)
             for e in self.events.values()
-            if e.user_id == user_id and e.status == Status.GOING
+            if e.user_id == user_id and e.status in (Status.GOING, Status.SAVED)
         ]
 
     async def create_preview(self, user_id, message_id, draft):
@@ -78,6 +78,9 @@ class MemoryRepository:
         e.status, e.version = status, e.version + 1
         await self.action(user_id, status.value.lower(), e.id)
         return e.model_copy(deep=True)
+
+    async def save(self, user_id, event):
+        return await self.rsvp(user_id, event, Status.SAVED)
 
     async def update_event(self, user_id, event, draft, cancel=False):
         e = self.events.get(event.id)

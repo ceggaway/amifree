@@ -1,12 +1,12 @@
 """All I/O is async and server-side; every event operation requires its owner."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 from supabase import AsyncClient
 
 from app.models.timetable import BusyBlock
 from app.models.user import User
-from app.schemas.event import Event, EventDraft, Status
+from app.schemas.event import SG, Event, EventDraft, Status
 from app.services.nusmods import ImportResult
 
 
@@ -17,7 +17,14 @@ class SupabaseRepository:
 
     async def ping(self):
         # Check all required tables are present, not merely that the host responds.
-        for table in ("users", "timetable_blocks", "events", "event_extractions", "user_actions"):
+        for table in (
+            "users",
+            "timetable_blocks",
+            "events",
+            "event_extractions",
+            "user_actions",
+            "manual_busy_blocks",
+        ):
             await self.client.table(table).select("id").limit(1).execute()
 
     async def ensure_user(self, telegram_id: int) -> User:
@@ -64,6 +71,11 @@ class SupabaseRepository:
         ).execute()
 
     async def busy(self, user_id: str, draft: EventDraft) -> tuple[list[BusyBlock], list[Event]]:
+        # Events are fetched for the whole Singapore day so the engine can count a busy day.
+        day = datetime.combine(draft.start_at.astimezone(SG).date(), time.min, SG)
+        window_start = min(draft.start_at, day)
+        window_end = max(draft.end_at, day + timedelta(days=1))
+
         # Filter BEFORE pagination: unrelated old rows cannot hide a future clash.
         async def fetch(table, extra=False):
             rows = []
@@ -73,13 +85,13 @@ class SupabaseRepository:
                     self.client.table(table)
                     .select("*")
                     .eq("user_id", user_id)
-                    .lt("start_at", draft.end_at.isoformat())
-                    .gt("end_at", draft.start_at.isoformat())
+                    .lt("start_at", (window_end if extra else draft.end_at).isoformat())
+                    .gt("end_at", (window_start if extra else draft.start_at).isoformat())
                     .order("id")
                     .range(offset, offset + 499)
                 )
                 if extra:
-                    q = q.eq("status", "GOING")
+                    q = q.in_("status", ["GOING", "SAVED"])
                 batch = (await q.execute()).data
                 rows.extend(batch)
                 if len(batch) < 500:
@@ -148,6 +160,13 @@ class SupabaseRepository:
                 "p_status": status.value,
                 "p_version": event.version,
             },
+        ).execute()
+        return Event.model_validate(result.data[0]) if result.data else None
+
+    async def save(self, user_id: str, event: Event) -> Event | None:
+        result = await self.client.rpc(
+            "amifree_save",
+            {"p_user_id": user_id, "p_event_id": event.id, "p_version": event.version},
         ).execute()
         return Event.model_validate(result.data[0]) if result.data else None
 

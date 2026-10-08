@@ -50,7 +50,7 @@ async def test_webhook_failure_recovery_and_duplicate_delivery(service_factory, 
     service, repo = service_factory()
     calls = []
 
-    async def command(uid, name):
+    async def command(uid, name, args=""):
         calls.append(name)
         await repo.ensure_user(uid)
         return [Reply("First response"), Reply("Second response")]

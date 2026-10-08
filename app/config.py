@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     retain_extractions: bool = False
     extraction_retention_days: int = Field(default=7, ge=1, le=90)
     pending_ttl_hours: int = Field(default=24, ge=1, le=168)
+    # Other Going plans on the same day before a card warns "Busy day"; 0 disables it.
+    busy_day_threshold: int = Field(default=3, ge=0, le=20)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @model_validator(mode="after")

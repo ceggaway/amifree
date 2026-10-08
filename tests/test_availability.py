@@ -66,3 +66,33 @@ def test_invalid_interval_and_naive_datetime():
         draft(END, START)
     with pytest.raises(ValueError):
         draft(START.replace(tzinfo=None), END)
+
+
+def test_saved_plans_are_possible_not_definite():
+    saved = Event(id="s", user_id="u", status=Status.SAVED, **draft().model_dump())
+    result = check(draft(), events=[saved])
+    assert result.verdict == "FREE" and result.possible == (saved,)
+    assert check(draft(), events=[saved], exclude_event_id="s").possible == ()
+    later = draft(END, END + timedelta(hours=1))
+    assert check(later, events=[saved]).possible == ()
+
+
+def test_busy_day_counts_other_going_plans_only():
+    def going(n, hour):
+        start = START.replace(hour=hour)
+        return Event(
+            id=str(n),
+            user_id="u",
+            status=Status.GOING,
+            title="Plan",
+            start_at=start,
+            end_at=start + timedelta(hours=1),
+        )
+
+    plans = [going(n, hour) for n, hour in enumerate((8, 10, 12))]
+    result = check(draft(), events=plans)
+    assert result.busy_day and result.day_count == 3 and not result.conflicts
+    assert not check(draft(), events=plans[:2]).busy_day
+    assert not check(draft(), events=plans, busy_day_threshold=0).busy_day
+    tomorrow = draft(START + timedelta(days=1), END + timedelta(days=1))
+    assert not check(tomorrow, events=plans).busy_day

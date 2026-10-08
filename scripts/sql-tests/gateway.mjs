@@ -1,11 +1,15 @@
 // Test-only SQL gateway over stdin/stdout. No listening socket or production fallback.
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { PGlite } from '@electric-sql/pglite';
 
 const db = new PGlite();
 await db.exec('create role anon; create role authenticated; create role service_role bypassrls;');
 await db.exec(await readFile(new URL('../../app/db/schema.sql', import.meta.url), 'utf8'));
+const migrations = new URL('../../app/db/migrations/', import.meta.url);
+for (const file of (await readdir(migrations)).filter(f => f.endsWith('.sql')).sort()) {
+  await db.exec(await readFile(new URL(file, migrations), 'utf8'));
+}
 await db.exec('set role service_role;');
 console.log(JSON.stringify({ ready: true }));
 for await (const line of createInterface({ input: process.stdin })) {

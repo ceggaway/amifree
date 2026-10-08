@@ -96,7 +96,7 @@ async def test_invalid_date_keeps_pending_and_can_be_corrected(service_factory, 
     assert "valid event date" in question.text
     assert not repo.events and (await repo.ensure_user(1)).pending is not None
     card = (await service.message(1, 3, "2026-10-09", reference))[0]
-    assert "You're free" in card.text
+    assert "No clashes found" in card.text
     assert len(repo.events) == 1
     assert (await repo.ensure_user(1)).pending is None
 

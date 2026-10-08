@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
 const db = new PGlite();
 const schema = await readFile(new URL('../../app/db/schema.sql', import.meta.url), 'utf8');
 await db.exec('create role anon; create role authenticated; create role service_role bypassrls;');
-await db.exec(schema);
-await db.exec(schema);
+const migrationDir = new URL('../../app/db/migrations/', import.meta.url);
+const migrations = [];
+for (const file of (await readdir(migrationDir)).filter(f => f.endsWith('.sql')).sort()) {
+  migrations.push(await readFile(new URL(file, migrationDir), 'utf8'));
+}
+// Schema and every migration are applied twice: reapplication must be safe.
+for (let pass = 0; pass < 2; pass++) {
+  await db.exec(schema);
+  for (const migration of migrations) await db.exec(migration);
+}
 let count = 0;
 async function check(name, fn) {
   await fn(); count++; console.log(`PASS: ${name}`);
@@ -70,6 +78,17 @@ await check('cancellation clears the commitment without creating another event',
   const cancelled=await one('select * from amifree_update_event($1,$2,$3,$4,$5)',[user.id,event.id,'{}',3,true]);
   assert.equal(cancelled.status,'CANCELLED');
   assert.equal((await q('select * from amifree_rsvp($1,$2,$3,$4)',[user.id,event.id,'GOING',4])).rows.length,0);
+});
+await check('Save keeps existing rows, is owner-scoped and version-checked', async () => {
+  const plan = await one('select * from amifree_create_preview($1,$2,$3)', [user.id,3,JSON.stringify({...draft,title:'Supper'})]);
+  assert.equal((await q('select * from amifree_save($1,$2,$3)',[other.id,plan.id,1])).rows.length,0);
+  const saved = await one('select * from amifree_save($1,$2,$3)',[user.id,plan.id,1]);
+  assert.equal(saved.status,'SAVED'); assert.equal(saved.version,2);
+  assert.equal((await q('select * from amifree_save($1,$2,$3)',[user.id,plan.id,1])).rows.length,0);
+  assert.equal((await one("select count(*)::int n from user_actions where action_type='saved'")).n,1);
+  await assert.rejects(q("update events set status='BOGUS' where id=$1",[plan.id]));
+  assert.equal((await one('select status from events where id=$1',[event.id])).status,'CANCELLED');
+  await q('delete from events where id=$1',[plan.id]);
 });
 await check('retention removes old extraction text and expired pending drafts', async () => {
   await q("insert into event_extractions(user_id,raw_text,extracted_json,validation_state,created_at) values($1,'private','{}','parsed',now()-interval '8 days')",[user.id]);

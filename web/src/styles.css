@@ -1,0 +1,38 @@
+/* Follows the user's Telegram theme, with readable fallbacks in a plain browser. */
+:root {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --panel: var(--tg-theme-secondary-bg-color, #f2f3f5);
+  --text: var(--tg-theme-text-color, #111418);
+  --hint: var(--tg-theme-hint-color, #6b7280);
+  --accent: var(--tg-theme-button-color, #2481cc);
+  --accent-text: var(--tg-theme-button-text-color, #ffffff);
+  --danger: var(--tg-theme-destructive-text-color, #c0392b);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+main { padding: 16px 16px 84px; max-width: 640px; margin: 0 auto; }
+h2 { font-size: 17px; margin: 18px 0 8px; }
+h3 { font-size: 15px; margin: 0 0 4px; }
+p { margin: 4px 0; }
+nav { position: fixed; inset: auto 0 0 0; display: flex; background: var(--panel); padding-bottom: env(safe-area-inset-bottom); }
+nav a { flex: 1; text-align: center; padding: 14px 4px; color: var(--hint); text-decoration: none; }
+nav a.active { color: var(--accent); font-weight: 600; }
+.card, .summary, .day { background: var(--panel); border-radius: 12px; padding: 12px; margin: 8px 0; }
+.summary { display: flex; flex-direction: column; gap: 4px; }
+.hint { color: var(--hint); font-size: 13px; }
+.error { color: var(--danger); }
+.pre { white-space: pre-line; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.row.between { justify-content: space-between; align-items: center; }
+.row.between h2 { margin: 0; }
+.stack { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+button { border: 0; border-radius: 8px; padding: 9px 12px; background: var(--bg); color: var(--text); font: inherit; min-height: 40px; }
+button.on { background: var(--accent); color: var(--accent-text); }
+button.danger { color: var(--danger); }
+input { width: 100%; padding: 10px; border: 1px solid var(--hint); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.banner-stack { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.banner { border-radius: 8px; padding: 6px 10px; font-size: 14px; background: var(--bg); }
+.banner.clash { border-left: 4px solid var(--danger); }
+.banner.ok { border-left: 4px solid #2e9d5b; }
+.banner.info { border-left: 4px solid var(--accent); }
+.slot { display: grid; grid-template-columns: 96px 1fr auto; gap: 8px; padding: 6px 0; border-top: 1px solid var(--bg); }

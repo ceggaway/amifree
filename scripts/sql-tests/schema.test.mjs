@@ -107,13 +107,26 @@ await check('anonymous/authenticated users cannot read tables or invoke RPCs', a
   }
   await db.exec('reset role; set role service_role;');
 });
-await check('all five tables have RLS enabled', async () => {
-  const result=await q("select relname,relrowsecurity from pg_class where relname=any($1::text[])",[['users','events','timetable_blocks','event_extractions','user_actions']]);
-  assert.equal(result.rows.length,5); assert.ok(result.rows.every(r=>r.relrowsecurity));
+const TABLES = ['users','events','timetable_blocks','event_extractions','user_actions','manual_busy_blocks'];
+await check('every table has RLS enabled', async () => {
+  const result=await q("select relname,relrowsecurity from pg_class where relnamespace='public'::regnamespace and relname=any($1::text[])",[TABLES]);
+  assert.equal(result.rows.length,TABLES.length); assert.ok(result.rows.every(r=>r.relrowsecurity));
+});
+await check('manual blocks reject malformed rules and survive a timetable reimport', async () => {
+  const weekly = "insert into manual_busy_blocks(user_id,title,kind,weekday,start_time,end_time,start_date) values($1,'Work','WEEKLY',2,$2,$3,'2026-10-07')";
+  await q(weekly,[user.id,'18:00','22:00']);
+  await assert.rejects(q(weekly,[user.id,'22:00','18:00']));
+  await assert.rejects(q("insert into manual_busy_blocks(user_id,title,kind) values($1,'Busy','ONCE')",[user.id]));
+  await doImport([block]);
+  assert.equal((await one('select count(*)::int n from manual_busy_blocks where user_id=$1',[user.id])).n,1);
+  await db.exec('reset role; set role anon;');
+  await assert.rejects(q('select * from manual_busy_blocks'));
+  await assert.rejects(q('select * from amifree_save($1,$2,$3)',[user.id,event.id,1]));
+  await db.exec('reset role; set role service_role;');
 });
 await check('user deletion cascades to all personal data', async () => {
   await q('delete from users where id=$1',[user.id]);
-  for (const table of ['events','timetable_blocks','event_extractions','user_actions']) {
+  for (const table of TABLES.filter(t => t !== 'users')) {
     assert.equal((await one(`select count(*)::int n from ${table} where user_id=$1`,[user.id])).n,0);
   }
   assert.equal((await one('select count(*)::int n from users where id=$1',[other.id])).n,1);

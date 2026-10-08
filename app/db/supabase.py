@@ -4,10 +4,11 @@ from datetime import UTC, datetime, time, timedelta
 
 from supabase import AsyncClient
 
-from app.models.timetable import BusyBlock
+from app.models.timetable import BlockRule, BusyBlock
 from app.models.user import User
 from app.schemas.event import SG, Event, EventDraft, Status
 from app.services.nusmods import ImportResult
+from app.services.quick_blocks import expand_blocks
 
 
 class SupabaseRepository:
@@ -100,9 +101,36 @@ class SupabaseRepository:
 
         blocks = await fetch("timetable_blocks")
         events = await fetch("events", True)
-        return [BusyBlock.model_validate(b) for b in blocks], [
+        manual = expand_blocks(await self.list_blocks(user_id), draft.start_at, draft.end_at)
+        return [BusyBlock.model_validate(b) for b in blocks] + manual, [
             Event.model_validate(e) for e in events
         ]
+
+    async def create_block(self, user_id: str, rule: BlockRule) -> BlockRule:
+        row = rule.model_dump(mode="json", exclude={"id", "user_id"}) | {"user_id": user_id}
+        result = await self.client.table("manual_busy_blocks").insert(row).execute()
+        return BlockRule.model_validate(result.data[0])
+
+    async def list_blocks(self, user_id: str) -> list[BlockRule]:
+        result = (
+            await self.client.table("manual_busy_blocks")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at")
+            .limit(500)
+            .execute()
+        )
+        return [BlockRule.model_validate(row) for row in result.data]
+
+    async def delete_block(self, user_id: str, block_id: str) -> bool:
+        result = (
+            await self.client.table("manual_busy_blocks")
+            .delete()
+            .eq("user_id", user_id)
+            .eq("id", block_id)
+            .execute()
+        )
+        return bool(result.data)
 
     async def create_preview(self, user_id: str, message_id: int, draft: EventDraft) -> Event:
         result = await self.client.rpc(

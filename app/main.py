@@ -93,6 +93,8 @@ def create_app(
                     BotCommand("start", "Getting started"),
                     BotCommand("help", "How AmIFree works"),
                     BotCommand("plans", "Upcoming saved plans"),
+                    BotCommand("block", "Mark yourself busy: busy sat 2-6pm"),
+                    BotCommand("blocks", "Your busy blocks"),
                     BotCommand("events", "Recent cards, including previews"),
                     BotCommand("cancel", "Clear pending action"),
                     BotCommand("deletemydata", "Delete everything about me"),

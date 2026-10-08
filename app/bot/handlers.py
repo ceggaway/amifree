@@ -127,7 +127,18 @@ def register_handlers(application: Application, service):
     application.bot_data["service"] = service
     application.add_handler(
         CommandHandler(
-            ["start", "help", "plans", "events", "cancel", "delete", "deletemydata"], command
+            [
+                "start",
+                "help",
+                "plans",
+                "events",
+                "block",
+                "blocks",
+                "cancel",
+                "delete",
+                "deletemydata",
+            ],
+            command,
         )
     )
     application.add_handler(CallbackQueryHandler(callback))

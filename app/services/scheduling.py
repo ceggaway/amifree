@@ -5,15 +5,23 @@ import secrets
 import time
 from collections.abc import Callable
 from datetime import datetime
+from uuid import UUID
 
-from app.bot.keyboards import choose_keyboard, confirm_keyboard, page_keyboard
+from app.bot.keyboards import (
+    choose_keyboard,
+    confirm_keyboard,
+    page_keyboard,
+    remove_block_keyboard,
+)
 from app.bot.messages import HELP, Reply, details, event_card
 from app.config import Settings
+from app.models.timetable import BlockRule
 from app.models.user import User
 from app.schemas.event import SG, Event, EventDraft, Extraction, Status
 from app.services.availability import check_availability
 from app.services.date_resolution import Clarification, validate_extraction
 from app.services.event_updates import match_updates
+from app.services.quick_blocks import MAX_RULES, USAGE, describe, parse_block
 
 log = logging.getLogger(__name__)
 
@@ -100,7 +108,39 @@ class SchedulingService:
             return await self.list_events(user)
         if command == "plans":
             return await self.list_events(user, plans=True)
+        if command == "block":
+            if not args:
+                return [Reply("Tell me when you're busy. " + USAGE)]
+            try:
+                rule = parse_block(args, self.clock(), explicit=True)
+            except Clarification as exc:
+                return [Reply(str(exc))]
+            return await self.preview_block(user, rule)
+        if command == "blocks":
+            rules = await self.repo.list_blocks(user.id)
+            if not rules:
+                return [Reply("No busy blocks yet. " + USAGE)]
+            return [Reply(describe(rule), remove_block_keyboard(rule.id)) for rule in rules[:20]]
         return [Reply("Use /help to see the available commands.")]
+
+    async def preview_block(self, user: User, rule: BlockRule) -> list[Reply]:
+        if len(await self.repo.list_blocks(user.id)) >= MAX_RULES:
+            return [Reply("You've reached the busy block limit. Remove one with /blocks first.")]
+        nonce = secrets.token_hex(8)
+        await self.repo.set_pending(
+            user.id, {"stage": "block", "rule": rule.model_dump(mode="json"), "nonce": nonce}
+        )
+        note = (
+            "\nAdd 'until <date>' to change when it stops repeating."
+            if rule.kind == "WEEKLY"
+            else ""
+        )
+        return [
+            Reply(
+                "Block this time?\n\n" + describe(rule) + note,
+                confirm_keyboard(nonce, "Save block"),
+            )
+        ]
 
     async def list_events(self, user: User, page: int = 0, plans: bool = False) -> list[Reply]:
         events = await self.repo.recent_events(user.id)
@@ -150,12 +190,20 @@ class SchedulingService:
                 )
             ]
         pending = user.pending
-        if pending and pending["stage"] in ("confirm", "choose", "delete"):
+        if pending and pending["stage"] in ("confirm", "choose", "delete", "block"):
             return [
                 Reply(
                     "Please finish the pending action using its buttons, or send /cancel before forwarding another event."
                 )
             ]
+        if not pending:
+            # Quick blocks are parsed deterministically and never reach the extractor.
+            try:
+                rule = parse_block(text, reference)
+            except Clarification as exc:
+                return [Reply(str(exc))]
+            if rule:
+                return await self.preview_block(user, rule)
         started = time.monotonic()
         previous = pending.get("extraction") if pending else None
         if pending:
@@ -307,6 +355,13 @@ class SchedulingService:
             return await self.list_events(user, int(page), plans=prefix == "plans")
         parts = data.split(":")
         action = parts[0]
+        if action == "unblock" and len(parts) == 2:
+            try:
+                UUID(parts[1])
+            except ValueError:
+                return [Reply("That button isn't valid. Use /blocks.")]
+            removed = await self.repo.delete_block(user.id, parts[1])
+            return [Reply("Busy block removed." if removed else "That block is already gone.")]
         if action in ("confirm", "dismiss") and len(parts) == 2:
             pending = user.pending
             if not pending or pending.get("nonce") != parts[1]:
@@ -317,6 +372,13 @@ class SchedulingService:
             if pending["stage"] == "delete":
                 await self.repo.delete_user(user.id)
                 return [Reply("Your AmIFree data has been deleted. Use /start to set up again.")]
+            if pending["stage"] == "block":
+                await self.repo.create_block(user.id, BlockRule.model_validate(pending["rule"]))
+                await self.repo.set_pending(user.id, None)
+                await self.safe_action(user.id, "block")
+                return [
+                    Reply("Blocked. Plans that overlap it will show a clash. /blocks lists them.")
+                ]
             if pending["stage"] != "confirm":
                 return [Reply("That action is no longer available.")]
             event = await self.repo.get_event(user.id, pending["event_id"])

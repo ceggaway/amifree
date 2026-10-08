@@ -36,6 +36,12 @@ def confirm_keyboard(nonce: str, label="Confirm update") -> InlineKeyboardMarkup
     )
 
 
+def remove_block_keyboard(block_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Remove", callback_data=f"unblock:{block_id}")]]
+    )
+
+
 def choose_keyboard(events: list[Event]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

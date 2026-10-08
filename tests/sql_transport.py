@@ -50,6 +50,13 @@ COLUMNS = {
     "raw_text",
     "extracted_json",
     "validation_state",
+    "title",
+    "kind",
+    "weekday",
+    "start_time",
+    "end_time",
+    "start_date",
+    "until_date",
 }
 
 

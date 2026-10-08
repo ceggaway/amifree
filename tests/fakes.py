@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from app.models.user import User
 from app.schemas.event import Event, Status
+from app.services.quick_blocks import expand_blocks
 
 
 class MemoryRepository:
@@ -11,6 +12,7 @@ class MemoryRepository:
     def __init__(self):
         self.users = {}
         self.blocks = {}
+        self.rules = {}
         self.events = {}
         self.actions = []
         self.available = True
@@ -40,11 +42,25 @@ class MemoryRepository:
         user.pending = None
 
     async def busy(self, user_id, draft):
-        return self.blocks.get(user_id, []), [
+        manual = expand_blocks(self.rules.get(user_id, []), draft.start_at, draft.end_at)
+        return self.blocks.get(user_id, []) + manual, [
             e.model_copy(deep=True)
             for e in self.events.values()
             if e.user_id == user_id and e.status in (Status.GOING, Status.SAVED)
         ]
+
+    async def create_block(self, user_id, rule):
+        rule = rule.model_copy(update={"id": str(uuid4()), "user_id": user_id})
+        self.rules.setdefault(user_id, []).append(rule)
+        return rule
+
+    async def list_blocks(self, user_id):
+        return list(self.rules.get(user_id, []))
+
+    async def delete_block(self, user_id, block_id):
+        rules = self.rules.get(user_id, [])
+        self.rules[user_id] = [r for r in rules if r.id != block_id]
+        return len(self.rules[user_id]) != len(rules)
 
     async def create_preview(self, user_id, message_id, draft):
         for e in self.events.values():
@@ -105,6 +121,7 @@ class MemoryRepository:
         self.users = {t: u for t, u in self.users.items() if u.id != user_id}
         self.events = {k: e for k, e in self.events.items() if e.user_id != user_id}
         self.blocks.pop(user_id, None)
+        self.rules.pop(user_id, None)
         self.actions = [a for a in self.actions if a[0] != user_id]
 
 

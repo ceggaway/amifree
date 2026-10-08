@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     nightly_hour: int = Field(default=20, ge=0, le=23)
     # Shared secret for POST /internal/jobs/run; the endpoint is disabled while blank.
     jobs_secret: SecretStr = SecretStr("")
+    # HTTPS URL of the Mini App, e.g. https://your-service.onrender.com/app/ . Blank hides it.
+    mini_app_url: str = ""
+    # Exact origin of a separately hosted dev frontend (e.g. a Vite tunnel). Enables CORS for it.
+    mini_app_dev_origin: str = ""
+    # Signs Mini App sessions. Blank derives a key from the bot token.
+    session_secret: SecretStr = SecretStr("")
+    session_ttl: int = Field(default=3600, ge=300, le=86400)
+    init_data_max_age: int = Field(default=3600, ge=60, le=86400)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @model_validator(mode="after")
@@ -40,6 +48,18 @@ class Settings(BaseSettings):
                 r"[A-Za-z0-9_-]{16,256}", self.telegram_webhook_secret.get_secret_value()
             ):
                 raise ValueError("Webhook secret must contain 16–256 letters, digits, _ or -")
+        if self.mini_app_url and urlparse(self.mini_app_url).scheme != "https":
+            raise ValueError("MINI_APP_URL must be an HTTPS URL")
+        origin = urlparse(self.mini_app_dev_origin)
+        if self.mini_app_dev_origin and (
+            origin.scheme not in ("http", "https")
+            or not origin.netloc
+            or origin.path not in ("", "/")
+        ):
+            raise ValueError("MINI_APP_DEV_ORIGIN must be an exact origin such as https://host")
+        secret = self.session_secret.get_secret_value()
+        if secret and len(secret) < 32:
+            raise ValueError("SESSION_SECRET must be at least 32 characters")
         return self
 
     def require_credentials(self):

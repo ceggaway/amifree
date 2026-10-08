@@ -3,15 +3,19 @@ import hmac
 import logging
 from collections import OrderedDict
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from supabase import acreate_client
 from supabase.lib.client_options import AsyncClientOptions
-from telegram import BotCommand, Update
+from telegram import BotCommand, MenuButtonWebApp, Update, WebAppInfo
 from telegram.ext import Application
 
+from app.api.routes import build_router
 from app.bot.delivery import Delivery, webhook_delivery
 from app.bot.handlers import register_handlers
 from app.config import Settings
@@ -101,6 +105,12 @@ def create_app(
                     BotCommand("deletemydata", "Delete everything about me"),
                 ]
             )
+            if settings.mini_app_url:
+                await bot_app.bot.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(
+                        "Open AmIFree", WebAppInfo(url=settings.mini_app_url)
+                    )
+                )
             await bot_app.start()
             stack.push_async_callback(bot_app.stop)
             if settings.bot_mode == "polling":
@@ -154,6 +164,30 @@ def create_app(
     app = FastAPI(
         title="AmIFree", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None
     )
+
+    app.include_router(build_router(settings))
+    if settings.mini_app_dev_origin:
+        # Bearer tokens, not cookies: no credentials mode and exactly one allowed origin.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[settings.mini_app_dev_origin.rstrip("/")],
+            allow_methods=["GET", "POST", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if request.url.path.startswith(("/api/", "/internal/")):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    # The built Mini App, when present, is served from this same origin.
+    dist = Path(__file__).resolve().parents[1] / "web" / "dist"
+    if (dist / "index.html").is_file():
+        app.mount("/app", StaticFiles(directory=dist, html=True), name="miniapp")
 
     @app.get("/healthz")
     async def health():

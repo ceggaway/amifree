@@ -109,6 +109,27 @@ class SupabaseRepository:
             Event.model_validate(e) for e in events
         ]
 
+    async def blocks_between(self, user_id: str, start: datetime, end: datetime) -> list[BusyBlock]:
+        """Classes, exams and manual blocks overlapping [start, end), for calendar views."""
+        rows, offset = [], 0
+        while True:
+            batch = (
+                await self.client.table("timetable_blocks")
+                .select("*")
+                .eq("user_id", user_id)
+                .lt("start_at", end.isoformat())
+                .gt("end_at", start.isoformat())
+                .order("id")
+                .range(offset, offset + 499)
+                .execute()
+            ).data
+            rows.extend(batch)
+            if len(batch) < 500:
+                break
+            offset += 500
+        manual = expand_blocks(await self.list_blocks(user_id), start, end)
+        return [BusyBlock.model_validate(b) for b in rows] + manual
+
     async def create_block(self, user_id: str, rule: BlockRule) -> BlockRule:
         row = rule.model_dump(mode="json", exclude={"id", "user_id"}) | {"user_id": user_id}
         result = await self.client.table("manual_busy_blocks").insert(row).execute()

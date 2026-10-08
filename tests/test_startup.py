@@ -46,6 +46,7 @@ async def test_real_application_startup_and_shutdown(monkeypatch, mode):
         supabase_service_role_key="test-key",
         app_base_url="https://example.test",
         telegram_webhook_secret="test_secret_123456",
+        mini_app_url="https://example.test/app/",
     )
     app = create_app(settings)
     async with (
@@ -57,6 +58,7 @@ async def test_real_application_startup_and_shutdown(monkeypatch, mode):
         assert (await client.get("/readyz")).status_code == 200
         calls = dict(transport.calls)
         assert "setMyCommands" in calls
+        assert "Open AmIFree" in str(calls["setChatMenuButton"])
         if mode == "webhook":
             assert calls["setWebhook"]["url"] == "https://example.test/telegram/webhook"
             assert calls["setWebhook"]["secret_token"] == "test_secret_123456"

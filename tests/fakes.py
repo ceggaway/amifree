@@ -56,6 +56,10 @@ class MemoryRepository:
             if e.user_id == user_id and e.status in (Status.GOING, Status.SAVED)
         ]
 
+    async def blocks_between(self, user_id, start, end):
+        classes = [b for b in self.blocks.get(user_id, []) if b.start_at < end and b.end_at > start]
+        return classes + expand_blocks(self.rules.get(user_id, []), start, end)
+
     async def create_block(self, user_id, rule):
         rule = rule.model_copy(update={"id": str(uuid4()), "user_id": user_id})
         self.rules.setdefault(user_id, []).append(rule)
@@ -132,7 +136,7 @@ class MemoryRepository:
             if (g.chat_id, g.source_message_id) == (chat_id, message_id):
                 return g.model_copy(deep=True)
         g = GroupEvent(
-            **draft.model_dump(),
+            **draft.model_dump(include=set(EventDraft.model_fields)),
             id=str(uuid4()),
             chat_id=chat_id,
             source_message_id=message_id,

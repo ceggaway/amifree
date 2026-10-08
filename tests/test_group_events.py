@@ -83,7 +83,16 @@ async def test_event_card_from_a_replied_message(service_factory):
     assert service.extractor.calls[0][0] == TEXT
     assert "CCA dinner" in card["text"] and "Location: Vivo" in card["text"]
     assert "Going 0 · Maybe 0 · Can't 0" in card["text"]
-    assert list(taps) == ["Going", "Maybe", "Can't", "Am I free?", "Save", "Edit", "Cancel event"]
+    assert list(taps) == [
+        "Going",
+        "Maybe",
+        "Can't",
+        "Am I free?",
+        "Save",
+        "Edit",
+        "Cancel event",
+        "Nudge",
+    ]
     assert all(len(data.encode()) <= 64 for data in taps.values())
     # The bot records its own card message so later edits can re-render it.
     assert event.message_id == 101 and event.chat_id == CHAT

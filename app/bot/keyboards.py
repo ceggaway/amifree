@@ -35,9 +35,14 @@ def group_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
             [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")],
             [button("Am I free?", "free"), button("Save", "save")],
             # Organiser only; everyone else gets a private refusal.
-            [button("Edit", "edit"), button("Cancel event", "cancel")],
+            [button("Edit", "edit"), button("Cancel event", "cancel"), button("Nudge", "nudge")],
         ]
     )
+
+
+def nudge_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
+    """Answer a group card from the private nudge, without going back to the group."""
+    return InlineKeyboardMarkup(group_keyboard(event).inline_keyboard[:1])
 
 
 def poll_keyboard(poll: Poll) -> InlineKeyboardMarkup:
@@ -47,7 +52,10 @@ def poll_keyboard(poll: Poll) -> InlineKeyboardMarkup:
 
     if poll.status == "COLLECTING":
         return InlineKeyboardMarkup(
-            [[button("Count me in", "join")], [button("Suggest slots (organiser)", "suggest")]]
+            [
+                [button("Count me in", "join")],
+                [button("Suggest slots (organiser)", "suggest"), button("Nudge", "nudge")],
+            ]
         )
     rows = [[button("Fill mine", "fill"), button("Count me in", "join")]]
     for index in range(len(poll.slots)):
@@ -60,6 +68,7 @@ def poll_keyboard(poll: Poll) -> InlineKeyboardMarkup:
         )
     rows.append(
         [button(f"Pick {index + 1}", "pick", str(index)) for index in range(len(poll.slots))]
+        + [button("Nudge", "nudge")]
     )
     return InlineKeyboardMarkup(rows)
 

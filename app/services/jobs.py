@@ -8,9 +8,11 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta
 
-from app.bot.messages import Reply, event_card, verdict_line
+from app.bot.keyboards import nudge_keyboard
+from app.bot.messages import Reply, details, event_card, verdict_line
 from app.schemas.event import SG, Status
 from app.services.change_alerts import describe_change
+from app.services.chase import card_link, enqueue_auto
 from app.services.reminders import enqueue_nightly, summary
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,45 @@ class Notifier:
             )
             text = summary(start, events)
             return Reply(text) if text else None
+        if row["kind"] == "NUDGE" and payload["type"] == "event":
+            event = await self.repo.get_group_event(payload["id"])
+            now = self.scheduling.clock()
+            # Skip if the card is over, or they answered while the nudge was queued.
+            if not event or event.status != "ACTIVE" or event.end_at <= now:
+                return None
+            if await self.repo.linked_event(user.id, event.id):
+                return None
+            availability = await self.scheduling.availability(user, event)
+            return Reply(
+                "📣 Your group is waiting for your answer:\n\n"
+                + details(event)
+                + "\n\n"
+                + verdict_line(availability)
+                + card_link(event)
+                + "\n\n/reminders off stops nudges.",
+                nudge_keyboard(event),
+            )
+        if row["kind"] == "NUDGE":
+            poll = await self.repo.get_poll(payload["id"])
+            if not poll or poll.status == "CLOSED":
+                return None
+            answered = (
+                await self.repo.poll_voter_ids(poll.id)
+                if poll.status == "OPEN"
+                else await self.repo.poll_participants(poll.id)
+            )
+            if user.id in answered:
+                return None
+            ask = (
+                "tap Fill mine to answer from your schedule"
+                if poll.status == "OPEN"
+                else "tap Count me in so your free time is counted"
+            )
+            return Reply(
+                f"🗳 Your group is choosing a time for {poll.title}. Open the poll and {ask}."
+                + card_link(poll)
+                + "\n\n/reminders off stops nudges."
+            )
         return None
 
     async def deliver(self, limit: int = 50) -> dict[str, int]:
@@ -81,4 +122,5 @@ class Notifier:
         queued = await enqueue_nightly(
             self.repo, self.scheduling.clock(), self.scheduling.settings.nightly_hour
         )
+        queued += await enqueue_auto(self.repo, self.scheduling.clock())
         return {"queued": queued} | await self.deliver()

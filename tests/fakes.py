@@ -19,6 +19,7 @@ class MemoryRepository:
         self.polls = {}
         self.poll_people = {}
         self.poll_votes = {}
+        self.poll_created = {}
         self.events = {}
         self.actions = []
         self.available = True
@@ -288,6 +289,7 @@ class MemoryRepository:
         )
         self.polls[p.id] = p
         self.poll_people[p.id] = [user_id]
+        self.poll_created[p.id] = datetime.now(UTC)
         self.members.add((chat_id, user_id))
         return p.model_copy(deep=True)
 
@@ -339,6 +341,30 @@ class MemoryRepository:
             if pid == poll_id:
                 tally[(slot, answer)] = tally.get((slot, answer), 0) + 1
         return tally
+
+    async def group_member_ids(self, chat_id):
+        return [user_id for chat, user_id in self.members if chat == chat_id]
+
+    async def group_responder_ids(self, group_event_id):
+        return [e.user_id for e in self.events.values() if e.group_event_id == group_event_id]
+
+    async def poll_voter_ids(self, poll_id):
+        return sorted({user_id for (pid, user_id, _) in self.poll_votes if pid == poll_id})
+
+    async def cards_to_chase(self, created_before, now):
+        events = [
+            g.model_copy(deep=True)
+            for g in self.group_events.values()
+            if g.status == "ACTIVE" and g.created_at <= created_before and g.start_at > now
+        ]
+        polls = [
+            p.model_copy(deep=True)
+            for p in self.polls.values()
+            if p.status != "CLOSED"
+            and self.poll_created[p.id] <= created_before
+            and p.window_end > now
+        ]
+        return events, polls
 
     async def action(self, user_id, kind, event_id=None, metadata=None):
         self.actions.append((user_id, kind, event_id, metadata))

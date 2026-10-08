@@ -11,6 +11,7 @@ from uuid import UUID
 
 from app.bot.messages import Reply, group_card, private_verdict
 from app.schemas.event import GroupEvent, Status
+from app.services.chase import enqueue_nudges
 from app.services.date_resolution import Clarification, validate_extraction
 
 log = logging.getLogger(__name__)
@@ -92,6 +93,30 @@ class GroupEventService:
             return [Reply("That event was already cancelled.")]
         return await self.scheduling.begin_change(user, event, cancel=action == "cancel")
 
+    async def nudge(self, card) -> str:
+        queued = await enqueue_nudges(self.repo, card)
+        await self.scheduling.flush_notifications()
+        if not queued:
+            return "Nobody left to nudge. Each member is nudged at most once per card."
+        return (
+            f"Nudging {queued} member{'s' if queued != 1 else ''} privately. People who have"
+            " never used AmIFree in this group, or turned reminders off, aren't messaged."
+        )
+
+    async def from_private(self, telegram_id: int, data: str) -> list[Reply]:
+        """An RSVP tapped on a private nudge. Only people already seen in that group may use it."""
+        parts = data.split(":")
+        event_id = parse_id(parts[2]) if len(parts) == 3 else None
+        event = await self.repo.get_group_event(event_id) if event_id else None
+        user = await self.repo.ensure_user(telegram_id)
+        members = await self.repo.group_member_ids(event.chat_id) if event else []
+        if not event or user.id not in members or parts[1] not in RSVP:
+            return [Reply("That card isn't available to you.")]
+        result = await self.callback(telegram_id, event.chat_id, data)
+        if result.card:
+            await self.scheduling.group_changed(event.id)
+        return [Reply(result.alert or GONE)]
+
     async def posted(self, group_event_id: str, message_id: int):
         await self.repo.set_group_message(group_event_id, message_id)
 
@@ -114,6 +139,10 @@ class GroupEventService:
                 return GroupResult(alert="Only the organiser can change this card.")
             # Editing happens in the organiser's private chat, then updates this card.
             return GroupResult(start=f"{action}_{event.id}")
+        if action == "nudge":
+            if event.creator_user_id != user.id:
+                return GroupResult(alert="Only the organiser can nudge members.")
+            return GroupResult(alert=await self.nudge(event))
         linked = await self.repo.linked_event(user.id, event.id)
         availability = await self.scheduling.availability(
             user, event, linked.id if linked else None

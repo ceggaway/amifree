@@ -105,6 +105,7 @@ COLUMNS = {
     "reminders_enabled",
     "dm_blocked",
     "poll_id",
+    "window_end",
 }
 
 

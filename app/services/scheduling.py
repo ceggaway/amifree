@@ -463,6 +463,8 @@ class SchedulingService:
 
     async def callback(self, telegram_id: int, data: str) -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
+        if data.startswith("g:"):
+            return await self.groups.from_private(telegram_id, data)
         if data.startswith(("events:", "plans:")):
             prefix, _, page = data.partition(":")
             if not page.isascii() or not page.isdigit() or len(page) > 8:

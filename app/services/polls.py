@@ -191,6 +191,10 @@ class PollService:
                 else "You're in. Your schedule is only used to count who is free."
             )
             return GroupResult(alert=note, card=await self.render(poll))
+        if action == "nudge":
+            if not organiser:
+                return GroupResult(alert="Only the organiser can nudge members.")
+            return GroupResult(alert=await self.scheduling.groups.nudge(poll))
         if action == "suggest":
             if not organiser:
                 return GroupResult(alert="Only the organiser can suggest slots.")

@@ -419,6 +419,50 @@ class SupabaseRepository:
         result = await self.client.rpc("amifree_poll_tally", {"p_poll_id": poll_id}).execute()
         return {(row["slot"], row["answer"]): row["n"] for row in result.data or []}
 
+    async def _column(self, table: str, column: str, **filters) -> list[str]:
+        q = self.client.table(table).select("*")
+        for key, value in filters.items():
+            q = q.eq(key, value)
+        return [row[column] for row in (await q.limit(1000).execute()).data]
+
+    async def group_member_ids(self, chat_id: int) -> list[str]:
+        return await self._column("group_members", "user_id", chat_id=chat_id)
+
+    async def group_responder_ids(self, group_event_id: str) -> list[str]:
+        return await self._column("events", "user_id", group_event_id=group_event_id)
+
+    async def poll_voter_ids(self, poll_id: str) -> list[str]:
+        return sorted(set(await self._column("poll_votes", "user_id", poll_id=poll_id)))
+
+    async def cards_to_chase(
+        self, created_before: datetime, now: datetime
+    ) -> tuple[list[GroupEvent], list[Poll]]:
+        """Cards at least a day old that are still open. Old cards age out after two weeks."""
+        oldest = (created_before - timedelta(days=14)).isoformat()
+        events = (
+            await self.client.table("group_events")
+            .select("*")
+            .eq("status", "ACTIVE")
+            .lte("created_at", created_before.isoformat())
+            .gte("created_at", oldest)
+            .gt("start_at", now.isoformat())
+            .limit(200)
+            .execute()
+        ).data
+        polls = (
+            await self.client.table("polls")
+            .select("*")
+            .neq("status", "CLOSED")
+            .lte("created_at", created_before.isoformat())
+            .gte("created_at", oldest)
+            .gt("window_end", now.isoformat())
+            .limit(200)
+            .execute()
+        ).data
+        return [GroupEvent.model_validate(e) for e in events], [
+            Poll.model_validate(p) for p in polls
+        ]
+
     async def action(
         self, user_id: str, kind: str, event_id: str | None = None, metadata: dict | None = None
     ):

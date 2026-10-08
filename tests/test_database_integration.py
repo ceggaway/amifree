@@ -348,6 +348,38 @@ async def test_polls_in_postgresql(reference):
         assert await repo.poll_vote(poll.id, third.id, {"0": "FREE"})
         assert await repo.poll_vote(poll.id, third.id, {"0": "MAYBE"})
         assert await repo.poll_tally(poll.id) == {(0, "FREE"): 1, (0, "MAYBE"): 1, (1, "BUSY"): 1}
+        # Auto-chase inputs: who is known in the chat, who answered, which cards are due.
+        assert sorted(await repo.group_member_ids(-500)) == sorted(
+            [organiser.id, member.id, third.id]
+        )
+        assert await repo.poll_voter_ids(poll.id) == sorted([member.id, third.id])
+        now = datetime(2026, 10, 5, 12, tzinfo=SG)
+        assert await repo.cards_to_chase(now, now) == ([], [])
+        await db.query("update polls set created_at=$1", [(now - timedelta(days=2)).isoformat()])
+        assert [p.id for p in (await repo.cards_to_chase(now - timedelta(days=1), now))[1]] == [
+            poll.id
+        ]
+        card = await repo.create_group_event(
+            organiser.id,
+            -500,
+            31,
+            EventDraft(
+                title="Sync", start_at=now + timedelta(hours=3), end_at=now + timedelta(hours=4)
+            ),
+        )
+        await db.query(
+            "update group_events set created_at=$1", [(now - timedelta(days=2)).isoformat()]
+        )
+        await repo.group_rsvp(member.id, card, Status.MAYBE)
+        assert await repo.group_responder_ids(card.id) == [member.id]
+        assert [e.id for e in (await repo.cards_to_chase(now - timedelta(days=1), now))[0]] == [
+            card.id
+        ]
+        # Started events and very old cards are no longer chased.
+        assert (await repo.cards_to_chase(now - timedelta(days=1), now + timedelta(hours=5)))[
+            0
+        ] == []
+        assert await repo.cards_to_chase(now + timedelta(days=30), now) == ([], [])
         assert await repo.poll_close(poll.id, member.id) is None
         assert (await repo.poll_close(poll.id, organiser.id)).status == "CLOSED"
         assert await repo.poll_join(poll.id, third.id) is None

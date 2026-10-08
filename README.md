@@ -1,8 +1,28 @@
-# AmIFree MVP
+# AmIFree
 
-Forward a Telegram invitation, review its extracted details and Free/Clash verdict, then RSVP. Going events become AmIFree commitments and block future checks. The frontend is the private Telegram chat; FastAPI runs the backend and Supabase stores the data.
+Forward a Telegram plan, check the card, and tap Save. AmIFree tells you whether it clashes with what it knows about you, reminds you the night before, and tells you when a saved plan changes. In groups, organisers post event cards with RSVPs, a private "Am I free?" check and a headcount, and run `/whosfree` polls that fill themselves from members' schedules.
 
-Built against the v2 product specification. Includes NUSMods classes/exams, structured event extraction, clarification, Edit, conservative confirmed updates/cancellations, RSVP, basic analytics and user deletion. Google Calendar, group scheduling, Supabase Auth, Mini Apps and OCR are outside the MVP.
+One FastAPI backend serves the Telegram bot, a JSON API and a React Telegram Mini App. Supabase stores the data. Clash detection is one deterministic Python implementation used by all three; no LLM decides availability.
+
+| For students | For organisers |
+| --- | --- |
+| Forward to save, `/plans` | `/event` cards with Going / Maybe / Can't and a live headcount |
+| Instant clash check: No clashes found, Clashes with X, or Busy day | Edit once: everyone who kept the plan gets one change alert |
+| Private "Am I free?" on every group card | `/whosfree` self-filling poll |
+| Night-before summary, change alerts | Auto-chase and a Nudge button for non-responders |
+| Quick blocks: `busy sat 2-6pm`, `work every Wed 6-10pm` | |
+
+NUSMods is optional. Google Calendar and other outside calendars are not connected, and cards say so. OCR of posters is not supported.
+
+**Status:** everything above is implemented and covered by the local test suite. None of the new features has been exercised against live Telegram, OpenAI or a hosted Supabase project. See `docs/verification.md`.
+
+## Privacy by design
+
+- The bot acts only on messages sent or forwarded to it in private, on commands, and on button taps. Telegram privacy mode stays on, so ordinary group messages are never delivered to it. `/event` reads only the one message it replies to.
+- Anything derived from a person's schedule in a group is returned as a callback alert that only the person who tapped can see. Group cards show counts, never names or reasons.
+- `/whosfree` reads a schedule only after that member taps Count me in, and suggests slots only once three people have joined.
+- Nudges and reminders go only to people who have used AmIFree; `/reminders off` stops summaries and nudges.
+- `/deletemydata` (alias `/delete`) removes the user's timetable, plans, busy blocks, poll answers, notification records and analytics. Group cards they organised stay for the other members, with no organiser attached.
 
 ## Local setup
 
@@ -20,7 +40,7 @@ Create `.env` from `.env.example` if it does not already exist. Preserve an exis
 ### Supabase
 
 1. Create a Supabase project.
-2. Run the complete `app/db/schema.sql` in its SQL Editor. It creates all five tables, indexes and transaction functions, enables row-level security, and grants access only to the server's service role. Reapplying it is safe for the current schema; future schema changes need versioned migrations.
+2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `004`). Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
 3. Copy the project URL and backend `service_role` key into `.env`. Keep the key on the server; use neither the anon key nor a browser session. The SDK also accepts Supabase's newer backend secret key in the same configuration variable. See [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys).
 
 ```dotenv
@@ -59,15 +79,47 @@ In disabled mode `/healthz` returns 200 and `/readyz` returns 503. This does not
 ## First real Telegram test
 
 1. Open your bot's private chat and send `/start`.
-2. Copy your student timetable's Share/Sync link from NUSMods and send it. Select all class types first. The bot reports academic year, semester and coverage.
-3. Forward a message such as `CCA dinner Friday 7–9pm at Vivo`.
-4. Review the date/time and verdict. Tap Going; the bot confirms the commitment.
+2. Forward a message such as `CCA dinner Friday 7–9pm at Vivo`. No timetable is needed.
+3. Review the card and tap Save, then send `/plans`. Send `busy sat 2-6pm` and confirm the block.
+4. Optionally send your NUSMods Share/Sync link (select all class types first). Tap Going on the plan; the bot confirms the commitment.
 5. Forward a second invitation overlapping that time. It should report Clash and offer Going anyway.
 6. Tap Maybe or Can't make it on a commitment to release its block. Use Edit to correct details; changes require confirmation.
 7. Forward `CCA dinner moved to 8pm` or `CCA dinner cancelled`. Review the proposed change before confirming. Ambiguous matches require selection.
-8. Test a second Telegram account to verify isolation. Group chats receive only a prompt to open a private chat.
+8. Test a second Telegram account to verify isolation.
 
-Commands: `/start`, `/help`, `/events`, `/cancel`, `/delete`. `/delete` requires a confirmation and cascades through that user's timetable, events, extraction records and analytics.
+Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `/reminders`, `/cancel`, `/deletemydata`. Deletion requires a confirmation.
+
+### Groups
+
+1. In BotFather leave **Group Privacy** turned on (the default). Add the bot to a test group.
+2. Reply `/event` to a message containing a plan, or send `/event Dinner Fri 7-9pm at Vivo`. The bot posts a card.
+3. With two accounts, tap **Am I free?** on the same card. Each sees a private popup; nothing appears in the group.
+4. Tap Going / Maybe / Can't and watch the headcount. The plan appears in each member's `/plans`.
+5. As the organiser tap **Edit**. Telegram opens the private chat; send the correction and confirm. Members who kept the plan each receive one message stating what changed.
+6. Send `/whosfree project meeting 2h next week`. Have three accounts tap **Count me in**, then tap **Suggest slots** as the organiser.
+
+Members must have opened a private chat with the bot at least once before it can DM them reminders, alerts or nudges. This is a Telegram rule.
+
+### Mini App
+
+```bash
+cd web
+npm ci
+npm run build      # writes web/dist, which the backend serves at /app/
+npm run dev        # browser-only UI work with mock data, proxied to a local backend
+```
+
+Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for example `https://your-service.onrender.com/app/`). On startup the bot sets its menu button to **Open AmIFree**. Telegram only opens HTTPS Mini Apps, so local testing inside Telegram needs a tunnel or a staging deploy. The Mini App sends Telegram's signed `initData` to `POST /api/auth/telegram`; the server verifies it and returns a one-hour session token. A normal browser has no signature and cannot sign in. Development builds fall back to mock data, which is compiled out of production builds.
+
+### Reminders and alerts
+
+Night-before summaries, change alerts and nudges are rows in `notification_logs`, sent by an idempotent job. The server runs that job every minute while it is awake. Hosts that sleep or restart will miss runs, so also schedule it externally: set `JOBS_SECRET` and call it every ten minutes, for example from Render Cron:
+
+```bash
+curl -fsS -X POST -H "X-Jobs-Secret: $JOBS_SECRET" "$APP_BASE_URL/internal/jobs/run"
+```
+
+Summaries are sent from `NIGHTLY_HOUR` (default 20, Singapore time) until midnight. A message is marked sent only after Telegram accepts it; failures retry with backoff up to five times.
 
 ## Verification
 
@@ -102,7 +154,7 @@ Publish the source to your own Git repository, then create a Python Web Service 
 | Setting | Value |
 | --- | --- |
 | Python | 3.12 (set `PYTHON_VERSION=3.12.1`) |
-| Build command | `pip install -c constraints.txt -r requirements.txt` |
+| Build command | `pip install -c constraints.txt -r requirements.txt && npm --prefix web ci && npm --prefix web run build` |
 | Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1` |
 | Health check | `/readyz` |
 | Environment | Four required credentials plus webhook settings below |
@@ -123,11 +175,15 @@ Use one replica and one worker for this MVP. Webhook updates are serialized and 
 - Forwarded invitations use the original Telegram message timestamp when available, otherwise the received message timestamp. Clarification retains that reference. Edits use the first correction message's timestamp and retain it for further clarification.
 - Date/time evidence must appear in the source text or the existing edit baseline. Missing/ambiguous critical fields prompt clarification. Non-Singapore timezones, recurring events and multiple-event messages are flagged by the extractor; the live pilot must validate its handling of these cases.
 - Missing end times prompt clarification by default. Setting `DEFAULT_EVENT_DURATION_MINUTES` to a positive value permits a visibly labelled assumption. Overnight events need an explicit end date. Existing updates preserve duration when no replacement end time is supplied.
-- Overlap uses half-open intervals: an event ending at 19:00 does not clash with one starting at 19:00. Only Going events block availability. Conflicts are private.
+- Overlap uses half-open intervals: an event ending at 19:00 does not clash with one starting at 19:00. Definite clashes are Going plans, NUSMods classes and exams, and busy blocks. A Saved plan is undecided: it is reported as a possible overlap with a choice of which to attend, and never blocks. "Busy day" is a warning, not a clash, shown when `BUSY_DAY_THRESHOLD` (default 3) other Going plans fall on the same day. Conflicts are private.
+- "No clashes found" covers only what AmIFree knows: every card lists what was checked and says when no NUSMods timetable covers the date.
+- Quick blocks are parsed without the LLM. Weekly blocks repeat for 90 days unless `until <date>` is given, cannot cross midnight, and are stored separately from NUSMods blocks so a reimport never removes them.
+- A member's answer on a group card is their own plan linked to the shared card. Only the organiser can edit or cancel a shared plan. Change alerts are sent only for edits made through AmIFree: Telegram does not tell a bot when someone edits a message elsewhere.
+- Bots cannot list group members. Headcounts, nudges and `/whosfree` only involve people who have interacted with AmIFree in that group. Each person is nudged at most once per card.
 - NUSMods links normally omit academic year. It is inferred from the message's Singapore timestamp, switching in August. Set `NUSMODS_ACADEMIC_YEAR=2026-2027` to override it for a specific pilot. The imported year is shown in the setup response.
 - Student share-link formats v1/v2/v3 are supported. Missing/stale selections are rejected; the importer does not choose a class. Hidden courses are still imported. TA-specific links are rejected with an explanation.
 - The importer expands listed teaching weeks into dated blocks and accounts for recess after teaching week 6. Special terms and explicit week ranges are supported. Exams require a published duration. Holiday exceptions, ad hoc cancellations and unscheduled classes are only as accurate as NUSMods' published lesson data. Resend a fresh link after timetable changes; reimport replaces old blocks atomically.
-- Coverage spans the imported semester. Outside coverage the bot reports unknown timetable coverage rather than claiming Free; it still detects stored Going clashes.
+- Coverage spans the imported semester. Outside coverage, or with no timetable imported, cards say that no NUSMods timetable covers the date; Going plans and busy blocks are still checked.
 - Event discovery includes all upcoming events plus events created in the last 30 days. `/events` has pages of 10 cards, with upcoming events first; candidate choices show at most 10 matches. A vague follow-up requires selection. A new clash appearing after an update preview requires another confirmation.
 - Pending clarification/update/delete state survives restarts in Supabase. It expires after `PENDING_TTL_HOURS` (default 24). One pending action per user is supported; `/cancel` clears it.
 - Optional raw extraction auditing is off (`RETAIN_EXTRACTIONS=false`). Pending state temporarily includes source text. With auditing enabled, records expire after `EXTRACTION_RETENTION_DAYS` (default 7). Cleanup runs at startup and hourly while the backend is running, and stale pending data is cleared when its user next interacts. If the backend is offline, cleanup resumes on restart.
@@ -146,7 +202,8 @@ The bundled `app/data/academic-calendar.json` covers AY2024/25–2026/27 and com
 - `EventExtractor.extract(text, reference, previous)` returns strict `Extraction` fields. Deterministic validation converts them to an aware `EventDraft` or a clarification prompt.
 - `check_availability(candidate, timetable, events, ...)` returns Free, Clash or Unknown; it never calls an LLM.
 - `SchedulingService` manages onboarding, pending state, event previews, versioned RSVP/update actions and Telegram replies. `SupabaseRepository` scopes all event operations to their owner and uses transaction functions for multi-row mutations.
-- FastAPI provides `/healthz`, `/readyz` and the authenticated webhook endpoint. There is no public endpoint for reading a user's schedule.
+- `GroupEventService` and `PollService` handle group cards and `/whosfree`; they return a private alert and, separately, the public card to render. `Notifier` (in `app/services/jobs.py`) queues and delivers reminders, change alerts and nudges.
+- FastAPI provides `/healthz`, `/readyz`, the authenticated webhook, `/internal/jobs/run` (shared secret) and `/api/*` (Telegram-signed session). Every `/api` route resolves the user on the server; a request without a valid session gets 401 and another user's IDs get 404. CORS is disabled unless `MINI_APP_DEV_ORIGIN` names one development origin.
 
 ### Webhook failure recovery
 

@@ -1,4 +1,44 @@
-# MVP verification report
+# Verification report
+
+## Must-haves and Mini App: 9 October 2026
+
+Local checks only, on branch `feat/must-haves`, using Python 3.12.1 and Node.js 24.8.0. **No feature in this section has been run against live Telegram, OpenAI or a hosted Supabase project**, and migrations `001`–`004` have not been applied to any hosted database.
+
+| Layer | Result | Evidence and limits |
+| --- | --- | --- |
+| Python syntax, lint, format, dependencies | Pass | `compileall`, `ruff check`, `ruff format --check`, `pip check` |
+| Python tests | **158 passed, no skips** | Baseline before this work was 103 |
+| Application coverage | **93% statements** | Clash engine and Mini App auth at 100% |
+| PostgreSQL schema and migrations | **21 checks passed** | `schema.sql` plus all migrations applied twice in PGlite, over existing rows |
+| Mini App build | Pass | `tsc --noEmit` and `vite build`; served by a real Uvicorn process at `/app/` |
+| Group behaviour | Pass locally | Real python-telegram-bot handlers with simulated Bot API responses |
+| Live Telegram, OpenAI, Supabase | **Not run** | Needs migrations applied and a test group |
+
+Behaviour covered by tests:
+
+- A new user without NUSMods forwards a plan, saves it and sees it in `/plans`; Going turns it into a commitment.
+- Going overlap clashes; back-to-back does not; a Saved overlap is reported as possible and offers a choice without deleting either plan; a busy day warns without clashing.
+- `work every Wed 6-10pm` clashes on Wednesday, not Tuesday, respects its end date, and survives a NUSMods reimport in real PostgreSQL.
+- Two members tapping the same card get different private alerts; no message is posted or edited into the group for an availability check; plain group messages produce no reply and no extraction.
+- Headcount follows RSVPs and shows counts only. A card's buttons do nothing in another chat.
+- An organiser edit from 7pm to 8pm alerts members who are Going, Maybe or Saved exactly once with the before and after times and a recomputed clash check; the decliner, the organiser and outsiders get nothing. Non-organisers and stale versions are refused.
+- Two plans tomorrow produce one nightly message; rerunning the job sends nothing; a failed send is retried once it recovers; a blocked user is skipped and flagged; opt-out is respected.
+- `/whosfree` refuses to suggest slots below three opt-ins or for a non-organiser, picks the slots where most participants are free, and exposes only counts.
+- Nudges reach only silent known members, once per card, and skip people who answered in the meantime.
+- Mini App sign-in rejects forged, tampered, expired, future-dated and wrong-bot `initData`; every API route returns 401 without a valid session; another user's plan or block ID returns 404; stale versions return 409; plans saved in the bot appear in the API and edits made through the API appear in the bot.
+- Deleting a user removes their plans, blocks, poll answers and notification rows, and leaves shared cards for other members.
+
+Known limits, not defects found by testing:
+
+- The simulated PostgREST transport covers only the request shapes the app uses. Hosted Supabase behaviour (RPC null handling, row limits) needs a live check.
+- Whether `/event` sent as a reply is delivered with the replied-to message under privacy mode, and whether Telegram accepts the callback `url` redirect used by Edit, are taken from Telegram's documentation and are untested live.
+- A worker crash between sending a notification and recording it can repeat that one message after ten minutes.
+- The React app has type checking but no component tests, and has not been opened inside Telegram.
+- There is no rate limiting on `/api/auth/telegram`.
+
+Live acceptance still to do: apply `app/db/migrations/001`–`004` in order to the dev Supabase project; set `MINI_APP_URL` and `JOBS_SECRET`; run in polling mode; walk the README's private, group and Mini App flows with two or three accounts.
+
+## Original MVP report: 4 October 2026
 
 Verified on **4 October 2026 (Asia/Singapore)** using Python 3.12.1 and Node.js 22.19.0. This report covers the completed implementation and local checks. Live Telegram, OpenAI and hosted Supabase acceptance remains pending credentials.
 

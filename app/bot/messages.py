@@ -16,8 +16,12 @@ I check your AmIFree Going plans, your busy blocks and any imported NUSMods time
 Outside calendars such as Google Calendar aren't connected, so "No clashes found"
 only covers what AmIFree knows about.
 
+In a group: reply /event to a plan message to post a card with Going / Maybe / Can't,
+a private "Am I free?" check and a headcount. /whosfree <what> suggests times from
+the schedules of members who opt in.
+
 Privacy: I only act on messages you send or forward to me, commands and button taps.
-I never read group chats.
+I never read group chats, and your schedule is never shown to a group.
 
 /start — getting started
 /help — this guide

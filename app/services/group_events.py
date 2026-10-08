@@ -30,6 +30,7 @@ class GroupResult:
     card: Reply | None = None  # replaces the bot's own card message
     post: Reply | None = None  # a new message in the group
     group_event_id: str | None = None  # set when `post` is a new card to record
+    poll_id: str | None = None  # set when `post` is a new poll card to record
     start: str | None = None  # opens the private chat with this /start parameter
 
 

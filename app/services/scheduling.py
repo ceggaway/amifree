@@ -22,6 +22,7 @@ from app.services.availability import check_availability
 from app.services.date_resolution import Clarification, validate_extraction
 from app.services.event_updates import match_updates
 from app.services.group_events import GroupEventService
+from app.services.polls import PollService
 from app.services.quick_blocks import MAX_RULES, USAGE, describe, parse_block
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class SchedulingService:
         )
         self.clock = clock or (lambda: datetime.now(SG))
         self.groups = GroupEventService(self)
+        self.polls = PollService(self)
         # Set by the bot layer: re-renders a group card after its headcount changes.
         self.on_group_change = None
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.

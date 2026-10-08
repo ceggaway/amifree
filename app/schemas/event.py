@@ -67,6 +67,25 @@ class Event(EventDraft):
     created_at: datetime | None = None
 
 
+class Poll(BaseModel):
+    id: str
+    chat_id: int
+    source_message_id: int | None = None
+    message_id: int | None = None
+    creator_user_id: str | None = None
+    title: str
+    duration_minutes: int
+    window_start: datetime
+    window_end: datetime
+    status: Literal["COLLECTING", "OPEN", "CLOSED"] = "COLLECTING"
+    slots: list[dict] = []
+
+    @field_validator("window_start", "window_end")
+    @classmethod
+    def local(cls, value):
+        return value.astimezone(SG)
+
+
 class GroupEvent(EventDraft):
     """The shared card. Members' attendance lives in their own linked Event rows."""
 

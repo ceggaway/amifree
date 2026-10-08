@@ -1,6 +1,6 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.schemas.event import Event, GroupEvent, Status
+from app.schemas.event import Event, GroupEvent, Poll, Status
 
 
 def event_keyboard(
@@ -38,6 +38,30 @@ def group_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
             [button("Edit", "edit"), button("Cancel event", "cancel")],
         ]
     )
+
+
+def poll_keyboard(poll: Poll) -> InlineKeyboardMarkup:
+    def button(label, action, extra=""):
+        data = f"p:{action}:{poll.id}" + (f":{extra}" if extra else "")
+        return InlineKeyboardButton(label, callback_data=data)
+
+    if poll.status == "COLLECTING":
+        return InlineKeyboardMarkup(
+            [[button("Count me in", "join")], [button("Suggest slots (organiser)", "suggest")]]
+        )
+    rows = [[button("Fill mine", "fill"), button("Count me in", "join")]]
+    for index in range(len(poll.slots)):
+        rows.append(
+            [
+                button(f"{index + 1} ✅", "v", f"{index}F"),
+                button(f"{index + 1} 🤔", "v", f"{index}M"),
+                button(f"{index + 1} ❌", "v", f"{index}B"),
+            ]
+        )
+    rows.append(
+        [button(f"Pick {index + 1}", "pick", str(index)) for index in range(len(poll.slots))]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def confirm_keyboard(nonce: str, label="Confirm update") -> InlineKeyboardMarkup:

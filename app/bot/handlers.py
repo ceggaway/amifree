@@ -110,6 +110,8 @@ async def deliver_group(update: Update, service, result):
         )
         if result.group_event_id:
             await service.groups.posted(result.group_event_id, sent.message_id)
+        if result.poll_id:
+            await service.polls.posted(result.poll_id, sent.message_id)
 
 
 async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation: str):

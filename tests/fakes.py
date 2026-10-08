@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.models.user import User
-from app.schemas.event import Event, EventDraft, GroupEvent, Status
+from app.schemas.event import Event, EventDraft, GroupEvent, Poll, Status
 from app.services.quick_blocks import expand_blocks
 
 
@@ -16,6 +16,9 @@ class MemoryRepository:
         self.group_events = {}
         self.members = set()
         self.notifications = []
+        self.polls = {}
+        self.poll_people = {}
+        self.poll_votes = {}
         self.events = {}
         self.actions = []
         self.available = True
@@ -269,6 +272,74 @@ class MemoryRepository:
         else:
             n["status"] = "failed" if permanent or n["attempts"] >= 5 else "pending"
 
+    async def create_poll(self, user_id, chat_id, message_id, title, minutes, start, end):
+        for p in self.polls.values():
+            if (p.chat_id, p.source_message_id) == (chat_id, message_id):
+                return p.model_copy(deep=True)
+        p = Poll(
+            id=str(uuid4()),
+            chat_id=chat_id,
+            source_message_id=message_id,
+            creator_user_id=user_id,
+            title=title,
+            duration_minutes=minutes,
+            window_start=start,
+            window_end=end,
+        )
+        self.polls[p.id] = p
+        self.poll_people[p.id] = [user_id]
+        self.members.add((chat_id, user_id))
+        return p.model_copy(deep=True)
+
+    async def set_poll_message(self, poll_id, message_id):
+        self.polls[poll_id].message_id = message_id
+
+    async def get_poll(self, poll_id):
+        p = self.polls.get(poll_id)
+        return p.model_copy(deep=True) if p else None
+
+    async def poll_join(self, poll_id, user_id):
+        p = self.polls[poll_id]
+        if p.status == "CLOSED":
+            return None
+        self.members.add((p.chat_id, user_id))
+        if user_id not in self.poll_people[poll_id]:
+            self.poll_people[poll_id].append(user_id)
+        return len(self.poll_people[poll_id])
+
+    async def poll_participants(self, poll_id):
+        return list(self.poll_people.get(poll_id, []))
+
+    async def poll_open(self, poll_id, user_id, slots):
+        p = self.polls[poll_id]
+        if p.creator_user_id != user_id or p.status != "COLLECTING":
+            return None
+        p.slots, p.status = slots, "OPEN"
+        return p.model_copy(deep=True)
+
+    async def poll_close(self, poll_id, user_id):
+        p = self.polls[poll_id]
+        if p.creator_user_id != user_id or p.status != "OPEN":
+            return None
+        p.status = "CLOSED"
+        return p.model_copy(deep=True)
+
+    async def poll_vote(self, poll_id, user_id, votes):
+        p = self.polls[poll_id]
+        if p.status != "OPEN":
+            return False
+        self.members.add((p.chat_id, user_id))
+        for slot, answer in votes.items():
+            self.poll_votes[(poll_id, user_id, int(slot))] = answer
+        return True
+
+    async def poll_tally(self, poll_id):
+        tally = {}
+        for (pid, _, slot), answer in self.poll_votes.items():
+            if pid == poll_id:
+                tally[(slot, answer)] = tally.get((slot, answer), 0) + 1
+        return tally
+
     async def action(self, user_id, kind, event_id=None, metadata=None):
         self.actions.append((user_id, kind, event_id, metadata))
 
@@ -282,6 +353,10 @@ class MemoryRepository:
         self.rules.pop(user_id, None)
         self.members = {m for m in self.members if m[1] != user_id}
         self.notifications = [n for n in self.notifications if n["user_id"] != user_id]
+        for people in self.poll_people.values():
+            if user_id in people:
+                people.remove(user_id)
+        self.poll_votes = {k: v for k, v in self.poll_votes.items() if k[1] != user_id}
         for g in self.group_events.values():
             if g.creator_user_id == user_id:
                 g.creator_user_id = None

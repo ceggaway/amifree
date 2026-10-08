@@ -301,3 +301,56 @@ async def test_change_outbox_in_postgresql(reference):
         assert await repo.get_user(str(organiser.id)[:-4] + "0000") is None
         await repo.delete_user(going.id)
         assert await db.query("select * from notification_logs") == []
+
+
+async def test_polls_in_postgresql(reference):
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        organiser, member, third = [await repo.ensure_user(n) for n in (1, 2, 3)]
+        start = datetime(2026, 10, 5, tzinfo=SG)
+        poll = await repo.create_poll(
+            organiser.id, -500, 30, "Sync", 60, start, start + timedelta(days=1)
+        )
+        again = await repo.create_poll(
+            organiser.id, -500, 30, "Sync", 60, start, start + timedelta(days=1)
+        )
+        assert again.id == poll.id and poll.window_start == start and poll.status == "COLLECTING"
+        await repo.set_poll_message(poll.id, 55)
+        assert await repo.poll_participants(poll.id) == [organiser.id]
+        assert await repo.poll_join(poll.id, member.id) == 2
+        assert await repo.poll_join(poll.id, member.id) == 2
+        assert not await repo.poll_vote(poll.id, member.id, {"0": "FREE"})
+        slots = [
+            {
+                "start_at": "2026-10-05T14:00:00+08:00",
+                "end_at": "2026-10-05T15:00:00+08:00",
+                "free": 2,
+            },
+            {
+                "start_at": "2026-10-05T16:00:00+08:00",
+                "end_at": "2026-10-05T17:00:00+08:00",
+                "free": 2,
+            },
+        ]
+        assert await repo.poll_open(poll.id, member.id, slots) is None
+        opened = await repo.poll_open(poll.id, organiser.id, slots)
+        assert opened.status == "OPEN" and opened.slots == slots and opened.message_id == 55
+        assert await repo.poll_open(poll.id, organiser.id, slots) is None
+        assert await repo.poll_vote(poll.id, member.id, {"0": "FREE", "1": "BUSY", "2": "FREE"})
+        assert await repo.poll_vote(poll.id, third.id, {"0": "FREE"})
+        assert await repo.poll_vote(poll.id, third.id, {"0": "MAYBE"})
+        assert await repo.poll_tally(poll.id) == {(0, "FREE"): 1, (0, "MAYBE"): 1, (1, "BUSY"): 1}
+        assert await repo.poll_close(poll.id, member.id) is None
+        assert (await repo.poll_close(poll.id, organiser.id)).status == "CLOSED"
+        assert await repo.poll_join(poll.id, third.id) is None
+        await repo.delete_user(member.id)
+        assert await repo.poll_tally(poll.id) == {(0, "MAYBE"): 1}
+        assert await repo.poll_participants(poll.id) == [organiser.id]

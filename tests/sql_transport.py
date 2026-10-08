@@ -39,6 +39,20 @@ RPC_PARAMS = {
     "amifree_enqueue_notification": ["p_user_id", "p_kind", "p_key", "p_payload"],
     "amifree_claim_notifications": ["p_limit"],
     "amifree_finish_notification": ["p_id", "p_ok", "p_permanent"],
+    "amifree_create_poll": [
+        "p_user_id",
+        "p_chat_id",
+        "p_source_message_id",
+        "p_title",
+        "p_duration",
+        "p_window_start",
+        "p_window_end",
+    ],
+    "amifree_poll_join": ["p_poll_id", "p_user_id"],
+    "amifree_poll_open": ["p_poll_id", "p_user_id", "p_slots"],
+    "amifree_poll_close": ["p_poll_id", "p_user_id"],
+    "amifree_poll_vote": ["p_poll_id", "p_user_id", "p_votes"],
+    "amifree_poll_tally": ["p_poll_id"],
 }
 VOID_RPCS = {
     "amifree_cleanup",
@@ -46,7 +60,7 @@ VOID_RPCS = {
     "amifree_touch_member",
     "amifree_finish_notification",
 }
-SCALAR_RPCS = {"amifree_enqueue_notification"}
+SCALAR_RPCS = {"amifree_enqueue_notification", "amifree_poll_join", "amifree_poll_vote"}
 TABLES = {
     "users",
     "events",
@@ -58,6 +72,9 @@ TABLES = {
     "group_members",
     "event_changes",
     "notification_logs",
+    "polls",
+    "poll_participants",
+    "poll_votes",
 }
 COLUMNS = {
     "id",
@@ -87,6 +104,7 @@ COLUMNS = {
     "message_id",
     "reminders_enabled",
     "dm_blocked",
+    "poll_id",
 }
 
 

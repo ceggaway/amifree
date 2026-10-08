@@ -6,7 +6,7 @@ from supabase import AsyncClient
 
 from app.models.timetable import BlockRule, BusyBlock
 from app.models.user import User
-from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
+from app.schemas.event import SG, Event, EventDraft, GroupEvent, Poll, Status
 from app.services.nusmods import ImportResult
 from app.services.quick_blocks import expand_blocks
 
@@ -27,6 +27,7 @@ class SupabaseRepository:
             "manual_busy_blocks",
             "group_events",
             "notification_logs",
+            "polls",
         ):
             await self.client.table(table).select("id").limit(1).execute()
 
@@ -341,6 +342,82 @@ class SupabaseRepository:
             "amifree_finish_notification",
             {"p_id": notification_id, "p_ok": ok, "p_permanent": permanent},
         ).execute()
+
+    async def create_poll(
+        self,
+        user_id: str,
+        chat_id: int,
+        message_id: int,
+        title: str,
+        minutes: int,
+        start: datetime,
+        end: datetime,
+    ) -> Poll:
+        result = await self.client.rpc(
+            "amifree_create_poll",
+            {
+                "p_user_id": user_id,
+                "p_chat_id": chat_id,
+                "p_source_message_id": message_id,
+                "p_title": title,
+                "p_duration": minutes,
+                "p_window_start": start.isoformat(),
+                "p_window_end": end.isoformat(),
+            },
+        ).execute()
+        return Poll.model_validate(result.data[0])
+
+    async def set_poll_message(self, poll_id: str, message_id: int):
+        await (
+            self.client.table("polls")
+            .update({"message_id": message_id})
+            .eq("id", poll_id)
+            .execute()
+        )
+
+    async def get_poll(self, poll_id: str) -> Poll | None:
+        result = await self.client.table("polls").select("*").eq("id", poll_id).limit(1).execute()
+        return Poll.model_validate(result.data[0]) if result.data else None
+
+    async def poll_join(self, poll_id: str, user_id: str) -> int | None:
+        result = await self.client.rpc(
+            "amifree_poll_join", {"p_poll_id": poll_id, "p_user_id": user_id}
+        ).execute()
+        # A closed or missing poll returns SQL null, which the client surfaces as empty data.
+        return result.data if isinstance(result.data, int) else None
+
+    async def poll_participants(self, poll_id: str) -> list[str]:
+        result = (
+            await self.client.table("poll_participants")
+            .select("*")
+            .eq("poll_id", poll_id)
+            .order("user_id")
+            .limit(1000)
+            .execute()
+        )
+        return [row["user_id"] for row in result.data]
+
+    async def poll_open(self, poll_id: str, user_id: str, slots: list[dict]) -> Poll | None:
+        result = await self.client.rpc(
+            "amifree_poll_open", {"p_poll_id": poll_id, "p_user_id": user_id, "p_slots": slots}
+        ).execute()
+        return Poll.model_validate(result.data[0]) if result.data else None
+
+    async def poll_close(self, poll_id: str, user_id: str) -> Poll | None:
+        result = await self.client.rpc(
+            "amifree_poll_close", {"p_poll_id": poll_id, "p_user_id": user_id}
+        ).execute()
+        return Poll.model_validate(result.data[0]) if result.data else None
+
+    async def poll_vote(self, poll_id: str, user_id: str, votes: dict[str, str]) -> bool:
+        result = await self.client.rpc(
+            "amifree_poll_vote", {"p_poll_id": poll_id, "p_user_id": user_id, "p_votes": votes}
+        ).execute()
+        return bool(result.data)
+
+    async def poll_tally(self, poll_id: str) -> dict[tuple[int, str], int]:
+        result = await self.client.rpc("amifree_poll_tally", {"p_poll_id": poll_id}).execute()
+        return {(row["slot"], row["answer"]): row["n"] for row in result.data or []}
 
     async def action(
         self, user_id: str, kind: str, event_id: str | None = None, metadata: dict | None = None

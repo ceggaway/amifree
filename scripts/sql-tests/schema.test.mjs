@@ -108,7 +108,7 @@ await check('anonymous/authenticated users cannot read tables or invoke RPCs', a
   await db.exec('reset role; set role service_role;');
 });
 const TABLES = ['users','events','timetable_blocks','event_extractions','user_actions','manual_busy_blocks'];
-const SHARED = ['group_events','group_members','event_changes','notification_logs'];
+const SHARED = ['group_events','group_members','event_changes','notification_logs','polls','poll_participants','poll_votes'];
 await check('every table has RLS enabled', async () => {
   const result=await q("select relname,relrowsecurity from pg_class where relnamespace='public'::regnamespace and relname=any($1::text[])",[[...TABLES,...SHARED]]);
   assert.equal(result.rows.length,TABLES.length+SHARED.length); assert.ok(result.rows.every(r=>r.relrowsecurity));
@@ -159,6 +159,9 @@ await check('group cards: organiser-only edits propagate to members and record a
   await assert.rejects(q('select * from group_events'));
   await assert.rejects(q('select * from amifree_group_counts($1)',[card.id]));
   await assert.rejects(q('select * from notification_logs'));
+  await assert.rejects(q('select * from polls'));
+  await assert.rejects(q('select * from poll_votes'));
+  await assert.rejects(q('select * from amifree_poll_tally($1)',[card.id]));
   await assert.rejects(q('select * from amifree_claim_notifications(1)'));
   await db.exec('reset role; set role service_role;');
   await q('delete from users where id=$1',[third.id]);

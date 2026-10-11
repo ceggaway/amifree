@@ -41,7 +41,7 @@ Create `.env` from `.env.example` if it does not already exist. Preserve an exis
 ### Supabase
 
 1. Create a Supabase project.
-2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `006`). Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
+2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `007`). Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
 3. Copy the project URL and backend `service_role` key into `.env`. Keep the key on the server; use neither the anon key nor a browser session. The SDK also accepts Supabase's newer backend secret key in the same configuration variable. See [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys).
 
 ```dotenv
@@ -126,12 +126,12 @@ The feed needs a public HTTPS `APP_BASE_URL`, also in polling mode. For a local 
 
 ### Personal calendar link (busy times)
 
-Sending the bot a private iCal link (Google "Secret address in iCal format", an iCloud public calendar link, or an Outlook published ICS link) connects that calendar. Its busy times then count in clash checks, Am I free? and `/whosfree`, and cards list "personal calendar" under Checked. `/calendar` shows where to find the link, the connection status and **Disconnect my calendar**.
+Sending the bot a private iCal link (Google "Secret address in iCal format", an iCloud public calendar link, or an Outlook published ICS link) connects that calendar. Each link adds a calendar, up to 5 (for example separate iCloud calendars for classes, CCA and events); sending a connected link again just refreshes it. Calendars are labelled with their own name (`X-WR-CALNAME`, e.g. "CCA"), so clashes read "Clashes with CCA calendar". Its busy times then count in clash checks, Am I free? and `/whosfree`, and cards list "personal calendar" under Checked. `/calendar` lists each connected calendar with its status and a **Remove** button, and has step-by-step guides for finding links.
 
 - **Busy times only.** `calendar_busy_blocks` has no title column; cards call them "Personal calendar". All-day, free (transparent) and cancelled events, and AmIFree's own feed, are ignored. Recurring events are expanded for the next 4 months.
 - **The link is encrypted at rest** with `CALENDAR_LINK_KEY` (blank derives a key from the bot token). Changing the key makes stored links unreadable; those users are asked to send their link again.
 - **Only Google, iCloud and Outlook hosts over HTTPS are fetched**, every redirect is re-checked, and responses are capped at 5 MB, so a pasted link can't make the server reach anything else.
-- **Refreshed hourly** by the jobs tick. A revoked link clears its busy times and `/calendar` says so; a temporary failure keeps the last good copy and retries an hour later.
+- **Refreshed hourly** by the jobs tick, each calendar on its own. A revoked link clears only that calendar's busy times and `/calendar` marks it ⚠️; a temporary failure keeps the last good copy and retries an hour later. Migration `007` moves a link connected under `006` into the new `personal_calendars` table.
 
 ### Reminders and alerts
 

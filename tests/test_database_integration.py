@@ -428,7 +428,7 @@ async def test_calendar_feed_in_postgresql():
 
 
 async def test_personal_calendar_in_postgresql():
-    from tests.test_personal_calendar import GOOGLE, FakeReader
+    from tests.test_personal_calendar import GOOGLE, ICLOUD_CCA, FakeReader
 
     async with (
         SQLGateway() as db,
@@ -441,32 +441,51 @@ async def test_personal_calendar_in_postgresql():
         )
         repo = SupabaseRepository(client)
         start = datetime.now(SG).replace(microsecond=0) + timedelta(days=2)
-        busy = [(start, start + timedelta(hours=2))]
+        dinner = (start, start + timedelta(hours=2))
+        lunch = (start + timedelta(days=1), start + timedelta(days=1, hours=1))
+        reader = FakeReader(labels={ICLOUD_CCA: "CCA"})
+        reader.per_link = {GOOGLE: [dinner], ICLOUD_CCA: [lunch]}
         service = SchedulingService(
             repo,
             QueueExtractor(),
             None,
             Settings(_env_file=None, bot_mode="disabled"),
-            calendar_reader=FakeReader(busy),
+            calendar_reader=reader,
         )
         await service.message(1, 1, GOOGLE, datetime.now(SG))
+        await service.message(1, 2, ICLOUD_CCA, datetime.now(SG))
         user = await repo.ensure_user(1)
-        assert user.personal_calendar_synced_at and "google" not in user.personal_calendar_url
-        # The table has no title column at all; the busy check labels the source itself.
+        calendars = await repo.list_calendars(user.id)
+        assert [c.label for c in calendars] == ["CCA", "Google Calendar"]
+        assert all(c.synced_at and "google" not in c.sealed_url for c in calendars)
+        # Busy-time rows have no title column at all; the calendar name labels them.
         columns = await db.query(
             "select column_name from information_schema.columns where table_name='calendar_busy_blocks'"
         )
-        assert sorted(c["column_name"] for c in columns) == ["end_at", "id", "start_at", "user_id"]
+        assert sorted(c["column_name"] for c in columns) == [
+            "calendar_id",
+            "end_at",
+            "id",
+            "start_at",
+            "user_id",
+        ]
         draft = EventDraft(
             title="Dinner", start_at=start + timedelta(hours=1), end_at=start + timedelta(hours=3)
         )
         blocks, _ = await repo.busy(user.id, draft)
-        assert [(b.title, b.source) for b in blocks] == [("Personal calendar", "CALENDAR")]
-        assert len(await repo.blocks_between(user.id, start, start + timedelta(days=1))) == 1
-        # A refresh replaces the set atomically; deleting the user removes everything.
-        await repo.replace_calendar_blocks(user.id, [], datetime.now(SG))
+        assert [(b.title, b.source) for b in blocks] == [("Google Calendar", "CALENDAR")]
+        window = await repo.blocks_between(user.id, start, start + timedelta(days=2))
+        assert sorted(b.title for b in window) == ["CCA calendar", "Google Calendar"]
+        # The same link again does not add a second row.
+        await service.message(1, 3, GOOGLE, datetime.now(SG))
+        assert len(await repo.list_calendars(user.id)) == 2
+        # Removing one calendar removes only its busy times, and only for its owner.
+        google = next(c for c in calendars if c.label == "Google Calendar")
+        assert not await repo.remove_calendar((await repo.ensure_user(2)).id, google.id)
+        assert await repo.remove_calendar(user.id, google.id)
         assert (await repo.busy(user.id, draft))[0] == []
-        await repo.replace_calendar_blocks(user.id, busy, datetime.now(SG))
+        assert len(await repo.blocks_between(user.id, start, start + timedelta(days=2))) == 1
         assert await repo.calendars_due(datetime.now(SG) + timedelta(hours=2)) != []
         await repo.delete_user(user.id)
         assert await db.query("select * from calendar_busy_blocks") == []
+        assert await db.query("select * from personal_calendars") == []

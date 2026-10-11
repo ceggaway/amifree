@@ -159,9 +159,9 @@ async def test_free_lists_gaps_around_plans_and_calendar(service_factory, refere
     card = (await service.message(1, 1, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     await service.callback(1, tap(card, "Going"))
     user = await repo.ensure_user(1)
-    repo.calendar_blocks[user.id] = [
-        (datetime(2026, 10, 9, 12, tzinfo=SG), datetime(2026, 10, 9, 14, tzinfo=SG))
-    ]
+    calendar, _ = await repo.add_calendar(user.id, "sealed", "hash", "CCA")
+    lunch = (datetime(2026, 10, 9, 12, tzinfo=SG), datetime(2026, 10, 9, 14, tzinfo=SG))
+    await repo.replace_calendar(calendar.id, [lunch], reference)
     reply = (await service.command(1, "free", "fri"))[0]
     assert "🟢 Free on Fri 9 Oct:\n• 8am – 12pm\n• 2pm – 7pm\n• 9pm – 11pm" in reply.text
 

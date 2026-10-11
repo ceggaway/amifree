@@ -182,43 +182,90 @@ async def test_fetch_failures(response, error):
 
 # ---------- in the bot ----------
 
+ICLOUD_CCA = "https://p1-caldav.icloud.com/published/2/CCA-link"
+ICLOUD_EVENTS = "https://p1-caldav.icloud.com/published/2/EVENTS-link"
+
 
 class FakeReader:
-    def __init__(self, busy=(), error=None):
-        self.result, self.error, self.calls = list(busy), error, []
+    """Stands in for the network. Each link can have its own calendar name and busy times."""
 
-    async def busy(self, link, now):
+    def __init__(self, busy=(), error=None, labels=None):
+        self.result, self.error, self.calls = list(busy), error, []
+        self.labels = labels or {}
+        self.per_link = {}
+
+    async def read(self, link, now):
+        from app.services.personal_calendar import CalendarData, fallback_label
+
         self.calls.append(link)
         if self.error:
             raise self.error
-        return self.result
+        busy = self.per_link.get(link, self.result)
+        return CalendarData(self.labels.get(link, fallback_label(link)), list(busy))
 
 
 FRIDAY_DINNER = (datetime(2026, 10, 9, 19, 30, tzinfo=SG), datetime(2026, 10, 9, 20, 30, tzinfo=SG))
+FRIDAY_LUNCH = (datetime(2026, 10, 9, 12, tzinfo=SG), datetime(2026, 10, 9, 13, tzinfo=SG))
 
 
 @pytest.fixture
 def with_calendar(service_factory):
-    def make(*items, busy=(FRIDAY_DINNER,), error=None):
+    def make(*items, busy=(FRIDAY_DINNER,), error=None, labels=None):
         service, repo = service_factory(*items)
-        service.calendar_reader = FakeReader(busy, error)
+        service.calendar_reader = FakeReader(busy, error, labels)
         return service, repo
 
     return make
 
 
+async def connected(repo, telegram_id=1):
+    return await repo.list_calendars((await repo.ensure_user(telegram_id)).id)
+
+
 async def test_pasting_a_link_connects_and_counts_busy_times(with_calendar, reference):
     service, repo = with_calendar(extraction())
     reply = (await service.message(1, 1, GOOGLE, reference))[0]
-    assert "✅ Personal calendar connected" in reply.text and "1 busy time " in reply.text
-    assert "never what the event is" in reply.text
-    user = await repo.ensure_user(1)
-    assert user.personal_calendar_url and "google" not in user.personal_calendar_url
+    assert reply.text.startswith("✅ Schedule added! I can now see when you're busy in your Google")
+    assert "forward me any plan" in reply.text and "never what your events are" in reply.text
+    [calendar] = await connected(repo)
+    assert "google" not in calendar.sealed_url and "private-abc123" not in calendar.url_hash
     card = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-    assert card.text.startswith("⚠️ Clashes with Personal calendar")
+    assert card.text.startswith("⚠️ Clashes with Google Calendar from 7:30–8:30pm")
     assert "Checked: your Going plans, busy blocks and personal calendar." in card.text
-    # The card names the source, never what the event in their calendar actually is.
-    assert "• Personal calendar: 09 Oct 19:30–20:30" in card.text
+
+
+async def test_several_calendars_are_all_checked(with_calendar, reference):
+    service, repo = with_calendar(extraction(), labels={ICLOUD_CCA: "CCA", ICLOUD_EVENTS: "Events"})
+    service.calendar_reader.per_link = {ICLOUD_CCA: [FRIDAY_DINNER], ICLOUD_EVENTS: [FRIDAY_LUNCH]}
+    first = (await service.message(1, 1, ICLOUD_CCA, reference))[0]
+    assert "your CCA calendar" in first.text
+    second = (await service.message(1, 2, ICLOUD_EVENTS, reference))[0]
+    assert second.text.startswith("✅ Added your Events calendar. I'm now checking 2 calendars.")
+    assert [c.label for c in await connected(repo)] == ["CCA", "Events"]
+    card = (await service.message(1, 3, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
+    assert card.text.startswith("⚠️ Clashes with CCA calendar from 7:30–8:30pm")
+    free = (await service.command(1, "free", "fri"))[0]
+    assert "• 8am – 12pm\n• 1pm – 7:30pm\n• 8:30pm – 11pm" in free.text  # both calendars
+
+
+async def test_sending_the_same_link_again_refreshes_instead_of_duplicating(
+    with_calendar, reference
+):
+    service, repo = with_calendar(labels={ICLOUD_CCA: "CCA"})
+    await service.message(1, 1, ICLOUD_CCA, reference)
+    again = (await service.message(1, 2, ICLOUD_CCA, reference))[0]
+    assert "already connected" in again.text
+    assert len(await connected(repo)) == 1
+
+
+async def test_at_most_five_calendars(with_calendar, reference):
+    service, repo = with_calendar()
+    for n in range(5):
+        await service.message(1, n, f"https://p1-caldav.icloud.com/published/2/cal-{n}", reference)
+    sixth = (
+        await service.message(1, 9, "https://p1-caldav.icloud.com/published/2/cal-9", reference)
+    )[0]
+    assert "the most I check" in sixth.text and len(await connected(repo)) == 5
 
 
 async def test_a_bad_link_is_explained_and_not_saved(with_calendar, reference):
@@ -227,42 +274,74 @@ async def test_a_bad_link_is_explained_and_not_saved(with_calendar, reference):
     )
     reply = (await service.message(1, 1, GOOGLE, reference))[0]
     assert "doesn't work any more" in reply.text
-    assert not (await repo.ensure_user(1)).personal_calendar_url
+    assert await connected(repo) == []
 
 
-async def test_calendar_screen_shows_status_and_disconnect(with_calendar, reference):
-    service, repo = with_calendar()
+async def test_calendar_screen_lists_each_calendar_with_remove(with_calendar, reference):
+    service, repo = with_calendar(labels={ICLOUD_CCA: "CCA", ICLOUD_EVENTS: "Events"})
     replies = await service.command(1, "calendar")
-    assert "Secret address in iCal format" in replies[-1].text  # not connected: where to find it
-    await service.message(1, 1, GOOGLE, reference)
+    google = (await service.callback(1, tap(replies[-1], "📅 Google")))[0]
+    assert "Secret address in iCal format" in google.text and google.edit  # step-by-step guide
+    await service.message(1, 1, ICLOUD_CCA, reference)
+    await service.message(1, 2, ICLOUD_EVENTS, reference)
     status = (await service.command(1, "calendar"))[-1]
-    assert "✅ Connected" in status.text
-    gone = (await service.callback(1, tap(status, "Disconnect my calendar")))[0]
-    assert "deleted its link and every busy time" in gone.text
-    user = await repo.ensure_user(1)
-    assert user.personal_calendar_url is None and not repo.calendar_blocks.get(user.id)
+    assert "• CCA · refreshed" in status.text and "• Events · refreshed" in status.text
+    assert "3 more allowed" in status.text
+    removed = (await service.callback(1, tap(status, "Remove CCA")))[0]
+    assert removed.edit and removed.text.startswith("Removed CCA")
+    assert "• Events" in removed.text and "• CCA" not in removed.text
+    assert [c.label for c in await connected(repo)] == ["Events"]
+    assert "already removed" in (await service.callback(1, tap(status, "Remove CCA")))[0].text
+
+
+async def test_removing_one_calendar_keeps_the_others_busy_times(with_calendar, reference):
+    service, repo = with_calendar(extraction(), labels={ICLOUD_CCA: "CCA", ICLOUD_EVENTS: "Events"})
+    service.calendar_reader.per_link = {ICLOUD_CCA: [FRIDAY_DINNER], ICLOUD_EVENTS: [FRIDAY_LUNCH]}
+    await service.message(1, 1, ICLOUD_CCA, reference)
+    await service.message(1, 2, ICLOUD_EVENTS, reference)
+    cca = next(c for c in await connected(repo) if c.label == "CCA")
+    await service.callback(1, f"pcal:rm:{cca.id}")
+    card = (await service.message(1, 3, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
+    assert card.text.startswith("✅ No clashes found")  # the dinner clash was the CCA calendar's
+
+
+async def test_other_people_cannot_remove_your_calendar(with_calendar, reference):
+    service, repo = with_calendar()
+    await service.message(1, 1, GOOGLE, reference)
+    [mine] = await connected(repo)
+    assert "already removed" in (await service.callback(2, f"pcal:rm:{mine.id}"))[0].text
+    assert len(await connected(repo)) == 1
 
 
 async def test_hourly_refresh(with_calendar, reference):
     service, repo = with_calendar()
     await service.message(1, 1, GOOGLE, reference)
-    user_id = (await repo.ensure_user(1)).id
+    [calendar] = await connected(repo)
     assert await service.refresh_calendars() == 0  # just synced
     service.calendar_reader.result = []  # the event was deleted in their calendar
     service.clock = lambda: reference + timedelta(hours=1, minutes=1)
     assert await service.refresh_calendars() == 1
-    assert repo.calendar_blocks[user_id] == []
+    assert repo.calendar_blocks[calendar.id] == []
 
 
-async def test_revoked_link_clears_busy_times_and_says_so(with_calendar, reference):
-    service, repo = with_calendar()
-    await service.message(1, 1, GOOGLE, reference)
-    user_id = (await repo.ensure_user(1)).id
-    service.calendar_reader.error = CalendarLinkGone("That calendar link doesn't work any more.")
+async def test_one_broken_calendar_does_not_affect_the_others(with_calendar, reference):
+    service, repo = with_calendar(labels={ICLOUD_CCA: "CCA", ICLOUD_EVENTS: "Events"})
+    await service.message(1, 1, ICLOUD_CCA, reference)
+    await service.message(1, 2, ICLOUD_EVENTS, reference)
+
+    async def read(link, now, original=service.calendar_reader.read):
+        if link == ICLOUD_CCA:
+            raise CalendarLinkGone("That calendar link doesn't work any more.")
+        return await original(link, now)
+
+    service.calendar_reader.read = read
     service.clock = lambda: reference + timedelta(hours=2)
-    await service.refresh_calendars()
-    assert repo.calendar_blocks[user_id] == []
-    assert "doesn't work any more" in (await service.command(1, "calendar"))[-1].text
+    assert await service.refresh_calendars() == 2
+    by_label = {c.label: c for c in await connected(repo)}
+    assert repo.calendar_blocks[by_label["CCA"].id] == []  # revoked: busy times cleared
+    assert repo.calendar_blocks[by_label["Events"].id] == [FRIDAY_DINNER]
+    status = (await service.command(1, "calendar"))[-1]
+    assert "• CCA: ⚠️ That calendar link doesn't work any more." in status.text
     # Not retried every minute: the next try is an hour later.
     service.clock = lambda: reference + timedelta(hours=2, minutes=5)
     assert await service.refresh_calendars() == 0
@@ -271,11 +350,11 @@ async def test_revoked_link_clears_busy_times_and_says_so(with_calendar, referen
 async def test_a_temporary_outage_keeps_the_last_good_copy(with_calendar, reference):
     service, repo = with_calendar()
     await service.message(1, 1, GOOGLE, reference)
-    user_id = (await repo.ensure_user(1)).id
+    [calendar] = await connected(repo)
     service.calendar_reader.error = CalendarLinkError("I couldn't reach your calendar just now.")
     service.clock = lambda: reference + timedelta(hours=2)
     await service.refresh_calendars()
-    assert repo.calendar_blocks[user_id] == [FRIDAY_DINNER]
+    assert repo.calendar_blocks[calendar.id] == [FRIDAY_DINNER]
 
 
 async def test_changed_encryption_key_asks_for_the_link_again(with_calendar, reference):
@@ -286,9 +365,9 @@ async def test_changed_encryption_key_asks_for_the_link_again(with_calendar, ref
     )
     service.clock = lambda: reference + timedelta(hours=2)
     await service.refresh_calendars()
-    user = await repo.ensure_user(1)
-    assert user.personal_calendar_url is None
-    assert "send me your calendar link again" in (await service.command(1, "calendar"))[-1].text
+    [calendar] = await connected(repo)
+    assert repo.calendar_blocks[calendar.id] == []
+    assert "send me this calendar's link again" in (await service.command(1, "calendar"))[-1].text
 
 
 async def test_jobs_tick_refreshes_calendars(with_calendar, reference):
@@ -303,3 +382,13 @@ async def test_jobs_tick_refreshes_calendars(with_calendar, reference):
 
     result = await Notifier(service, send).run()
     assert result["calendars"] == 1
+
+
+def test_calendar_names_come_from_the_calendar_itself():
+    from app.services.personal_calendar import calendar_label
+
+    named = ics(extra="X-WR-CALNAME:CCA\n")
+    assert calendar_label(named, ICLOUD_CCA) == "CCA"
+    assert calendar_label(ics(), ICLOUD_CCA) == "iPhone calendar"
+    email = ics(extra="X-WR-CALNAME:angel@gmail.com\n")
+    assert calendar_label(email, GOOGLE) == "Google Calendar"

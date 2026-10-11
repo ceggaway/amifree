@@ -4,9 +4,13 @@ The user pastes their calendar's private iCal address once. AmIFree keeps only t
 intervals, never titles, places, notes or attendees, and stores the link encrypted.
 """
 
+from __future__ import annotations
+
 import base64
 import hashlib
+import hmac
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit, urlunsplit
 
@@ -85,6 +89,11 @@ def cipher(secret: str) -> Fernet:
 
 def seal(link: str, secret: str) -> str:
     return cipher(secret).encrypt(link.encode()).decode()
+
+
+def link_hash(link: str, secret: str) -> str:
+    """Spots the same link sent twice without storing anything that reveals it."""
+    return hmac.new(secret.encode(), normalise(link).encode(), hashlib.sha256).hexdigest()
 
 
 def unseal(token: str, secret: str) -> str | None:
@@ -186,8 +195,42 @@ class CalendarReader:
             return bytes(body)
         raise CalendarLinkError("That link redirected too many times.")
 
+    async def read(self, link: str, now: datetime) -> CalendarData:
+        data = await self.fetch(link)
+        busy = busy_intervals(data, now - WINDOW_PAST, now + WINDOW_AHEAD)
+        return CalendarData(calendar_label(data, link), busy)
+
     async def busy(self, link: str, now: datetime) -> list[tuple[datetime, datetime]]:
-        return busy_intervals(await self.fetch(link), now - WINDOW_PAST, now + WINDOW_AHEAD)
+        return (await self.read(link, now)).busy
+
+
+MAX_CALENDARS = 5
+
+
+def fallback_label(link: str) -> str:
+    host = (urlsplit(link).hostname or "").lower()
+    if host.endswith("icloud.com"):
+        return "iPhone calendar"
+    if host.endswith("google.com"):
+        return "Google Calendar"
+    return "Outlook calendar"
+
+
+def calendar_label(data: bytes, link: str) -> str:
+    """The calendar's own name ("CCA", "Events"): its name only, never an event's."""
+    try:
+        name = str(icalendar.Calendar.from_ical(data).get("X-WR-CALNAME", ""))
+    except Exception:
+        name = ""
+    name = " ".join(name.split())[:40]
+    # Google often names the main calendar after the account's email address.
+    return name if name and "@" not in name else fallback_label(link)
+
+
+@dataclass(frozen=True)
+class CalendarData:
+    label: str
+    busy: list
 
 
 def window_covers(synced_at: datetime | None, start: datetime, end: datetime) -> bool:

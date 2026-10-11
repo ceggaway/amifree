@@ -9,13 +9,14 @@ from datetime import datetime, timedelta
 from datetime import time as day_time
 from uuid import UUID
 
+from app.bot import onboarding
 from app.bot.keyboards import (
     calendar_settings_keyboard,
     choose_keyboard,
     confirm_keyboard,
     free_keyboard,
     page_keyboard,
-    personal_calendar_keyboard,
+    personal_calendars_keyboard,
     remove_block_keyboard,
 )
 from app.bot.messages import (
@@ -44,13 +45,16 @@ from app.services.event_updates import match_updates
 from app.services.free_time import free_gaps, parse_free, weekend
 from app.services.group_events import GroupEventService
 from app.services.personal_calendar import (
+    MAX_CALENDARS,
     CalendarLinkError,
     CalendarLinkGone,
     find_link,
+    link_hash,
     seal,
     unseal,
     window_covers,
 )
+from app.services.personal_calendar import URL as CALENDAR_URL
 from app.services.polls import PollService
 from app.services.quick_blocks import MAX_RULES, USAGE, describe, parse_block
 
@@ -140,8 +144,9 @@ class SchedulingService:
             coverage_end=user.coverage_end,
             busy_day_threshold=self.settings.busy_day_threshold,
         )
-        if user.personal_calendar_url and user.personal_calendar_synced_at:
-            seen = window_covers(user.personal_calendar_synced_at, event.start_at, event.end_at)
+        synced = [c.synced_at for c in await self.repo.list_calendars(user.id) if c.synced_at]
+        if synced:
+            seen = window_covers(min(synced), event.start_at, event.end_at)
             result = replace(
                 result, personal=seen, nusmods=result.covered, covered=result.covered or seen
             )
@@ -165,17 +170,21 @@ class SchedulingService:
                 await self.repo.set_user_flags(user.id, dm_blocked=False)
             if args.startswith(("edit_", "cancel_")):
                 return await self.groups.begin_change(user, args)
+            connected = []
             if user.onboarding_status == "READY":
+                connected.append(f"NUSMods ({user.academic_year}, semester {user.semester})")
+            calendars = await self.repo.list_calendars(user.id)
+            if calendars:
+                names = ", ".join(c.label for c in calendars)
+                connected.append(f"your calendar{'s' if len(calendars) > 1 else ''} ({names})")
+            if connected:
                 return [
                     Reply(
-                        f"You're ready. Timetable: {user.academic_year}, semester {user.semester}.\nForward me a plan and tap Save. Send a fresh NUSMods link to replace your timetable.\n/plans lists what you've saved. /help for commands."
+                        "You're all set ✅ Forward me a plan, or use /plans · /free · /calendar"
+                        "\nChecking: " + " and ".join(connected) + "."
                     )
                 ]
-            return [
-                Reply(
-                    "Forward me a plan and I'll save it and tell you if it clashes.\n\nOptional: send your NUSMods Share/Sync link so your classes and exams are checked too.\nI only act on what you send me, commands and button taps. /help for more."
-                )
-            ]
+            return [Reply(onboarding.WELCOME, onboarding.welcome_keyboard())]
         if command == "cancel":
             await self.repo.set_pending(user.id, None)
             return [Reply("Pending action cleared. Forward an event when you're ready.")]
@@ -293,11 +302,10 @@ class SchedulingService:
         if "nusmods.com" in text.lower() and text.strip().startswith(("http://", "https://")):
             result = await self.importer.import_link(text.strip(), reference)
             await self.repo.import_timetable(user.id, result)
-            return [
-                Reply(
-                    f"Setup complete. Imported {len(result.blocks)} class/exam busy periods for {result.academic_year}, semester {result.semester}.\nCoverage: {result.coverage_start:%d %b %Y}–{result.coverage_end:%d %b %Y}.\nForward me a plan. I check this timetable, your busy blocks and your Going plans."
-                )
-            ]
+            return [Reply(onboarding.nusmods_added(result.academic_year, result.semester))]
+        if CALENDAR_URL.fullmatch(text.strip()):
+            # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
+            return [Reply(onboarding.NOT_A_SCHEDULE_LINK)]
         pending = user.pending
         if pending and pending["stage"] in ("confirm", "choose", "delete", "block"):
             return [
@@ -599,7 +607,7 @@ class SchedulingService:
             else:
                 parts.append(f"🔴 No free time on {label} between 8am and 11pm.")
         sources = ["your Going and Saved plans", "busy blocks"]
-        if user.personal_calendar_url and user.personal_calendar_synced_at:
+        if any(c.synced_at for c in await self.repo.list_calendars(user.id)):
             sources.append("personal calendar")
         if user.coverage_start:
             sources.append("NUSMods timetable")
@@ -614,7 +622,7 @@ class SchedulingService:
 
     async def calendar_setup(self, user: User, intro: str = "") -> list[Reply]:
         """/calendar: AmIFree → your calendar (feed), then your calendar → AmIFree (busy)."""
-        return [await self.feed_setup(user, intro), self.personal_calendar_status(user)]
+        return [await self.feed_setup(user, intro), await self.personal_calendar_status(user)]
 
     async def feed_setup(self, user: User, intro: str = "") -> Reply:
         if not self.settings.app_base_url:
@@ -659,64 +667,101 @@ class SchedulingService:
             or "amifree-development-only"
         )
 
-    def personal_calendar_status(self, user: User) -> Reply:
-        problem = f"\n⚠️ {user.personal_calendar_error}" if user.personal_calendar_error else ""
-        if user.personal_calendar_url:
-            synced = user.personal_calendar_synced_at
-            when = f"refreshed {synced.astimezone(SG):%-d %b, %-I:%M%p}" if synced else "connecting"
+    async def personal_calendar_status(self, user: User) -> Reply:
+        calendars = await self.repo.list_calendars(user.id)
+        if not calendars:
             return Reply(
-                f"📥 Your calendar → AmIFree\n✅ Connected ({when}). Its busy times count in "
-                "clash checks, Am I free? and /whosfree, and I refresh it every hour. I keep only "
-                "start and end times, never what the event is."
-                + problem
-                + "\n\nSend me a new link any time to replace it.",
-                personal_calendar_keyboard(),
+                "📥 Let AmIFree see when you're busy\n"
+                "Send me your calendar's private link and its busy times will count when I "
+                "check your plans and /free. Use several calendars? Send each link. I keep "
+                "only start and end times, never titles, places or notes.\n\n"
+                "Not sure where to find it? Pick your calendar and I'll show you step by step.",
+                onboarding.pick_calendar_keyboard(),
             )
+        lines = []
+        for c in calendars:
+            if c.error:
+                lines.append(f"• {c.label}: ⚠️ {c.error}")
+            elif c.synced_at:
+                lines.append(
+                    f"• {c.label} · refreshed {clock(c.synced_at)}, {c.synced_at.astimezone(SG):%-d %b}"
+                )
+            else:
+                lines.append(f"• {c.label} · connecting")
+        room = MAX_CALENDARS - len(calendars)
+        more = (
+            f"Paste another calendar's link to add it ({room} more allowed)."
+            if room > 0
+            else f"That's the most I check ({MAX_CALENDARS}). Remove one to add another."
+        )
         return Reply(
-            "📥 Let AmIFree see when you're busy\n"
-            "Send me your calendar's private link and its busy times will count in clash "
-            "checks, Am I free? and /whosfree. I keep only start and end times, never titles, "
-            "places or notes." + problem + "\n\nWhere to find the link:"
-            "\n• Google Calendar (on a computer): ⚙️ Settings → click your calendar → "
-            "Integrate calendar → Secret address in iCal format → copy."
-            "\n• iPhone / iCloud: Calendar app → Calendars → ⓘ next to a calendar → turn on "
-            "Public Calendar → Share Link → Copy. Anyone with that link can view that calendar."
-            "\n• Outlook: Settings → Calendar → Shared calendars → Publish a calendar → "
-            "copy the ICS link."
+            "📥 Calendars I check for busy times\n"
+            + "\n".join(lines)
+            + f"\n\n{more} I refresh them every hour and keep only when you're busy, never "
+            "what your events are.",
+            personal_calendars_keyboard(calendars),
         )
 
     async def connect_calendar(self, user: User, link: str) -> list[Reply]:
         if self.calendar_reader is None:
             return [Reply("Reading calendar links isn't available right now.")]
+        digest = link_hash(link, self.link_secret)
+        calendars = await self.repo.list_calendars(user.id)
+        known = any(c.url_hash == digest for c in calendars)
+        if not known and len(calendars) >= MAX_CALENDARS:
+            return [
+                Reply(
+                    f"You've connected {MAX_CALENDARS} calendars, the most I check. Remove one "
+                    "in /calendar first."
+                )
+            ]
         now = self.clock()
         try:
-            busy = await self.calendar_reader.busy(link, now)
+            data = await self.calendar_reader.read(link, now)
         except CalendarLinkError as exc:
             return [Reply(str(exc))]
-        await self.repo.set_personal_calendar(user.id, seal(link, self.link_secret))
-        await self.repo.replace_calendar_blocks(user.id, busy, now)
-        await self.safe_action(user.id, "personal_calendar_connected", metadata={"busy": len(busy)})
-        found = (
-            f"I found {len(busy)} busy time{'s' if len(busy) != 1 else ''} in the next 4 months"
-            if busy
-            else "I didn't find any busy times in the next 4 months. If that's wrong, check you "
-            "shared the right calendar"
+        calendar, new = await self.repo.add_calendar(
+            user.id, seal(link, self.link_secret), digest, data.label
         )
-        return [
-            Reply(
-                f"✅ Personal calendar connected. {found}.\n\nThey now count in clash checks, "
-                "Am I free? and /whosfree. I keep only start and end times, never what the "
-                "event is, and refresh it every hour. /calendar to disconnect."
-            )
-        ]
+        await self.repo.replace_calendar(calendar.id, data.busy, now)
+        await self.safe_action(
+            user.id, "personal_calendar_connected", metadata={"busy": len(data.busy), "new": new}
+        )
+        if not new:
+            return [
+                Reply(f"✅ {calendar.label} was already connected. I've refreshed it just now.")
+            ]
+        total = len(calendars) + 1
+        if total == 1:
+            return [Reply(onboarding.calendar_added(calendar.label, len(data.busy)))]
+        return [Reply(onboarding.another_calendar_added(calendar.label, total))]
+
+    async def remove_calendar(self, user: User, calendar_id: str) -> list[Reply]:
+        try:
+            UUID(calendar_id)
+        except ValueError:
+            return [Reply("That button isn't valid. Use /calendar.")]
+        calendars = {c.id: c for c in await self.repo.list_calendars(user.id)}
+        if calendar_id not in calendars or not await self.repo.remove_calendar(
+            user.id, calendar_id
+        ):
+            return [Reply("That calendar is already removed. Use /calendar to see what's left.")]
+        await self.safe_action(user.id, "personal_calendar_disconnected")
+        status = await self.personal_calendar_status(user)
+        removed = (
+            f"Removed {calendars[calendar_id].label}. I've deleted its link and every busy time I "
+            "read from it."
+        )
+        return [Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True)]
 
     async def disconnect_calendar(self, user: User) -> list[Reply]:
-        await self.repo.set_personal_calendar(user.id, None)
+        for c in await self.repo.list_calendars(user.id):
+            await self.repo.remove_calendar(user.id, c.id)
         await self.safe_action(user.id, "personal_calendar_disconnected")
         return [
             Reply(
-                "Personal calendar disconnected. I've deleted its link and every busy time I "
-                "read from it."
+                "All calendars disconnected. I've deleted their links and every busy time I "
+                "read from them."
             )
         ]
 
@@ -726,28 +771,28 @@ class SchedulingService:
             return 0
         now = self.clock()
         due = await self.repo.calendars_due(now - CALENDAR_REFRESH, limit)
-        for user in due:
-            link = unseal(user.personal_calendar_url, self.link_secret)
+        for calendar in due:
+            link = unseal(calendar.sealed_url, self.link_secret)
             if link is None:
-                # The encryption key changed: the stored link can't be read, so drop it.
-                await self.repo.set_personal_calendar(user.id, None)
+                # The encryption key changed, so the stored link can't be read any more.
+                await self.repo.replace_calendar(calendar.id, [], now)
                 await self.repo.calendar_error(
-                    user.id, "Please send me your calendar link again.", now
+                    calendar.id, "Please send me this calendar's link again.", now
                 )
                 continue
             try:
-                busy = await self.calendar_reader.busy(link, now)
+                data = await self.calendar_reader.read(link, now)
             except CalendarLinkGone as exc:
                 # A revoked link must not leave stale busy times behind.
-                await self.repo.replace_calendar_blocks(user.id, [], now)
-                await self.repo.calendar_error(user.id, str(exc), now)
+                await self.repo.replace_calendar(calendar.id, [], now)
+                await self.repo.calendar_error(calendar.id, str(exc), now)
             except CalendarLinkError as exc:
-                await self.repo.calendar_error(user.id, str(exc), now)  # keep last good copy
+                await self.repo.calendar_error(calendar.id, str(exc), now)  # keep last good copy
             except Exception as exc:
                 log.warning("calendar_refresh_failed error_type=%s", type(exc).__name__)
-                await self.repo.calendar_error(user.id, "I couldn't refresh it just now.", now)
+                await self.repo.calendar_error(calendar.id, "I couldn't refresh it just now.", now)
             else:
-                await self.repo.replace_calendar_blocks(user.id, busy, now)
+                await self.repo.replace_calendar(calendar.id, data.busy, now)
         return len(due)
 
     async def calendar_change(self, user: User, change: str) -> list[Reply]:
@@ -814,6 +859,12 @@ class SchedulingService:
             return await self.list_events(user, int(page), plans=prefix == "plans")
         parts = data.split(":")
         action = parts[0]
+        if data.startswith("setup:"):
+            found = onboarding.screen(data.removeprefix("setup:"))
+            if found is None:
+                return [Reply("That button isn't valid. Send /start.")]
+            text, keyboard = found
+            return [Reply(text, keyboard, edit=True)]
         if data in ("free:today", "free:tomorrow", "free:weekend"):
             today = self.clock().astimezone(SG).date()
             days = {
@@ -825,6 +876,8 @@ class SchedulingService:
             return [Reply(reply.text, edit=True)]
         if data == "pcal:off":
             return await self.disconnect_calendar(user)
+        if data.startswith("pcal:rm:"):
+            return await self.remove_calendar(user, data.removeprefix("pcal:rm:"))
         if action == "cal" and len(parts) == 2 and parts[1] in ("reset", "off"):
             return await self.calendar_change(user, parts[1])
         if action == "ics" and len(parts) == 2:

@@ -195,7 +195,10 @@ async def test_clear_draft_and_unknown_message(service_factory, reference):
 
 async def test_new_user_saves_without_nusmods(service_factory, reference):
     service, repo = service_factory(extraction())
-    assert "Optional" in (await service.command(1, "start"))[0].text
+    assert (
+        "paste your NUSMods or personal calendar link"
+        in (await service.command(1, "start"))[0].text
+    )
     card = (await service.message(1, 2, TEXT, reference))[0]
     assert card.text.startswith("✅ No clashes found")
     assert "No NUSMods timetable covers this date" in card.text

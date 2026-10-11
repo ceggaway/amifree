@@ -155,10 +155,14 @@ def free_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def personal_calendar_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Disconnect my calendar", callback_data="pcal:off")]]
-    )
+def personal_calendars_keyboard(calendars) -> InlineKeyboardMarkup:
+    """One Remove button per connected calendar, then help adding another."""
+    rows = [
+        [InlineKeyboardButton(f"Remove {c.label[:30]}", callback_data=f"pcal:rm:{c.id}")]
+        for c in calendars
+    ]
+    rows.append([InlineKeyboardButton("How do I add another?", callback_data="setup:calendar")])
+    return InlineKeyboardMarkup(rows)
 
 
 def calendar_keyboard(event: Event, google_url: str) -> InlineKeyboardMarkup:

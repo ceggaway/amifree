@@ -24,6 +24,7 @@ RPC_PARAMS = {
     "amifree_rsvp": ["p_user_id", "p_event_id", "p_status", "p_version"],
     "amifree_update_event": ["p_user_id", "p_event_id", "p_draft", "p_version", "p_cancel"],
     "amifree_cleanup": ["p_retention_days"],
+    "amifree_replace_calendar_blocks": ["p_user_id", "p_blocks", "p_synced_at"],
     "amifree_save": ["p_user_id", "p_event_id", "p_version"],
     "amifree_create_group_event": ["p_user_id", "p_chat_id", "p_source_message_id", "p_draft"],
     "amifree_touch_member": ["p_chat_id", "p_user_id"],
@@ -56,6 +57,7 @@ RPC_PARAMS = {
 }
 VOID_RPCS = {
     "amifree_cleanup",
+    "amifree_replace_calendar_blocks",
     "amifree_import_timetable",
     "amifree_touch_member",
     "amifree_finish_notification",
@@ -63,6 +65,7 @@ VOID_RPCS = {
 SCALAR_RPCS = {"amifree_enqueue_notification", "amifree_poll_join", "amifree_poll_vote"}
 TABLES = {
     "users",
+    "calendar_busy_blocks",
     "events",
     "timetable_blocks",
     "event_extractions",
@@ -78,6 +81,12 @@ TABLES = {
 }
 COLUMNS = {
     "id",
+    "calendar_feed_token",
+    "calendar_feed_seen_at",
+    "personal_calendar_url",
+    "personal_calendar_synced_at",
+    "personal_calendar_error",
+    "personal_calendar_checked_at",
     "user_id",
     "status",
     "start_at",

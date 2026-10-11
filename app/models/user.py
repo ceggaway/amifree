@@ -15,3 +15,9 @@ class User(BaseModel):
     pending: dict | None = None
     reminders_enabled: bool = True
     dm_blocked: bool = False
+    calendar_feed_token: str | None = None
+    calendar_feed_seen_at: datetime | None = None
+    personal_calendar_url: str | None = None  # encrypted
+    personal_calendar_synced_at: datetime | None = None
+    personal_calendar_error: str | None = None
+    personal_calendar_checked_at: datetime | None = None

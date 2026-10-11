@@ -386,3 +386,87 @@ async def test_polls_in_postgresql(reference):
         await repo.delete_user(member.id)
         assert await repo.poll_tally(poll.id) == {(0, "MAYBE"): 1}
         assert await repo.poll_participants(poll.id) == [organiser.id]
+
+
+async def test_calendar_feed_in_postgresql():
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        service = SchedulingService(
+            repo,
+            QueueExtractor(),
+            None,
+            Settings(_env_file=None, bot_mode="disabled", app_base_url="https://amifree.example"),
+        )
+        user = await repo.ensure_user(1)
+        start = datetime.now(SG) + timedelta(days=3)
+        event = await repo.create_preview(
+            user.id,
+            1,
+            EventDraft(title="Hall supper", start_at=start, end_at=start + timedelta(hours=1)),
+        )
+        await repo.rsvp(user.id, event, Status.GOING)
+        reply = (await service.command(1, "calendar"))[0]
+        token = reply.text.split("/cal/")[1].split(".ics")[0]
+        assert (await repo.ensure_user(1)).calendar_feed_token == token
+        assert "SUMMARY:Hall supper" in (await service.calendar_feed(token)).decode()
+        assert (await repo.ensure_user(1)).calendar_feed_seen_at is not None
+        # The token must be long: the database refuses a short, guessable one.
+        from postgrest.exceptions import APIError
+
+        with pytest.raises((APIError, RuntimeError)):  # Supabase / the local test gateway
+            await repo.set_feed_token(user.id, "short")
+        await repo.set_feed_token(user.id, None)
+        assert await service.calendar_feed(token) is None
+
+
+async def test_personal_calendar_in_postgresql():
+    from tests.test_personal_calendar import GOOGLE, FakeReader
+
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        start = datetime.now(SG).replace(microsecond=0) + timedelta(days=2)
+        busy = [(start, start + timedelta(hours=2))]
+        service = SchedulingService(
+            repo,
+            QueueExtractor(),
+            None,
+            Settings(_env_file=None, bot_mode="disabled"),
+            calendar_reader=FakeReader(busy),
+        )
+        await service.message(1, 1, GOOGLE, datetime.now(SG))
+        user = await repo.ensure_user(1)
+        assert user.personal_calendar_synced_at and "google" not in user.personal_calendar_url
+        # The table has no title column at all; the busy check labels the source itself.
+        columns = await db.query(
+            "select column_name from information_schema.columns where table_name='calendar_busy_blocks'"
+        )
+        assert sorted(c["column_name"] for c in columns) == ["end_at", "id", "start_at", "user_id"]
+        draft = EventDraft(
+            title="Dinner", start_at=start + timedelta(hours=1), end_at=start + timedelta(hours=3)
+        )
+        blocks, _ = await repo.busy(user.id, draft)
+        assert [(b.title, b.source) for b in blocks] == [("Personal calendar", "CALENDAR")]
+        assert len(await repo.blocks_between(user.id, start, start + timedelta(days=1))) == 1
+        # A refresh replaces the set atomically; deleting the user removes everything.
+        await repo.replace_calendar_blocks(user.id, [], datetime.now(SG))
+        assert (await repo.busy(user.id, draft))[0] == []
+        await repo.replace_calendar_blocks(user.id, busy, datetime.now(SG))
+        assert await repo.calendars_due(datetime.now(SG) + timedelta(hours=2)) != []
+        await repo.delete_user(user.id)
+        assert await db.query("select * from calendar_busy_blocks") == []

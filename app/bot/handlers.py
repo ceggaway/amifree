@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 from app.bot.delivery import webhook_delivery
-from app.bot.messages import Reply
+from app.bot.messages import Reply, send_reply
 from app.services.jobs import Notifier, Undeliverable
 from app.services.nusmods import ImportError
 
@@ -30,7 +30,7 @@ async def send(update: Update, replies: list[Reply]):
         await delivery.flush(update)
         return
     for reply in replies:
-        await update.effective_message.reply_text(reply.text, reply_markup=reply.keyboard)
+        await send_reply(update, reply)
 
 
 async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation: str):
@@ -257,6 +257,8 @@ def register_handlers(application: Application, service):
                 "block",
                 "blocks",
                 "reminders",
+                "calendar",
+                "free",
                 "cancel",
                 "delete",
                 "deletemydata",

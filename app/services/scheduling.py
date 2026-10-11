@@ -4,21 +4,36 @@ import logging
 import secrets
 import time
 from collections.abc import Callable
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timedelta
+from datetime import time as day_time
 from uuid import UUID
 
 from app.bot.keyboards import (
+    calendar_settings_keyboard,
     choose_keyboard,
     confirm_keyboard,
+    free_keyboard,
     page_keyboard,
+    personal_calendar_keyboard,
     remove_block_keyboard,
 )
-from app.bot.messages import HELP, Reply, details, event_card
+from app.bot.messages import (
+    HELP,
+    Reply,
+    checked_line,
+    clock,
+    details,
+    event_card,
+    time_range,
+    verdict_line,
+)
 from app.config import Settings
 from app.models.timetable import BlockRule
 from app.models.user import User
 from app.schemas.event import SG, Event, EventDraft, Extraction, GroupEvent, Status
 from app.services.availability import check_availability
+from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
     Clarification,
     single_event_guard,
@@ -26,11 +41,39 @@ from app.services.date_resolution import (
 )
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
+from app.services.free_time import free_gaps, parse_free, weekend
 from app.services.group_events import GroupEventService
+from app.services.personal_calendar import (
+    CalendarLinkError,
+    CalendarLinkGone,
+    find_link,
+    seal,
+    unseal,
+    window_covers,
+)
 from app.services.polls import PollService
 from app.services.quick_blocks import MAX_RULES, USAGE, describe, parse_block
 
 log = logging.getLogger(__name__)
+
+
+FEED_PAST, FEED_AHEAD = timedelta(days=30), timedelta(days=400)
+FEED_SEEN_EVERY = timedelta(minutes=10)
+CALENDAR_REFRESH = timedelta(hours=1)
+# Link previews fetch the feed too; they must not count as the user's calendar subscribing.
+PREVIEW_BOTS = ("telegrambot", "whatsapp", "facebookexternalhit", "slackbot", "discordbot")
+
+
+def synced(user: User) -> bool:
+    return bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+
+
+def decided_card(event: Event, availability, note: str, user: User) -> Reply:
+    """The tapped card, updated in place: same verdict and details, new status and buttons."""
+    card = event_card(event, availability, synced(user))
+    if event.status in (Status.SAVED, Status.GOING) and not user.calendar_feed_token:
+        note += "\nTip: /calendar puts every plan in your iPhone calendar automatically."
+    return Reply(f"{card.text}\n{note}", card.keyboard, edit=True)
 
 
 class SchedulingService:
@@ -42,6 +85,7 @@ class SchedulingService:
         settings: Settings,
         *,
         clock: Callable[[], datetime] | None = None,
+        calendar_reader=None,
     ):
         self.repo, self.extractor, self.importer, self.settings = (
             repository,
@@ -50,6 +94,8 @@ class SchedulingService:
             settings,
         )
         self.clock = clock or (lambda: datetime.now(SG))
+        # Reads personal calendar links; None where no network is available (most tests).
+        self.calendar_reader = calendar_reader
         self.groups = GroupEventService(self)
         self.polls = PollService(self)
         # Set by the bot layer: re-renders a group card after its headcount changes.
@@ -85,7 +131,7 @@ class SchedulingService:
 
     async def availability(self, user: User, event: EventDraft, exclude: str | None = None):
         blocks, events = await self.repo.busy(user.id, event)
-        return check_availability(
+        result = check_availability(
             event,
             blocks,
             events,
@@ -94,6 +140,12 @@ class SchedulingService:
             coverage_end=user.coverage_end,
             busy_day_threshold=self.settings.busy_day_threshold,
         )
+        if user.personal_calendar_url and user.personal_calendar_synced_at:
+            seen = window_covers(user.personal_calendar_synced_at, event.start_at, event.end_at)
+            result = replace(
+                result, personal=seen, nusmods=result.covered, covered=result.covered or seen
+            )
+        return result
 
     async def safe_action(self, user_id, kind, event_id=None, metadata=None):
         # Analytics errors should not break a successful commitment.
@@ -163,6 +215,10 @@ class SchedulingService:
             except Clarification as exc:
                 return [Reply(str(exc))]
             return await self.preview_block(user, rule)
+        if command == "calendar":
+            return await self.calendar_setup(user)
+        if command == "free":
+            return await self.free_command(user, args)
         if command == "blocks":
             rules = await self.repo.list_blocks(user.id)
             if not rules:
@@ -208,7 +264,7 @@ class SchedulingService:
         pages = (len(events) + 9) // 10
         page = min(page, pages - 1)
         replies = [
-            event_card(e, await self.availability(user, e, e.id))
+            event_card(e, await self.availability(user, e, e.id), synced(user))
             for e in events[page * 10 : (page + 1) * 10]
         ]
         if pages > 1:
@@ -228,6 +284,12 @@ class SchedulingService:
                     "That message is too long. Send the event title, date, time and venue in a shorter message."
                 )
             ]
+        try:
+            calendar_link = find_link(text, self.settings.app_base_url)
+        except CalendarLinkError as exc:
+            return [Reply(str(exc))]
+        if calendar_link:
+            return await self.connect_calendar(user, calendar_link)
         if "nusmods.com" in text.lower() and text.strip().startswith(("http://", "https://")):
             result = await self.importer.import_link(text.strip(), reference)
             await self.repo.import_timetable(user.id, result)
@@ -475,6 +537,272 @@ class SchedulingService:
             )
         ]
 
+    # ---- /free ----
+
+    async def free_command(self, user: User, args: str) -> list[Reply]:
+        if not args.strip():
+            return [Reply("When do you want to check?", free_keyboard())]
+        try:
+            query = parse_free(args, self.clock())
+        except Clarification as exc:
+            return [Reply(f"{exc}\nFor example: /free fri 7-9pm or /free tomorrow")]
+        if query.slot is not None:
+            return [await self.free_slot(user, query)]
+        return [await self.free_days(user, query.days)]
+
+    async def free_slot(self, user: User, query) -> Reply:
+        slot = query.slot
+        result = await self.availability(user, slot)
+        when = f"{slot.start_at:%a %-d %b} · {time_range(slot.start_at, slot.end_at)}"
+        if result.conflicts:
+            text = verdict_line(result) + "\n" + when
+            if len(result.conflicts) > 1:
+                text += "\n" + "\n".join(
+                    f"• {b.title[:60]} ({time_range(b.start_at, b.end_at)})"
+                    for b in result.conflicts[:5]
+                )
+        else:
+            text = "✅ No clashes found · " + when
+        if result.possible:
+            text += "\nYou also saved " + ", ".join(e.title[:40] for e in result.possible[:3])
+            text += " at that time."
+        if query.assumed_end:
+            text += "\n(No end time given, so I checked 2 hours.)"
+        return Reply(text + "\n\n" + checked_line(result))
+
+    async def free_days(self, user: User, days) -> Reply:
+        now = self.clock()
+        today = now.astimezone(SG).date()
+        parts = []
+        for day in days:
+            label = f"{day:%a %-d %b}"
+            if day < today:
+                parts.append(f"{label} has already passed.")
+                continue
+            start = datetime.combine(day, day_time(0), SG)
+            end = start + timedelta(days=1)
+            blocks = await self.repo.blocks_between(user.id, start, end)
+            plans = await self.repo.events_between(
+                start - timedelta(days=1), end, [Status.GOING, Status.SAVED], user.id
+            )
+            busy = [(b.start_at, b.end_at) for b in blocks] + [
+                (e.start_at, e.end_at) for e in plans if e.end_at > start
+            ]
+            gaps = free_gaps(day, busy, now)
+            if gaps:
+                parts.append(
+                    f"🟢 Free on {label}:\n"
+                    + "\n".join(f"• {clock(a)} – {clock(b)}" for a, b in gaps)
+                )
+            elif day == today and now.astimezone(SG).time() >= day_time(22, 30):
+                parts.append("No free time left today. I list free time from 8am to 11pm.")
+            else:
+                parts.append(f"🔴 No free time on {label} between 8am and 11pm.")
+        sources = ["your Going and Saved plans", "busy blocks"]
+        if user.personal_calendar_url and user.personal_calendar_synced_at:
+            sources.append("personal calendar")
+        if user.coverage_start:
+            sources.append("NUSMods timetable")
+        footer = "Checked: " + ", ".join(sources[:-1]) + " and " + sources[-1] + "."
+        return Reply("\n\n".join(parts) + "\n\n" + footer)
+
+    # ---- subscribed calendar feed (Apple Calendar first) ----
+
+    def feed_url(self, token: str) -> str | None:
+        base = self.settings.app_base_url.rstrip("/")
+        return f"{base}/cal/{token}.ics" if base else None
+
+    async def calendar_setup(self, user: User, intro: str = "") -> list[Reply]:
+        """/calendar: AmIFree → your calendar (feed), then your calendar → AmIFree (busy)."""
+        return [await self.feed_setup(user, intro), self.personal_calendar_status(user)]
+
+    async def feed_setup(self, user: User, intro: str = "") -> Reply:
+        if not self.settings.app_base_url:
+            return Reply(
+                "Automatic calendar sync needs AmIFree to be online at a public address, "
+                "which isn't set up yet. For now, use the 🍎 and 📅 buttons on your plans."
+            )
+        token = user.calendar_feed_token
+        if not token:
+            token = secrets.token_urlsafe(32)
+            await self.repo.set_feed_token(user.id, token)
+            await self.safe_action(user.id, "calendar_feed_created")
+        seen = user.calendar_feed_seen_at if user.calendar_feed_token else None
+        status = (
+            f"✅ Connected. Your calendar last synced {seen.astimezone(SG):%-d %b, %-I:%M%p}."
+            if seen
+            else "Not connected yet."
+        )
+        text = (
+            (intro + "\n\n" if intro else "")
+            + "📤 Put every plan in your iPhone calendar automatically\n"
+            + status
+            + "\n\n1. Tap and hold this link, then Copy:\n"
+            + self.feed_url(token)
+            + "\n\n2. On your iPhone open Settings → Apps → Calendar → Calendar Accounts → "
+            "Add Account → Other → Add Subscribed Calendar. (On older iOS: Settings → Calendar.)"
+            "\n3. Paste the link, tap Next, then Save."
+            "\n\nOn a Mac: Calendar → File → New Calendar Subscription, then paste."
+            "\n\nYour Going and Saved plans then appear in a calendar called AmIFree and update "
+            "by themselves when plans change. Keep the link private: anyone with it can see "
+            "your plans."
+        )
+        return Reply(text, calendar_settings_keyboard())
+
+    # ---- personal calendar → AmIFree (busy times only) ----
+
+    @property
+    def link_secret(self) -> str:
+        return (
+            self.settings.calendar_link_key.get_secret_value()
+            or self.settings.telegram_bot_token.get_secret_value()
+            or "amifree-development-only"
+        )
+
+    def personal_calendar_status(self, user: User) -> Reply:
+        problem = f"\n⚠️ {user.personal_calendar_error}" if user.personal_calendar_error else ""
+        if user.personal_calendar_url:
+            synced = user.personal_calendar_synced_at
+            when = f"refreshed {synced.astimezone(SG):%-d %b, %-I:%M%p}" if synced else "connecting"
+            return Reply(
+                f"📥 Your calendar → AmIFree\n✅ Connected ({when}). Its busy times count in "
+                "clash checks, Am I free? and /whosfree, and I refresh it every hour. I keep only "
+                "start and end times, never what the event is."
+                + problem
+                + "\n\nSend me a new link any time to replace it.",
+                personal_calendar_keyboard(),
+            )
+        return Reply(
+            "📥 Let AmIFree see when you're busy\n"
+            "Send me your calendar's private link and its busy times will count in clash "
+            "checks, Am I free? and /whosfree. I keep only start and end times, never titles, "
+            "places or notes." + problem + "\n\nWhere to find the link:"
+            "\n• Google Calendar (on a computer): ⚙️ Settings → click your calendar → "
+            "Integrate calendar → Secret address in iCal format → copy."
+            "\n• iPhone / iCloud: Calendar app → Calendars → ⓘ next to a calendar → turn on "
+            "Public Calendar → Share Link → Copy. Anyone with that link can view that calendar."
+            "\n• Outlook: Settings → Calendar → Shared calendars → Publish a calendar → "
+            "copy the ICS link."
+        )
+
+    async def connect_calendar(self, user: User, link: str) -> list[Reply]:
+        if self.calendar_reader is None:
+            return [Reply("Reading calendar links isn't available right now.")]
+        now = self.clock()
+        try:
+            busy = await self.calendar_reader.busy(link, now)
+        except CalendarLinkError as exc:
+            return [Reply(str(exc))]
+        await self.repo.set_personal_calendar(user.id, seal(link, self.link_secret))
+        await self.repo.replace_calendar_blocks(user.id, busy, now)
+        await self.safe_action(user.id, "personal_calendar_connected", metadata={"busy": len(busy)})
+        found = (
+            f"I found {len(busy)} busy time{'s' if len(busy) != 1 else ''} in the next 4 months"
+            if busy
+            else "I didn't find any busy times in the next 4 months. If that's wrong, check you "
+            "shared the right calendar"
+        )
+        return [
+            Reply(
+                f"✅ Personal calendar connected. {found}.\n\nThey now count in clash checks, "
+                "Am I free? and /whosfree. I keep only start and end times, never what the "
+                "event is, and refresh it every hour. /calendar to disconnect."
+            )
+        ]
+
+    async def disconnect_calendar(self, user: User) -> list[Reply]:
+        await self.repo.set_personal_calendar(user.id, None)
+        await self.safe_action(user.id, "personal_calendar_disconnected")
+        return [
+            Reply(
+                "Personal calendar disconnected. I've deleted its link and every busy time I "
+                "read from it."
+            )
+        ]
+
+    async def refresh_calendars(self, limit: int = 20) -> int:
+        """Background refresh, run by the jobs tick. Returns how many calendars were checked."""
+        if self.calendar_reader is None:
+            return 0
+        now = self.clock()
+        due = await self.repo.calendars_due(now - CALENDAR_REFRESH, limit)
+        for user in due:
+            link = unseal(user.personal_calendar_url, self.link_secret)
+            if link is None:
+                # The encryption key changed: the stored link can't be read, so drop it.
+                await self.repo.set_personal_calendar(user.id, None)
+                await self.repo.calendar_error(
+                    user.id, "Please send me your calendar link again.", now
+                )
+                continue
+            try:
+                busy = await self.calendar_reader.busy(link, now)
+            except CalendarLinkGone as exc:
+                # A revoked link must not leave stale busy times behind.
+                await self.repo.replace_calendar_blocks(user.id, [], now)
+                await self.repo.calendar_error(user.id, str(exc), now)
+            except CalendarLinkError as exc:
+                await self.repo.calendar_error(user.id, str(exc), now)  # keep last good copy
+            except Exception as exc:
+                log.warning("calendar_refresh_failed error_type=%s", type(exc).__name__)
+                await self.repo.calendar_error(user.id, "I couldn't refresh it just now.", now)
+            else:
+                await self.repo.replace_calendar_blocks(user.id, busy, now)
+        return len(due)
+
+    async def calendar_change(self, user: User, change: str) -> list[Reply]:
+        if change == "off":
+            await self.repo.set_feed_token(user.id, None)
+            await self.safe_action(user.id, "calendar_feed_off")
+            return [
+                Reply(
+                    "Calendar sync is off and the old link no longer works. To remove the "
+                    "AmIFree calendar from your iPhone: Settings → Apps → Calendar → Calendar "
+                    "Accounts → Subscribed Calendars → AmIFree → Delete Account."
+                )
+            ]
+        await self.repo.set_feed_token(user.id, None)
+        await self.safe_action(user.id, "calendar_feed_reset")
+        fresh = user.model_copy(update={"calendar_feed_token": None, "calendar_feed_seen_at": None})
+        return [
+            await self.feed_setup(
+                fresh,
+                "New link made. The old one has stopped working, so delete the old AmIFree "
+                "calendar on your iPhone and subscribe to this one.",
+            )
+        ]
+
+    async def calendar_feed(self, token: str, user_agent: str = "") -> bytes | None:
+        """The private feed a calendar app subscribes to. None for an unknown link."""
+        user = await self.repo.user_by_feed_token(token)
+        if not user:
+            return None
+        now = self.clock()
+        events = await self.repo.events_between(
+            now - FEED_PAST, now + FEED_AHEAD, [Status.GOING, Status.SAVED], user.id
+        )
+        preview = any(bot in user_agent.lower() for bot in PREVIEW_BOTS)
+        seen = user.calendar_feed_seen_at
+        if not preview and (seen is None or now - seen > FEED_SEEN_EVERY):
+            await self.repo.mark_feed_seen(user.id, now)
+        return build_feed(events, now=now)
+
+    async def calendar_file(self, user: User, event_id: str) -> list[Reply]:
+        try:
+            UUID(event_id)
+        except ValueError:
+            return [Reply("That button isn't valid. Use /plans.")]
+        event = await self.repo.get_event(user.id, event_id)
+        if not event or event.status in (Status.CANCELLED, Status.DECLINED, Status.PREVIEW):
+            return [Reply("That plan isn't saved any more. Use /plans to see your plans.")]
+        await self.safe_action(user.id, "calendar_export", event.id, {"target": "ics"})
+        return [
+            Reply(
+                "Tap the file, then Add to Calendar. Works with Apple Calendar and Outlook.",
+                document=(ics_filename(event), build_ics(event, now=self.clock())),
+            )
+        ]
+
     async def callback(self, telegram_id: int, data: str) -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
         if data.startswith("g:"):
@@ -486,6 +814,21 @@ class SchedulingService:
             return await self.list_events(user, int(page), plans=prefix == "plans")
         parts = data.split(":")
         action = parts[0]
+        if data in ("free:today", "free:tomorrow", "free:weekend"):
+            today = self.clock().astimezone(SG).date()
+            days = {
+                "free:today": (today,),
+                "free:tomorrow": (today + timedelta(days=1),),
+                "free:weekend": weekend(today),
+            }[data]
+            reply = await self.free_days(user, days)
+            return [Reply(reply.text, edit=True)]
+        if data == "pcal:off":
+            return await self.disconnect_calendar(user)
+        if action == "cal" and len(parts) == 2 and parts[1] in ("reset", "off"):
+            return await self.calendar_change(user, parts[1])
+        if action == "ics" and len(parts) == 2:
+            return await self.calendar_file(user, parts[1])
         if action == "unblock" and len(parts) == 2:
             try:
                 UUID(parts[1])
@@ -587,9 +930,9 @@ class SchedulingService:
             if not result:
                 return [Reply("That event changed. Use /plans to see the latest card.")]
             await self.group_changed(result.group_event_id)
+            availability = await self.availability(user, result, result.id)
             return [
-                Reply("Saved. Find it any time with /plans."),
-                event_card(result, await self.availability(user, result, result.id)),
+                decided_card(result, availability, "Saved. Find it any time with /plans.", user)
             ]
         statuses = {
             "go": Status.GOING,
@@ -611,9 +954,9 @@ class SchedulingService:
         if not result:
             return [Reply("That event changed. Use /events to see the latest card.")]
         await self.group_changed(result.group_event_id)
-        text = {
-            Status.GOING: "Added to your AmIFree commitments.",
-            Status.MAYBE: "Marked Maybe. This won't block your availability.",
-            Status.DECLINED: "Marked Can't make it. This won't block your availability.",
+        note = {
+            Status.GOING: "Added to your commitments: this time is now blocked.",
+            Status.MAYBE: "Marked Maybe. This won't block your time.",
+            Status.DECLINED: "Marked Can't make it. This won't block your time.",
         }[statuses[action]]
-        return [Reply(text), event_card(result, availability)]
+        return [decided_card(result, availability, note, user)]

@@ -4,20 +4,39 @@ from app.schemas.event import Event, GroupEvent, Poll, Status
 
 
 def event_keyboard(
-    event: Event, clash: bool = False, possible: tuple[Event, ...] = ()
+    event: Event,
+    clash: bool = False,
+    possible: tuple[Event, ...] = (),
+    synced: bool = False,
 ) -> InlineKeyboardMarkup:
     def button(label, action, target=event):
         return InlineKeyboardButton(label, callback_data=f"{action}:{target.id}:{target.version}")
 
     go = "force" if clash else "go"
-    rows = [
-        [button("Going anyway" if clash else "Going", go), button("Maybe", "maybe")],
-        # Shared group plans are edited once by their organiser, not per member.
-        [button("Can't make it", "decline")]
-        + ([] if event.group_event_id else [button("Edit", "edit")]),
-    ]
-    if event.status != Status.SAVED:
-        rows.append([button("Save", "save")])
+    # Shared group plans are edited once by their organiser, not per member.
+    edit = [] if event.group_event_id else [button("Edit", "edit")]
+    if event.status == Status.PREVIEW:
+        rows = [
+            [button("Going anyway" if clash else "Going", go), button("Maybe", "maybe")],
+            [button("Can't make it", "decline")] + edit,
+            [button("Save", "save")],
+        ]
+    else:
+        # Once decided, offer only the other answers. No Save: on a Going plan it would
+        # quietly downgrade the commitment to "Saved (not decided)".
+        answers = [
+            (Status.GOING, button("Going anyway" if clash else "Going", go)),
+            (Status.MAYBE, button("Maybe", "maybe")),
+            (Status.DECLINED, button("Can't make it", "decline")),
+        ]
+        rows = [[b for status, b in answers if status != event.status]]
+        if edit:
+            rows.append(edit)
+        # With a live calendar subscription the plan is already on its way: no buttons.
+        if event.status in (Status.SAVED, Status.GOING) and not synced:
+            from app.services.calendar_export import google_link
+
+            rows.append(calendar_keyboard(event, google_link(event)).inline_keyboard[0])
     if possible:
         # Choosing one never deletes the other; it only commits the chosen plan.
         rows.append([button("Attend this one", go)])
@@ -111,3 +130,44 @@ def page_keyboard(page: int, pages: int, prefix: str = "events") -> InlineKeyboa
     if page + 1 < pages:
         buttons.append(InlineKeyboardButton("Next", callback_data=f"{prefix}:{page + 1}"))
     return InlineKeyboardMarkup([buttons])
+
+
+def calendar_settings_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("New link", callback_data="cal:reset"),
+                InlineKeyboardButton("Turn off", callback_data="cal:off"),
+            ]
+        ]
+    )
+
+
+def free_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Today", callback_data="free:today"),
+                InlineKeyboardButton("Tomorrow", callback_data="free:tomorrow"),
+                InlineKeyboardButton("This weekend", callback_data="free:weekend"),
+            ]
+        ]
+    )
+
+
+def personal_calendar_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Disconnect my calendar", callback_data="pcal:off")]]
+    )
+
+
+def calendar_keyboard(event: Event, google_url: str) -> InlineKeyboardMarkup:
+    """Offered once a plan is Saved or Going: add it to the user's own calendar."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("📅 Google Calendar", url=google_url),
+                InlineKeyboardButton("🍎 Apple Calendar", callback_data=f"ics:{event.id}"),
+            ]
+        ]
+    )

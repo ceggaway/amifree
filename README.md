@@ -8,11 +8,12 @@ One FastAPI backend serves the Telegram bot, a JSON API and a React Telegram Min
 | --- | --- |
 | Forward to save, `/plans` | `/event` cards with Going / Maybe / Can't and a live headcount |
 | Instant clash check: No clashes found, Clashes with X, or Busy day | Edit once: everyone who kept the plan gets one change alert |
-| Private "Am I free?" on every group card | `/whosfree` self-filling poll |
+| Private "Am I free?" on every group card, and `/free fri 7-9pm` or `/free tomorrow` | `/whosfree` self-filling poll |
 | Night-before summary, change alerts | Auto-chase and a Nudge button for non-responders |
 | Quick blocks: `busy sat 2-6pm`, `work every Wed 6-10pm` | |
+| Add to Google or Apple Calendar after Save or Going | |
 
-NUSMods is optional. Google Calendar and other outside calendars are not connected, and cards say so. OCR of posters is not supported.
+NUSMods is optional. After Save or Going, the bot offers 📅 Google Calendar (a pre-filled link) and 🍎 Apple Calendar (an .ics file, also works in Outlook). No calendar sign-in is needed; AmIFree does not read outside calendars, and cards say so. Change alerts offer the same buttons: the .ics replaces the old entry, a Google link adds a new one. OCR of posters is not supported.
 
 **Status:** everything above is implemented and covered by the local test suite. None of the new features has been exercised against live Telegram, OpenAI or a hosted Supabase project. See `docs/verification.md`.
 
@@ -40,7 +41,7 @@ Create `.env` from `.env.example` if it does not already exist. Preserve an exis
 ### Supabase
 
 1. Create a Supabase project.
-2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `004`). Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
+2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `006`). Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
 3. Copy the project URL and backend `service_role` key into `.env`. Keep the key on the server; use neither the anon key nor a browser session. The SDK also accepts Supabase's newer backend secret key in the same configuration variable. See [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys).
 
 ```dotenv
@@ -87,7 +88,7 @@ In disabled mode `/healthz` returns 200 and `/readyz` returns 503. This does not
 7. Forward `CCA dinner moved to 8pm` or `CCA dinner cancelled`. Review the proposed change before confirming. Ambiguous matches require selection.
 8. Test a second Telegram account to verify isolation.
 
-Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `/reminders`, `/cancel`, `/deletemydata`. Deletion requires a confirmation.
+Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `/reminders`, `/free`, `/calendar`, `/cancel`, `/deletemydata`. Deletion requires a confirmation.
 
 ### Groups
 
@@ -110,6 +111,27 @@ npm run dev        # browser-only UI work with mock data, proxied to a local bac
 ```
 
 Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for example `https://your-service.onrender.com/app/`). On startup the bot sets its menu button to **Open AmIFree**. Telegram only opens HTTPS Mini Apps, so local testing inside Telegram needs a tunnel or a staging deploy. The Mini App sends Telegram's signed `initData` to `POST /api/auth/telegram`; the server verifies it and returns a one-hour session token. A normal browser has no signature and cannot sign in. Development builds fall back to mock data, which is compiled out of production builds.
+
+### Am I free? (`/free`)
+
+`/free fri 7-9pm` checks that time against everything AmIFree knows; `/free fri 7pm` checks two hours. `/free tomorrow`, `/free 17th` or `/free this weekend` list free gaps of at least 30 minutes between 8am and 11pm; plain `/free` offers Today / Tomorrow / This weekend buttons. It is parsed with the same date/time rules as forwarded plans, with no LLM call, and asks "AM or PM?" when that is unclear.
+
+Partial overlaps are still clashes, but every clash message says how much of the plan is lost: "it ends at 7:30pm, so you'd miss the first 30 min", "you'd need to leave at 8pm (the last 1 hr)", "from 7:30–8pm", or "(the whole time)". This applies to cards, `/free`, change alerts and the private group popup.
+
+### Calendar sync (`/calendar`)
+
+`/calendar` gives each user a private feed link, `APP_BASE_URL/cal/<secret>.ics`, with iPhone steps (Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add Subscribed Calendar). Their Going and Saved plans then appear in a calendar called AmIFree, and edits and cancellations update on the calendar app's next refresh. Once the feed has been fetched by a calendar app (link previews don't count), cards say "Syncing to your calendar automatically" instead of showing the 🍎/📅 buttons. **New link** and **Turn off** invalidate the old link; `/deletemydata` removes it.
+
+The feed needs a public HTTPS `APP_BASE_URL`, also in polling mode. For a local test, run a tunnel (`cloudflared tunnel --url http://localhost:8000`) and set `APP_BASE_URL` to its address; quick-tunnel addresses change on every run, so re-subscribe after restarting it. The secret is redacted from access logs. Without `APP_BASE_URL`, `/calendar` explains that sync isn't available yet.
+
+### Personal calendar link (busy times)
+
+Sending the bot a private iCal link (Google "Secret address in iCal format", an iCloud public calendar link, or an Outlook published ICS link) connects that calendar. Its busy times then count in clash checks, Am I free? and `/whosfree`, and cards list "personal calendar" under Checked. `/calendar` shows where to find the link, the connection status and **Disconnect my calendar**.
+
+- **Busy times only.** `calendar_busy_blocks` has no title column; cards call them "Personal calendar". All-day, free (transparent) and cancelled events, and AmIFree's own feed, are ignored. Recurring events are expanded for the next 4 months.
+- **The link is encrypted at rest** with `CALENDAR_LINK_KEY` (blank derives a key from the bot token). Changing the key makes stored links unreadable; those users are asked to send their link again.
+- **Only Google, iCloud and Outlook hosts over HTTPS are fetched**, every redirect is re-checked, and responses are capped at 5 MB, so a pasted link can't make the server reach anything else.
+- **Refreshed hourly** by the jobs tick. A revoked link clears its busy times and `/calendar` says so; a temporary failure keeps the last good copy and retries an hour later.
 
 ### Reminders and alerts
 

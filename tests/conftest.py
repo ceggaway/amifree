@@ -61,3 +61,14 @@ async def onboard(service, reference, telegram_id=1):
     await service.message(
         telegram_id, 1, "https://nusmods.com/timetable/sem-1/share?CS3216=LEC:1", reference
     )
+
+
+def tap(reply, label):
+    """callback_data of the button with this label, wherever it sits on the card."""
+    for row in reply.keyboard.inline_keyboard:
+        for b in row:
+            if b.text == label:
+                return b.callback_data
+    raise AssertionError(
+        f"No {label!r} button; have {[b.text for r in reply.keyboard.inline_keyboard for b in r]}"
+    )

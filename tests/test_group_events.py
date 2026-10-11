@@ -5,7 +5,7 @@ from telegram.ext import Application
 
 from app.bot.handlers import register_handlers
 from app.schemas.event import Status
-from tests.conftest import extraction
+from tests.conftest import extraction, tap
 from tests.telegram_transport import TelegramTransport
 
 CHAT = -100500
@@ -165,7 +165,7 @@ async def test_going_from_a_group_card_blocks_later_checks(service_factory, refe
         await bot.process_update(Update.de_json(group_tap(taps["Going"], 2), bot.bot))
         # A private RSVP on the linked plan re-renders the shared card's headcount.
         mine = (await service.command(2, "plans"))[0]
-        await service.callback(2, mine.keyboard.inline_keyboard[0][1].callback_data)
+        await service.callback(2, tap(mine, "Maybe"))
     edits = [p for name, p in transport.calls if name == "editMessageText"]
     assert "Going 0 · Maybe 1" in edits[-1]["text"]
     assert int(edits[-1]["chat_id"]) == CHAT and int(edits[-1]["message_id"]) == 101

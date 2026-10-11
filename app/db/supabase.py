@@ -10,6 +10,15 @@ from app.schemas.event import SG, Event, EventDraft, GroupEvent, Poll, Status
 from app.services.nusmods import ImportResult
 from app.services.quick_blocks import expand_blocks
 
+MAX_CALENDAR_BLOCKS = 3000
+
+
+def calendar_block(row: dict) -> BusyBlock:
+    """A personal-calendar busy time. The title is ours: the calendar's own is never stored."""
+    return BusyBlock(
+        title="Personal calendar", start_at=row["start_at"], end_at=row["end_at"], source="CALENDAR"
+    )
+
 
 class SupabaseRepository:
     def __init__(self, client: AsyncClient, pending_ttl_hours: int = 24):
@@ -104,8 +113,10 @@ class SupabaseRepository:
 
         blocks = await fetch("timetable_blocks")
         events = await fetch("events", True)
+        calendar = await fetch("calendar_busy_blocks")
         manual = expand_blocks(await self.list_blocks(user_id), draft.start_at, draft.end_at)
-        return [BusyBlock.model_validate(b) for b in blocks] + manual, [
+        personal = [calendar_block(b) for b in calendar]
+        return [BusyBlock.model_validate(b) for b in blocks] + manual + personal, [
             Event.model_validate(e) for e in events
         ]
 
@@ -128,7 +139,21 @@ class SupabaseRepository:
                 break
             offset += 500
         manual = expand_blocks(await self.list_blocks(user_id), start, end)
-        return [BusyBlock.model_validate(b) for b in rows] + manual
+        calendar = (
+            await self.client.table("calendar_busy_blocks")
+            .select("*")
+            .eq("user_id", user_id)
+            .lt("start_at", end.isoformat())
+            .gt("end_at", start.isoformat())
+            .order("id")
+            .limit(MAX_CALENDAR_BLOCKS)
+            .execute()
+        ).data
+        return (
+            [BusyBlock.model_validate(b) for b in rows]
+            + manual
+            + [calendar_block(b) for b in calendar]
+        )
 
     async def create_block(self, user_id: str, rule: BlockRule) -> BlockRule:
         row = rule.model_dump(mode="json", exclude={"id", "user_id"}) | {"user_id": user_id}
@@ -346,6 +371,93 @@ class SupabaseRepository:
 
     async def set_user_flags(self, user_id: str, **flags: bool):
         await self.client.table("users").update(flags).eq("id", user_id).execute()
+
+    async def set_personal_calendar(self, user_id: str, sealed_link: str | None):
+        await (
+            self.client.table("users")
+            .update(
+                {
+                    "personal_calendar_url": sealed_link,
+                    "personal_calendar_synced_at": None,
+                    "personal_calendar_checked_at": None,
+                    "personal_calendar_error": None,
+                }
+            )
+            .eq("id", user_id)
+            .execute()
+        )
+        if sealed_link is None:
+            await self.replace_calendar_blocks(user_id, [], None)
+
+    async def replace_calendar_blocks(self, user_id: str, blocks, synced_at: datetime | None):
+        await self.client.rpc(
+            "amifree_replace_calendar_blocks",
+            {
+                "p_user_id": user_id,
+                "p_blocks": [
+                    {"start_at": a.isoformat(), "end_at": b.isoformat()} for a, b in blocks
+                ],
+                "p_synced_at": synced_at.isoformat() if synced_at else None,
+            },
+        ).execute()
+
+    async def calendar_error(self, user_id: str, error: str, checked_at: datetime):
+        await (
+            self.client.table("users")
+            .update(
+                {
+                    "personal_calendar_error": error[:300],
+                    "personal_calendar_checked_at": checked_at.isoformat(),
+                }
+            )
+            .eq("id", user_id)
+            .execute()
+        )
+
+    async def calendars_due(self, before: datetime, limit: int = 20) -> list[User]:
+        rows = (
+            await self.client.table("users")
+            .select("*")
+            .neq("personal_calendar_url", "")
+            .order("id")
+            .limit(2000)
+            .execute()
+        ).data
+        users = [User.model_validate(r) for r in rows if r.get("personal_calendar_url")]
+        due = [
+            u
+            for u in users
+            if not u.personal_calendar_checked_at or u.personal_calendar_checked_at < before
+        ]
+        due.sort(key=lambda u: u.personal_calendar_checked_at or datetime.min.replace(tzinfo=UTC))
+        return due[:limit]
+
+    async def set_feed_token(self, user_id: str, token: str | None):
+        # A new (or no) link always resets "seen": the old subscription no longer works.
+        await (
+            self.client.table("users")
+            .update({"calendar_feed_token": token, "calendar_feed_seen_at": None})
+            .eq("id", user_id)
+            .execute()
+        )
+
+    async def user_by_feed_token(self, token: str) -> User | None:
+        result = await (
+            self.client.table("users")
+            .select("*")
+            .eq("calendar_feed_token", token)
+            .limit(1)
+            .execute()
+        )
+        return User.model_validate(result.data[0]) if result.data else None
+
+    async def mark_feed_seen(self, user_id: str, when: datetime):
+        await (
+            self.client.table("users")
+            .update({"calendar_feed_seen_at": when.isoformat()})
+            .eq("id", user_id)
+            .execute()
+        )
 
     async def enqueue_notification(self, user_id: str, kind: str, key: str, payload: dict) -> bool:
         result = await self.client.rpc(

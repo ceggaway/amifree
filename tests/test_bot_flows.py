@@ -5,7 +5,7 @@ import pytest
 from app.models.timetable import BusyBlock
 from app.schemas.event import Status
 from app.services.scheduling import SchedulingService
-from tests.conftest import extraction, onboard
+from tests.conftest import extraction, onboard, tap
 
 TEXT = "CCA dinner Friday 7–9pm at Vivo"
 
@@ -175,7 +175,7 @@ async def test_edit_keeps_commitment_until_confirmed(service_factory, reference)
     await onboard(service, reference)
     card = (await service.message(1, 2, TEXT, reference))[0]
     confirmed = await service.callback(1, card.keyboard.inline_keyboard[0][0].callback_data)
-    await service.callback(1, confirmed[1].keyboard.inline_keyboard[1][1].callback_data)
+    await service.callback(1, tap(confirmed[0], "Edit"))
     preview = (await service.message(1, 3, "20:00–22:00", reference))[0]
     e = next(iter(repo.events.values()))
     assert e.status == Status.GOING and e.start_at.hour == 19
@@ -203,12 +203,13 @@ async def test_new_user_saves_without_nusmods(service_factory, reference):
     save = card.keyboard.inline_keyboard[2][0]
     assert save.text == "Save"
     saved = await service.callback(1, save.callback_data)
-    assert "Saved" in saved[0].text and "Saved (not decided)" in saved[1].text
+    assert len(saved) == 1 and saved[0].edit  # the tapped card is updated in place
+    assert "Saved (not decided)" in saved[0].text and "Find it any time" in saved[0].text
     event = next(iter(repo.events.values()))
     assert event.status == Status.SAVED
     assert "CCA dinner" in (await service.command(1, "plans"))[0].text
     # Going turns the saved plan into a commitment that blocks later checks.
-    await service.callback(1, saved[1].keyboard.inline_keyboard[0][0].callback_data)
+    await service.callback(1, tap(saved[0], "Going"))
     assert event.status == Status.GOING
 
 
@@ -251,3 +252,22 @@ async def test_plans_excludes_previews_and_declined(service_factory, reference):
     await service.callback(1, declined.keyboard.inline_keyboard[1][0].callback_data)
     assert "No upcoming plans" in (await service.command(1, "plans"))[0].text
     assert len(await service.command(1, "events")) == 2
+
+
+async def test_card_buttons_follow_the_plans_status(service_factory, reference):
+    """Regression: a Going card offered Going again, and Save, which downgraded it."""
+    service, repo = service_factory(extraction())
+
+    def labels(reply):
+        return [b.text for row in reply.keyboard.inline_keyboard for b in row]
+
+    card = (await service.message(1, 2, TEXT, reference))[0]
+    assert labels(card) == ["Going", "Maybe", "Can't make it", "Edit", "Save"]
+    saved = await service.callback(1, tap(card, "Save"))
+    cal = ["📅 Google Calendar", "🍎 Apple Calendar"]
+    assert labels(saved[0]) == ["Going", "Maybe", "Can't make it", "Edit", *cal]
+    going = await service.callback(1, tap(saved[0], "Going"))
+    assert labels(going[0]) == ["Maybe", "Can't make it", "Edit", *cal]
+    assert next(iter(repo.events.values())).status == Status.GOING
+    maybe = await service.callback(1, tap(going[0], "Maybe"))
+    assert labels(maybe[0]) == ["Going", "Can't make it", "Edit"]  # no calendar: not committed

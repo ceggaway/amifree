@@ -62,7 +62,10 @@ async def test_webhook_to_telegram_complete_flow(service_factory, reference):
         callback = markup["inline_keyboard"][0][0]["callback_data"]
         assert len(callback.encode()) <= 64
         await client.post("/telegram/webhook", json=callback_payload(callback))
-        assert any("Added to" in r["text"] for r in transport.sent)
+        # Going updates the tapped card in place rather than sending a new message.
+        edits = [p for name, p in transport.calls if name == "editMessageText"]
+        assert any("Added to your commitments" in e["text"] for e in edits)
+        assert int(edits[-1]["message_id"]) == 100
         await client.post(
             "/telegram/webhook",
             json=message_payload(

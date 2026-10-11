@@ -14,6 +14,8 @@ Buttons are numbered: type `1` to tap button 1. Data lives in memory and is gone
 import asyncio
 import json
 import sys
+import tempfile
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +28,7 @@ from app.config import Settings  # noqa: E402
 from app.schemas.event import SG  # noqa: E402
 from app.services.event_extractor import EventExtractor  # noqa: E402
 from app.services.nusmods import NUSModsImporter  # noqa: E402
+from app.services.personal_calendar import CalendarReader  # noqa: E402
 from app.services.scheduling import SchedulingService  # noqa: E402
 from tests.fakes import MemoryRepository  # noqa: E402
 
@@ -51,16 +54,22 @@ class NoKeyExtractor:
 def show(replies, buttons):
     buttons.clear()
     for reply in replies:
-        print("\n┌─ bot")
+        print("\n┌─ bot  ✏️ updated the card above" if reply.edit else "\n┌─ bot")
         for line in reply.text.splitlines():
             print("│ " + line)
+        if reply.document:
+            name, content = reply.document
+            path = Path(tempfile.gettempdir()) / name
+            path.write_bytes(content)
+            print(f"│ 📎 {name} — saved to {path}")
+            print(f'│    open it with:  open "{path}"')
         if reply.keyboard:
             for row in reply.keyboard.inline_keyboard:
                 cells = []
                 for b in row:
                     buttons.append(b)
                     target = f" → {b.url}" if b.url else ""
-                    cells.append(f"[{len(buttons)}] {b.text}{target}")
+                    cells.append(f"[{len(buttons)}] {b.text}" + (" ↗" if target else ""))
                 print("│ " + "   ".join(cells))
         print("└─")
 
@@ -81,6 +90,7 @@ async def main():
             NUSModsImporter(http, settings.nusmods_academic_year),
             settings,
             clock=lambda: now["value"] or datetime.now(SG),
+            calendar_reader=CalendarReader(http),
         )
         user, message_id, buttons = 1, 0, []
         print(__doc__.split("\n\n", 1)[1])
@@ -116,7 +126,8 @@ async def main():
                 if text.isdigit() and buttons:
                     button = buttons[int(text) - 1]
                     if button.url:
-                        print("That's a link button; open it in a browser:", button.url)
+                        print("Link button. Opening it in your browser:", button.url[:80] + "…")
+                        webbrowser.open(button.url)
                         continue
                     show(await service.callback(user, button.callback_data), buttons)
                 elif text.startswith("/"):

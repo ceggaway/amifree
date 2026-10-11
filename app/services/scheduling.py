@@ -19,7 +19,12 @@ from app.models.timetable import BlockRule
 from app.models.user import User
 from app.schemas.event import SG, Event, EventDraft, Extraction, GroupEvent, Status
 from app.services.availability import check_availability
-from app.services.date_resolution import Clarification, validate_extraction
+from app.services.date_resolution import (
+    Clarification,
+    single_event_guard,
+    validate_extraction,
+)
+from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
 from app.services.group_events import GroupEventService
 from app.services.polls import PollService
@@ -264,6 +269,15 @@ class SchedulingService:
             source = text
             await self.safe_action(user.id, "forward", metadata={"message_id": message_id})
         extracted = await self.extractor.extract(text, reference, previous)
+        if not (pending and pending.get("event_id")):  # edits of saved events keep their kind
+            extracted = settle_kind(extracted, clarifying=bool(pending), text=source)
+        if pending:
+            extracted = settle_ambiguity(extracted, text)
+        elif extracted.kind == "new":
+            try:
+                single_event_guard(text)
+            except Clarification as exc:
+                return [Reply(str(exc))]
         if self.settings.retain_extractions:
             try:
                 await self.repo.extraction(

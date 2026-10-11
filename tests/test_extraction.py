@@ -135,3 +135,27 @@ async def test_refusal_is_failure(reference):
         async with AsyncOpenAI(api_key="test", http_client=http) as client:
             with pytest.raises(ExtractionError):
                 await EventExtractor(client, "gpt-4o-mini").extract("unknown", reference)
+
+
+async def test_clarification_never_sends_a_stale_ambiguity_back(reference):
+    """Regression: a kept 'unclear AM/PM' flag made every answer re-ask the same question."""
+    sent = []
+
+    class Responses:
+        async def parse(self, **kwargs):
+            sent.append(json.loads(kwargs["input"][1]["content"]))
+
+            class Result:
+                output_parsed = extraction()
+
+            return Result()
+
+    class Client:
+        responses = Responses()
+
+    previous = extraction(ambiguity="unclear AM/PM", date_text=None).model_dump(mode="json")
+    await EventExtractor(Client(), "m").extract("this saturday", reference, previous)
+    draft = sent[0]["original_draft"]
+    assert draft["ambiguity"] is None
+    assert draft["start_time_text"] == "7" and draft["title"] == "CCA dinner"
+    assert previous["ambiguity"] == "unclear AM/PM"  # caller's pending state is untouched

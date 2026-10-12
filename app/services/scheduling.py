@@ -17,6 +17,7 @@ from app.bot.keyboards import (
     free_keyboard,
     page_keyboard,
     personal_calendars_keyboard,
+    recurring_keyboard,
     remove_block_keyboard,
 )
 from app.bot.messages import (
@@ -36,9 +37,11 @@ from app.schemas.event import SG, Event, EventDraft, Extraction, GroupEvent, Sta
 from app.services.availability import check_availability
 from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
+    WEEKDAYS,
     Clarification,
     single_event_guard,
     validate_extraction,
+    weekly_weekday,
 )
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
@@ -56,7 +59,7 @@ from app.services.personal_calendar import (
 )
 from app.services.personal_calendar import URL as CALENDAR_URL
 from app.services.polls import PollService
-from app.services.quick_blocks import MAX_RULES, USAGE, describe, parse_block
+from app.services.quick_blocks import HORIZON_DAYS, MAX_RULES, USAGE, describe, parse_block
 
 log = logging.getLogger(__name__)
 
@@ -235,7 +238,62 @@ class SchedulingService:
             return [Reply(describe(rule), remove_block_keyboard(rule.id)) for rule in rules[:20]]
         return [Reply("Use /help to see the available commands.")]
 
-    async def preview_block(self, user: User, rule: BlockRule) -> list[Reply]:
+    async def offer_recurring(
+        self, user: User, message_id: int, extracted, source: str, reference: datetime, weekday: int
+    ) -> list[Reply] | None:
+        """A weekly event ("Saturdays, 9:30-11:30am"): ask whether it's one date or every week."""
+        day_name = WEEKDAYS[weekday].title()
+        try:
+            draft = validate_extraction(
+                extracted,
+                source,
+                reference,
+                default_minutes=self.settings.default_event_duration_minutes,
+            )
+        except Clarification:
+            return None  # e.g. no end time: the normal questions handle it
+        nonce = secrets.token_hex(8)
+        await self.repo.set_pending(
+            user.id,
+            {
+                "stage": "recurring",
+                "nonce": nonce,
+                "message_id": message_id,
+                "weekday": weekday,
+                "draft": draft.model_dump(mode="json"),
+            },
+        )
+        when = f"{day_name}s, {time_range(draft.start_at, draft.end_at)}"
+        return [
+            Reply(
+                f"🔁 {draft.title}\nThis happens every week: {when}.\n\nWhat should I add?",
+                recurring_keyboard(nonce, f"{draft.start_at:%a %-d %b}", day_name),
+            )
+        ]
+
+    async def choose_recurring(self, user: User, choice: str, nonce: str) -> list[Reply]:
+        pending = user.pending
+        if not pending or pending.get("stage") != "recurring" or pending.get("nonce") != nonce:
+            return [Reply("That choice expired. Forward the post again.")]
+        draft = EventDraft.model_validate(pending["draft"])
+        await self.repo.set_pending(user.id, None)
+        if choice == "once":
+            event = await self.repo.create_preview(user.id, pending["message_id"], draft)
+            card = event_card(event, await self.availability(user, event, event.id))
+            return [Reply(card.text, card.keyboard, edit=True)]
+        rule = BlockRule(
+            title=draft.title,
+            kind="WEEKLY",
+            weekday=pending["weekday"],
+            start_time=draft.start_at.timetz().replace(tzinfo=None),
+            end_time=draft.end_at.timetz().replace(tzinfo=None),
+            start_date=draft.start_at.date(),
+            until_date=draft.start_at.date() + timedelta(days=HORIZON_DAYS),
+        )
+        replies = await self.preview_block(user, rule, typed=False)
+        return [Reply(r.text, r.keyboard, edit=True) for r in replies]
+
+    async def preview_block(self, user: User, rule: BlockRule, typed: bool = True) -> list[Reply]:
         if len(await self.repo.list_blocks(user.id)) >= MAX_RULES:
             return [Reply("You've reached the busy block limit. Remove one with /blocks first.")]
         nonce = secrets.token_hex(8)
@@ -244,7 +302,7 @@ class SchedulingService:
         )
         note = (
             "\nAdd 'until <date>' to change when it stops repeating."
-            if rule.kind == "WEEKLY"
+            if rule.kind == "WEEKLY" and typed
             else ""
         )
         return [
@@ -307,7 +365,7 @@ class SchedulingService:
             # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
             return [Reply(onboarding.NOT_A_SCHEDULE_LINK)]
         pending = user.pending
-        if pending and pending["stage"] in ("confirm", "choose", "delete", "block"):
+        if pending and pending["stage"] in ("confirm", "choose", "delete", "block", "recurring"):
             return [
                 Reply(
                     "Please finish the pending action using its buttons, or send /cancel before forwarding another event."
@@ -404,6 +462,20 @@ class SchedulingService:
                     "I couldn't find an event in that message. Send an invitation with a title, date and start/end times."
                 )
             ]
+        weekly = None if pending else weekly_weekday(text)
+        if weekly is not None and extracted.kind == "new":
+            # "Saturdays" isn't a date: use the coming Saturday, so any follow-up question is
+            # about what's really missing (usually the end time), not "what date?".
+            day_name = WEEKDAYS[weekly].title()
+            extracted = extracted.model_copy(update={"date_text": day_name, "ambiguity": None})
+            source = f"{source}\n{day_name}"
+            state.update(source=source, extraction=extracted.model_dump(mode="json"))
+            if extracted.start_time_text:
+                offer = await self.offer_recurring(
+                    user, message_id, extracted, source, reference, weekly
+                )
+                if offer:
+                    return offer
         try:
             draft = validate_extraction(
                 extracted,
@@ -859,6 +931,8 @@ class SchedulingService:
             return await self.list_events(user, int(page), plans=prefix == "plans")
         parts = data.split(":")
         action = parts[0]
+        if data.startswith("rec:") and len(parts) == 3 and parts[1] in ("once", "weekly"):
+            return await self.choose_recurring(user, parts[1], parts[2])
         if data.startswith("setup:"):
             found = onboarding.screen(data.removeprefix("setup:"))
             if found is None:

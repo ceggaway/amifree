@@ -112,6 +112,10 @@ npm run dev        # browser-only UI work with mock data, proxied to a local bac
 
 Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for example `https://your-service.onrender.com/app/`). On startup the bot sets its menu button to **Open AmIFree**. Telegram only opens HTTPS Mini Apps, so local testing inside Telegram needs a tunnel or a staging deploy. The Mini App sends Telegram's signed `initData` to `POST /api/auth/telegram`; the server verifies it and returns a one-hour session token. A normal browser has no signature and cannot sign in. Development builds fall back to mock data, which is compiled out of production builds.
 
+### Weekly events and posters
+
+A post that repeats on one weekday ("Saturdays, 9:30am-11:30am", "every Tue 7-8pm") asks once: **Just the next one** (a normal card for the coming date), **Every Saturday** (a weekly busy block, previewed before saving) or **Neither**. If its end time is missing, the bot asks for that rather than for a date. Photos, videos and files are read through their caption; a picture with no text gets a short explanation.
+
 ### Am I free? (`/free`)
 
 `/free fri 7-9pm` checks that time against everything AmIFree knows; `/free fri 7pm` checks two hours. `/free tomorrow`, `/free 17th` or `/free this weekend` list free gaps of at least 30 minutes between 8am and 11pm; plain `/free` offers Today / Tomorrow / This weekend buttons. It is parsed with the same date/time rules as forwarded plans, with no LLM call, and asks "AM or PM?" when that is unclear.

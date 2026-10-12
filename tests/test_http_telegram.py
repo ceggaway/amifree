@@ -198,3 +198,47 @@ async def test_missing_credentials_prevent_bot_start():
     with pytest.raises(RuntimeError, match="Configure .env"):
         async with app.router.lifespan_context(app):
             pass
+
+
+SCALE_POST = """AI can generate 100 ideas in seconds. But can it tell you which one is worth pursuing?
+
+Join Associate Professor Chai Kah Hin, Dean of NUS SCALE, for a session on creative problem-solving in the age of Generative AI.
+
+📅 Wednesday, 21 October 2026
+🕖 7pm (Registration and refreshments from 6.30pm)
+📍 JustCo Marina Square
+6 Raffles Blvd, #03-308, Singapore 039594
+
+Register here"""
+
+
+async def test_a_poster_with_a_caption_is_read_like_any_plan(service_factory, reference):
+    """Regression: a forwarded channel post (photo + caption) got "photos aren't supported"."""
+    from tests.telegram_transport import photo_payload
+
+    seminar = extraction(
+        title="Creative problem-solving seminar",
+        date_text="Wednesday, 21 October 2026",
+        start_time_text="7pm",
+        end_time_text=None,
+        location="JustCo Marina Square",
+    )
+    service, _ = service_factory(seminar)
+    transport = TelegramTransport()
+    bot = (
+        Application.builder()
+        .token("123456:fake-test-token")
+        .request(transport)
+        .updater(None)
+        .build()
+    )
+    register_handlers(bot, service)
+    async with bot:
+        payload = photo_payload(SCALE_POST, 7, forward_timestamp=int(reference.timestamp()))
+        await bot.process_update(Update.de_json(payload, bot.bot))
+        # The caption reached the extractor, and the bot answered about the event itself.
+        assert service.extractor.calls[0][0] == SCALE_POST
+        reply = transport.sent[-1]["text"]
+        assert "photo" not in reply.lower() and "end" in reply.lower()  # asks when it ends
+        await bot.process_update(Update.de_json(photo_payload(None, 8), bot.bot))
+        assert "not what's inside a picture yet" in transport.sent[-1]["text"]

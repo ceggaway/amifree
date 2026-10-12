@@ -143,6 +143,20 @@ def calendar_settings_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def recurring_keyboard(nonce: str, next_date: str, day_name: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    f"Just the next one ({next_date})", callback_data=f"rec:once:{nonce}"
+                )
+            ],
+            [InlineKeyboardButton(f"Every {day_name}", callback_data=f"rec:weekly:{nonce}")],
+            [InlineKeyboardButton("Neither", callback_data=f"dismiss:{nonce}")],
+        ]
+    )
+
+
 def free_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

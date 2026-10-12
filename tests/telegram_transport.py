@@ -48,6 +48,17 @@ class TelegramTransport(BaseRequest):
         return 200, json.dumps({"ok": True, "result": result}).encode()
 
 
+def photo_payload(caption, message_id=1, telegram_id=1, *, forward_timestamp=None):
+    """A photo message: Telegram puts its words in `caption`, not `text`."""
+    payload = message_payload("x", message_id, telegram_id, forward_timestamp=forward_timestamp)
+    message = payload["message"]
+    del message["text"]
+    message["photo"] = [{"file_id": "poster", "file_unique_id": "p1", "width": 640, "height": 640}]
+    if caption is not None:
+        message["caption"] = caption
+    return payload
+
+
 def message_payload(text, message_id=1, telegram_id=1, *, group=False, forward_timestamp=None):
     result = {
         "update_id": message_id,

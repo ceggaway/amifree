@@ -29,6 +29,24 @@ _WEEKDAY_ABBR = {s: n for n, full in enumerate(WEEKDAYS) for s in (full, full[:3
 _WEEKDAY_ABBR.update({"tues": 1, "weds": 2, "thur": 3, "thurs": 3})
 
 
+_PLURAL_DAY = re.compile(r"\b(mon|tues|wednes|thurs|fri|satur|sun)days\b", re.IGNORECASE)
+_EVERY_DAY = re.compile(
+    r"\b(?:every|each)\s+(mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)[a-z]*\b", re.IGNORECASE
+)
+_STEM = {"mon": 0, "tue": 1, "tues": 1, "wed": 2, "wednes": 2, "weds": 2, "thu": 3, "thur": 3}
+_STEM |= {"thurs": 3, "fri": 4, "sat": 5, "satur": 5, "sun": 6}
+
+
+def weekly_weekday(text: str) -> int | None:
+    """The weekday of a weekly event ("Saturdays", "every Tue"), or None.
+
+    Only when exactly one weekday repeats: "Tuesdays and Thursdays" is left to ask about.
+    """
+    days = {_STEM[m.lower()] for m in _PLURAL_DAY.findall(text)}
+    days |= {_STEM[m.lower()] for m in _EVERY_DAY.findall(text)}
+    return days.pop() if len(days) == 1 else None
+
+
 def resolve_date(raw: str, reference: datetime) -> date:
     raw = raw.strip().lower()
     today = reference.astimezone(SG).date()

@@ -8,12 +8,15 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta
 
+from telegram import InlineKeyboardMarkup
+
 from app.bot.keyboards import nudge_keyboard
 from app.bot.messages import Reply, details, event_card, verdict_line
 from app.schemas.event import SG, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
 from app.services.reminders import enqueue_nightly, summary
+from app.services.scheduling import synced
 
 log = logging.getLogger(__name__)
 
@@ -34,11 +37,22 @@ class Notifier:
             text = describe_change(payload["before"], payload["after"], payload.get("cancelled"))
             event = await self.repo.get_event(user.id, payload["event_id"])
             if payload.get("cancelled") or not event:
-                return Reply(text)
+                return Reply(text + "\n\nIf you added it to your calendar, delete it there too.")
             # The clash check is recomputed now, against the plan's new time.
             availability = await self.scheduling.availability(user, event, event.id)
-            card = event_card(event, availability)
-            return Reply(text + "\n\n" + verdict_line(availability), card.keyboard)
+            card = event_card(event, availability, synced(user))
+            rows = list(card.keyboard.inline_keyboard) if card.keyboard else []
+            if event.status in (Status.SAVED, Status.GOING) and not synced(user):
+                # The card already carries the calendar buttons. Apple's .ics reuses the
+                # event's UID, so it replaces the old entry; a Google link can only add.
+                text += (
+                    "\n\nAdded it to your calendar? 🍎 replaces the old entry; "
+                    "for 📅 Google, add the new one and delete the old."
+                )
+            return Reply(
+                text + "\n\n" + verdict_line(availability),
+                InlineKeyboardMarkup(rows) if rows else None,
+            )
         if not user.reminders_enabled:
             return None
         if row["kind"] == "NIGHTLY":
@@ -123,4 +137,10 @@ class Notifier:
             self.repo, self.scheduling.clock(), self.scheduling.settings.nightly_hour
         )
         queued += await enqueue_auto(self.repo, self.scheduling.clock())
-        return {"queued": queued} | await self.deliver()
+        try:
+            calendars = await self.scheduling.refresh_calendars()
+        except Exception as exc:  # a calendar problem must never stop reminders going out
+            log.warning("calendar_refresh_tick_failed error_type=%s", type(exc).__name__)
+            calendars = 0
+        extra = {"calendars": calendars} if calendars else {}
+        return {"queued": queued} | extra | await self.deliver()

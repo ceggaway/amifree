@@ -13,6 +13,12 @@ class Availability:
     possible: tuple[Event, ...] = ()
     day_count: int = 0
     busy_day: bool = False
+    # A connected personal calendar was part of the check.
+    personal: bool = False
+    # NUSMods coverage on its own, when `covered` also counts the personal calendar.
+    nusmods: bool | None = None
+    # The time that was checked, so messages can say how much of it a clash takes.
+    candidate: EventDraft | None = None
 
     @property
     def verdict(self) -> str:
@@ -54,4 +60,5 @@ def check_availability(
         possible,
         day_count,
         busy_day_threshold > 0 and day_count >= busy_day_threshold,
+        candidate=candidate,
     )

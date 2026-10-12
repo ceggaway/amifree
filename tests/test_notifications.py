@@ -8,7 +8,7 @@ from app.main import create_app
 from app.schemas.event import SG, Status
 from app.services.change_alerts import describe_change
 from app.services.jobs import Notifier, Undeliverable
-from tests.conftest import extraction
+from tests.conftest import extraction, tap
 from tests.test_group_events import CHAT, alerts, group_tap, make_bot, post_card
 
 MOVED = extraction(
@@ -23,12 +23,13 @@ class Outbox:
     """Captures DMs; can fail on demand like a flaky or blocked Telegram chat."""
 
     def __init__(self):
-        self.sent, self.errors = [], []
+        self.sent, self.errors, self.replies = [], [], []
 
     async def __call__(self, telegram_id, reply):
         if self.errors:
             raise self.errors.pop(0)
         self.sent.append((telegram_id, reply.text))
+        self.replies.append((telegram_id, reply))
 
 
 async def card_with_members(service, repo, answers):
@@ -156,7 +157,13 @@ async def test_organiser_cancels_for_everyone(service_factory):
             Update.de_json(group_tap(taps["Going"], 3, update_id=7200), bot.bot)
         )
     assert "cancelled for everyone" in done[0].text
-    assert outbox.sent == [(2, "CCA dinner (Fri 9 Oct 7pm–9pm) was cancelled by the organiser.")]
+    assert outbox.sent == [
+        (
+            2,
+            "CCA dinner (Fri 9 Oct 7pm–9pm) was cancelled by the organiser."
+            "\n\nIf you added it to your calendar, delete it there too.",
+        )
+    ]
     linked = [e for e in repo.events.values() if e.group_event_id]
     assert [e.status for e in linked] == [Status.CANCELLED]
     edits = [p for name, p in transport.calls if name == "editMessageText"]
@@ -266,7 +273,7 @@ async def test_reminder_opt_out_and_cancelled_plans(service_factory, reference):
     from app.services.reminders import enqueue_nightly
 
     assert await enqueue_nightly(repo, service.clock(), 18) == 1
-    await service.callback(2, going[1].keyboard.inline_keyboard[1][0].callback_data)
+    await service.callback(2, tap(going[0], "Can't make it"))
     assert (await service.notifier.run())["skipped"] == 1 and outbox.sent == []
 
 
@@ -293,3 +300,19 @@ async def test_jobs_endpoint_requires_its_secret(service_factory, reference):
             assert response.status_code == expected
     assert response.json() == {"queued": 1, "sent": 1, "failed": 0, "skipped": 0}
     assert len(outbox.sent) == 1
+
+
+async def test_change_alert_offers_to_update_the_calendar(service_factory):
+    service, repo = service_factory(extraction(), MOVED)
+    _, _, outbox, _, event = await card_with_members(service, repo, {2: "Going", 3: "Maybe"})
+    await organiser_moves_to_8pm(service, event)
+    by_user = dict(outbox.replies)
+    going = by_user[2]
+    google, apple = going.keyboard.inline_keyboard[-1]
+    assert google.url and "20261009T120000Z" in google.url  # the new 8pm start, in UTC
+    assert apple.callback_data.startswith("ics:")
+    assert "replaces the old entry" in going.text
+    # Maybe isn't a commitment, so there's nothing to update in a calendar.
+    assert all(
+        b.text != "📅 Google Calendar" for row in by_user[3].keyboard.inline_keyboard for b in row
+    )

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from telegram import Update
 
-from app.bot.messages import Reply
+from app.bot.messages import Reply, send_reply
 
 
 @dataclass
@@ -17,7 +17,7 @@ class Delivery:
     async def flush(self, update: Update):
         while self.sent < len(self.replies or []):
             reply = self.replies[self.sent]
-            await update.effective_message.reply_text(reply.text, reply_markup=reply.keyboard)
+            await send_reply(update, reply)
             self.sent += 1
 
 

@@ -386,3 +386,106 @@ async def test_polls_in_postgresql(reference):
         await repo.delete_user(member.id)
         assert await repo.poll_tally(poll.id) == {(0, "MAYBE"): 1}
         assert await repo.poll_participants(poll.id) == [organiser.id]
+
+
+async def test_calendar_feed_in_postgresql():
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        service = SchedulingService(
+            repo,
+            QueueExtractor(),
+            None,
+            Settings(_env_file=None, bot_mode="disabled", app_base_url="https://amifree.example"),
+        )
+        user = await repo.ensure_user(1)
+        start = datetime.now(SG) + timedelta(days=3)
+        event = await repo.create_preview(
+            user.id,
+            1,
+            EventDraft(title="Hall supper", start_at=start, end_at=start + timedelta(hours=1)),
+        )
+        await repo.rsvp(user.id, event, Status.GOING)
+        reply = (await service.command(1, "calendar"))[0]
+        token = reply.text.split("/cal/")[1].split(".ics")[0]
+        assert (await repo.ensure_user(1)).calendar_feed_token == token
+        assert "SUMMARY:Hall supper" in (await service.calendar_feed(token)).decode()
+        assert (await repo.ensure_user(1)).calendar_feed_seen_at is not None
+        # The token must be long: the database refuses a short, guessable one.
+        from postgrest.exceptions import APIError
+
+        with pytest.raises((APIError, RuntimeError)):  # Supabase / the local test gateway
+            await repo.set_feed_token(user.id, "short")
+        await repo.set_feed_token(user.id, None)
+        assert await service.calendar_feed(token) is None
+
+
+async def test_personal_calendar_in_postgresql():
+    from tests.test_personal_calendar import GOOGLE, ICLOUD_CCA, FakeReader
+
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        start = datetime.now(SG).replace(microsecond=0) + timedelta(days=2)
+        dinner = (start, start + timedelta(hours=2))
+        lunch = (start + timedelta(days=1), start + timedelta(days=1, hours=1))
+        reader = FakeReader(labels={ICLOUD_CCA: "CCA"})
+        reader.per_link = {GOOGLE: [dinner], ICLOUD_CCA: [lunch]}
+        service = SchedulingService(
+            repo,
+            QueueExtractor(),
+            None,
+            Settings(_env_file=None, bot_mode="disabled"),
+            calendar_reader=reader,
+        )
+        await service.message(1, 1, GOOGLE, datetime.now(SG))
+        await service.message(1, 2, ICLOUD_CCA, datetime.now(SG))
+        user = await repo.ensure_user(1)
+        calendars = await repo.list_calendars(user.id)
+        assert [c.label for c in calendars] == ["CCA", "Google Calendar"]
+        assert all(c.synced_at and "google" not in c.sealed_url for c in calendars)
+        # Busy-time rows have no title column at all; the calendar name labels them.
+        columns = await db.query(
+            "select column_name from information_schema.columns where table_name='calendar_busy_blocks'"
+        )
+        assert sorted(c["column_name"] for c in columns) == [
+            "calendar_id",
+            "end_at",
+            "id",
+            "start_at",
+            "user_id",
+        ]
+        draft = EventDraft(
+            title="Dinner", start_at=start + timedelta(hours=1), end_at=start + timedelta(hours=3)
+        )
+        blocks, _ = await repo.busy(user.id, draft)
+        assert [(b.title, b.source) for b in blocks] == [("Google Calendar", "CALENDAR")]
+        window = await repo.blocks_between(user.id, start, start + timedelta(days=2))
+        assert sorted(b.title for b in window) == ["CCA calendar", "Google Calendar"]
+        # The same link again does not add a second row.
+        await service.message(1, 3, GOOGLE, datetime.now(SG))
+        assert len(await repo.list_calendars(user.id)) == 2
+        # Removing one calendar removes only its busy times, and only for its owner.
+        google = next(c for c in calendars if c.label == "Google Calendar")
+        assert not await repo.remove_calendar((await repo.ensure_user(2)).id, google.id)
+        assert await repo.remove_calendar(user.id, google.id)
+        assert (await repo.busy(user.id, draft))[0] == []
+        assert len(await repo.blocks_between(user.id, start, start + timedelta(days=2))) == 1
+        assert await repo.calendars_due(datetime.now(SG) + timedelta(hours=2)) != []
+        await repo.delete_user(user.id)
+        assert await db.query("select * from calendar_busy_blocks") == []
+        assert await db.query("select * from personal_calendars") == []

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     mini_app_dev_origin: str = ""
     # Signs Mini App sessions. Blank derives a key from the bot token.
     session_secret: SecretStr = SecretStr("")
+    # Encrypts stored personal calendar links. Blank derives one from the bot token;
+    # changing either makes stored links unreadable, and users are asked to resend them.
+    calendar_link_key: SecretStr = SecretStr("")
     session_ttl: int = Field(default=3600, ge=300, le=86400)
     init_data_max_age: int = Field(default=3600, ge=60, le=86400)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

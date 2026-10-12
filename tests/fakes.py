@@ -23,6 +23,8 @@ class MemoryRepository:
         self.events = {}
         self.actions = []
         self.available = True
+        self.calendar_blocks = {}  # calendar id -> [(start, end)]
+        self.calendars = {}
 
     async def ping(self):
         if not self.available:
@@ -50,7 +52,8 @@ class MemoryRepository:
 
     async def busy(self, user_id, draft):
         manual = expand_blocks(self.rules.get(user_id, []), draft.start_at, draft.end_at)
-        return self.blocks.get(user_id, []) + manual, [
+        personal = self.personal_blocks(user_id, draft.start_at, draft.end_at)
+        return self.blocks.get(user_id, []) + manual + personal, [
             e.model_copy(deep=True)
             for e in self.events.values()
             if e.user_id == user_id and e.status in (Status.GOING, Status.SAVED)
@@ -58,7 +61,8 @@ class MemoryRepository:
 
     async def blocks_between(self, user_id, start, end):
         classes = [b for b in self.blocks.get(user_id, []) if b.start_at < end and b.end_at > start]
-        return classes + expand_blocks(self.rules.get(user_id, []), start, end)
+        manual = expand_blocks(self.rules.get(user_id, []), start, end)
+        return classes + manual + self.personal_blocks(user_id, start, end)
 
     async def create_block(self, user_id, rule):
         rule = rule.model_copy(update={"id": str(uuid4()), "user_id": user_id})
@@ -241,6 +245,68 @@ class MemoryRepository:
         user = next((u for u in self.users.values() if u.id == user_id), None)
         return user.model_copy(deep=True) if user else None
 
+    async def list_calendars(self, user_id):
+        mine = [c for c in self.calendars.values() if c.user_id == user_id]
+        return [c.model_copy() for c in sorted(mine, key=lambda c: c.label.lower())]
+
+    async def add_calendar(self, user_id, sealed, url_hash, label):
+        from app.models.user import PersonalCalendar
+
+        for c in self.calendars.values():
+            if c.user_id == user_id and c.url_hash == url_hash:
+                c.sealed_url, c.label, c.error = sealed, label, None
+                return c.model_copy(), False
+        c = PersonalCalendar(
+            id=str(uuid4()), user_id=user_id, sealed_url=sealed, url_hash=url_hash, label=label
+        )
+        self.calendars[c.id] = c
+        return c.model_copy(), True
+
+    async def remove_calendar(self, user_id, calendar_id):
+        c = self.calendars.get(calendar_id)
+        if not c or c.user_id != user_id:
+            return False
+        del self.calendars[calendar_id]
+        self.calendar_blocks.pop(calendar_id, None)
+        return True
+
+    async def replace_calendar(self, calendar_id, blocks, synced_at):
+        if calendar_id not in self.calendars:
+            return
+        self.calendar_blocks[calendar_id] = list(blocks)
+        c = self.calendars[calendar_id]
+        c.synced_at, c.checked_at, c.error = synced_at, synced_at, None
+
+    async def calendar_error(self, calendar_id, error, checked_at):
+        c = self.calendars[calendar_id]
+        c.error, c.checked_at = error[:300], checked_at
+
+    async def calendars_due(self, before, limit=20):
+        due = [c for c in self.calendars.values() if not c.checked_at or c.checked_at < before]
+        return [c.model_copy() for c in due[:limit]]
+
+    def personal_blocks(self, user_id, start, end):
+        from app.models.timetable import BusyBlock
+
+        return [
+            BusyBlock(title=c.busy_title, start_at=a, end_at=b, source="CALENDAR")
+            for c in self.calendars.values()
+            if c.user_id == user_id
+            for a, b in self.calendar_blocks.get(c.id, [])
+            if a < end and b > start
+        ]
+
+    async def set_feed_token(self, user_id, token):
+        user = self.user(user_id)
+        user.calendar_feed_token, user.calendar_feed_seen_at = token, None
+
+    async def user_by_feed_token(self, token):
+        user = next((u for u in self.users.values() if u.calendar_feed_token == token), None)
+        return user.model_copy(deep=True) if user else None
+
+    async def mark_feed_seen(self, user_id, when):
+        self.user(user_id).calendar_feed_seen_at = when
+
     async def set_user_flags(self, user_id, **flags):
         for key, value in flags.items():
             setattr(self.user(user_id), key, value)
@@ -381,6 +447,9 @@ class MemoryRepository:
         self.events = {k: e for k, e in self.events.items() if e.user_id != user_id}
         self.blocks.pop(user_id, None)
         self.rules.pop(user_id, None)
+        for cid in [c.id for c in self.calendars.values() if c.user_id == user_id]:
+            self.calendars.pop(cid)
+            self.calendar_blocks.pop(cid, None)
         self.members = {m for m in self.members if m[1] != user_id}
         self.notifications = [n for n in self.notifications if n["user_id"] != user_id]
         for people in self.poll_people.values():

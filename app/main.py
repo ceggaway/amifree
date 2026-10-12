@@ -1,12 +1,13 @@
 import asyncio
 import hmac
 import logging
+import re
 from collections import OrderedDict
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
@@ -22,6 +23,7 @@ from app.config import Settings
 from app.db.supabase import SupabaseRepository
 from app.services.event_extractor import EventExtractor
 from app.services.nusmods import NUSModsImporter
+from app.services.personal_calendar import CalendarReader
 from app.services.scheduling import SchedulingService
 
 log = logging.getLogger(__name__)
@@ -32,6 +34,21 @@ def configure_logging(level):
     # HTTP library logs may contain the Telegram bot token in the URL.
     for name in ("httpx", "httpcore", "telegram", "openai", "postgrest", "supabase"):
         logging.getLogger(name).setLevel(logging.CRITICAL)
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, RedactFeedTokens) for f in access.filters):
+        access.addFilter(RedactFeedTokens())
+
+
+class RedactFeedTokens(logging.Filter):
+    """Calendar feed URLs carry their secret in the path; never write it to access logs."""
+
+    def filter(self, record):
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                re.sub(r"/cal/[^/?\s]+", "/cal/[redacted]", a) if isinstance(a, str) else a
+                for a in record.args
+            )
+        return True
 
 
 def create_app(
@@ -82,6 +99,7 @@ def create_app(
                 EventExtractor(ai, settings.openai_model),
                 NUSModsImporter(http, settings.nusmods_academic_year),
                 settings,
+                calendar_reader=CalendarReader(http),
             )
             bot_app = (
                 Application.builder()
@@ -100,6 +118,8 @@ def create_app(
                     BotCommand("block", "Mark yourself busy: busy sat 2-6pm"),
                     BotCommand("blocks", "Your busy blocks"),
                     BotCommand("reminders", "Night-before summary on or off"),
+                    BotCommand("free", "Am I free? e.g. /free fri 7-9pm"),
+                    BotCommand("calendar", "Calendar sync and your calendar's busy times"),
                     BotCommand("events", "Recent cards, including previews"),
                     BotCommand("cancel", "Clear pending action"),
                     BotCommand("deletemydata", "Delete everything about me"),
@@ -188,6 +208,27 @@ def create_app(
     dist = Path(__file__).resolve().parents[1] / "web" / "dist"
     if (dist / "index.html").is_file():
         app.mount("/app", StaticFiles(directory=dist, html=True), name="miniapp")
+
+    @app.get("/cal/{token}.ics")
+    async def calendar_feed(token: str, request: Request):
+        # The token is the whole secret, so every failure looks the same: 404.
+        if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+            raise HTTPException(404, "Not found")
+        if not app.state.ready or not app.state.service:
+            raise HTTPException(503, "Calendar unavailable")
+        content = await app.state.service.calendar_feed(
+            token, request.headers.get("user-agent", "")
+        )
+        if content is None:
+            raise HTTPException(404, "Not found")
+        return Response(
+            content,
+            media_type="text/calendar; charset=utf-8",
+            headers={
+                "Cache-Control": "private, max-age=300",
+                "Content-Disposition": 'inline; filename="amifree.ics"',
+            },
+        )
 
     @app.get("/healthz")
     async def health():

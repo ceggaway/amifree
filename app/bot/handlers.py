@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 from app.bot.delivery import webhook_delivery
-from app.bot.messages import Reply
+from app.bot.messages import Reply, send_reply
 from app.services.jobs import Notifier, Undeliverable
 from app.services.nusmods import ImportError
 
@@ -30,7 +30,7 @@ async def send(update: Update, replies: list[Reply]):
         await delivery.flush(update)
         return
     for reply in replies:
-        await update.effective_message.reply_text(reply.text, reply_markup=reply.keyboard)
+        await send_reply(update, reply)
 
 
 async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation: str):
@@ -60,8 +60,10 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
                 pass
             message = update.effective_message
             reference = message.forward_origin.date if message.forward_origin else message.date
+            # Event posts are often a poster with the details in its caption.
+            text = message.text or message.caption or ""
             replies = await service.message(
-                update.effective_user.id, message.message_id, message.text, reference
+                update.effective_user.id, message.message_id, text, reference
             )
         await send(update, replies)
     except ImportError as exc:
@@ -196,7 +198,9 @@ async def unsupported(update, context):
             update,
             [
                 Reply(
-                    "Please forward a text event. Photos, posters, audio and recurring events aren't supported in this MVP."
+                    "I can read the words in a post, but not what's inside a picture yet. "
+                    "Forward the post with its text, or type the details, like:\n"
+                    "Dinner Fri 7-9pm at Vivo"
                 )
             ],
         )
@@ -257,6 +261,8 @@ def register_handlers(application: Application, service):
                 "block",
                 "blocks",
                 "reminders",
+                "calendar",
+                "free",
                 "cancel",
                 "delete",
                 "deletemydata",
@@ -266,6 +272,8 @@ def register_handlers(application: Application, service):
     )
     application.add_handler(CallbackQueryHandler(callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message))
+    # A photo, video or file with a caption: read the caption like any forwarded plan.
+    application.add_handler(MessageHandler(filters.CAPTION & ~filters.COMMAND, message))
     application.add_handler(MessageHandler(filters.COMMAND, command))
     application.add_handler(MessageHandler(filters.ALL, unsupported))
     application.add_error_handler(error_handler)

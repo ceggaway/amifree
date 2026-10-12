@@ -196,5 +196,26 @@ await check('aggregate analytics SQL executes with seeded data', async () => {
   assert.equal(Number(reports[2].rows[0].clashes_detected),1);
   assert.equal(Number(reports[2].rows[0].median_processing_ms),1250);
 });
+await check('migration 007 moves a single calendar link and its busy times across', async () => {
+  const legacy = await one('select * from amifree_ensure_user($1)', [1007]);
+  await q("update users set personal_calendar_url='sealed-link', personal_calendar_synced_at=now() where id=$1", [legacy.id]);
+  await q("insert into calendar_busy_blocks(user_id,start_at,end_at) values($1,'2026-10-09T19:00:00+08:00','2026-10-09T20:00:00+08:00')", [legacy.id]);
+  await db.exec('reset role');
+  await db.exec(migrations.find(m => m.includes('Several personal calendar links')));
+  await db.exec('set role service_role');
+  const cals = (await q('select * from personal_calendars where user_id=$1', [legacy.id])).rows;
+  assert.equal(cals.length, 1); assert.equal(cals[0].sealed_url, 'sealed-link');
+  const blocks = (await q('select * from calendar_busy_blocks where user_id=$1', [legacy.id])).rows;
+  assert.equal(blocks.length, 1); assert.equal(blocks[0].calendar_id, cals[0].id);
+  assert.equal((await one('select personal_calendar_url from users where id=$1', [legacy.id])).personal_calendar_url, null);
+  // Replacing one calendar leaves another calendar's busy times alone.
+  const second = await one("insert into personal_calendars(user_id,sealed_url,url_hash,label) values($1,'s2','h2','Events') returning *", [legacy.id]);
+  await q('select amifree_replace_calendar($1,$2,$3)', [second.id, JSON.stringify([{start_at:'2026-10-10T12:00:00+08:00', end_at:'2026-10-10T13:00:00+08:00'}]), '2026-10-09T00:00:00+08:00']);
+  await q('select amifree_replace_calendar($1,$2,$3)', [cals[0].id, '[]', '2026-10-09T00:00:00+08:00']);
+  const left = (await q('select calendar_id from calendar_busy_blocks where user_id=$1', [legacy.id])).rows;
+  assert.deepEqual(left.map(r => r.calendar_id), [second.id]);
+  await q('delete from users where id=$1', [legacy.id]);
+  assert.equal((await one('select count(*)::int n from personal_calendars where user_id=$1', [legacy.id])).n, 0);
+});
 await db.close();
 console.log(`${count} PostgreSQL schema checks passed.`);

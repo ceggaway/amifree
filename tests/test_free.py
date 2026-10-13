@@ -207,3 +207,33 @@ def test_dates_with_hyphens_are_not_time_ranges():
     q = parse_free("2026-10-16 7-9pm", MONDAY)
     assert (q.slot.start_at, q.slot.end_at) == (at(16, 19), at(16, 21))
     assert parse_free("2026-10-16", MONDAY).days == (date(2026, 10, 16),)
+
+
+async def test_free_shows_saved_plans_as_tentative_not_busy(service_factory, reference):
+    service, _ = service_factory(extraction())  # CCA dinner Fri 9 Oct 7-9pm
+    card = (await service.message(1, 1, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
+    await service.callback(1, tap(card, "Save"))
+    reply = (await service.command(1, "free", "fri"))[0]
+    # Surely free around the dinner, and the dinner slot is tentative rather than taken.
+    assert "🟢 Free on Fri 9 Oct:\n• 8am – 7pm\n• 9pm – 11pm" in reply.text
+    assert (
+        "🟡 Tentative, you have a Saved plan (not decided):\n• 7pm – 9pm CCA dinner" in reply.text
+    )
+    assert "Saved plans are shown as tentative, not busy." in reply.text
+    # Going makes it definite: the slot is busy and nothing is tentative any more.
+    await service.callback(1, tap((await service.command(1, "plans"))[0], "Going"))
+    reply = (await service.command(1, "free", "fri"))[0]
+    assert "🟡" not in reply.text and "• 8am – 7pm\n• 9pm – 11pm" in reply.text
+
+
+async def test_a_day_covered_only_by_saved_plans_is_tentatively_free(service_factory, reference):
+    service, _ = service_factory(
+        extraction(
+            title="Hackathon", date_text="Friday", start_time_text="08:00", end_time_text="23:00"
+        )
+    )
+    card = (await service.message(1, 1, "Hackathon Friday 08:00 23:00", reference))[0]
+    await service.callback(1, tap(card, "Save"))
+    reply = (await service.command(1, "free", "fri"))[0]
+    assert "🔴" not in reply.text and "🟢" not in reply.text
+    assert "🟡 Otherwise free, but you have a Saved plan (not decided):" in reply.text

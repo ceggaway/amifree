@@ -45,6 +45,8 @@ async def test_sdk_queries_are_scoped_and_rpcs_match_schema(reference):
         if path in ("amifree_create_preview", "amifree_rsvp", "amifree_update_event"):
             assert body["p_user_id"] == uid
             return httpx.Response(200, json=[event])
+        if path == "schema_migrations":
+            return httpx.Response(200, json=[{"version": 8}])
         if path == "events":
             if request.url.params.get("select") == "id":
                 assert request.url.params.get("limit") == "1"
@@ -84,3 +86,56 @@ async def test_sdk_queries_are_scoped_and_rpcs_match_schema(reference):
         await repo.update_event(uid, preview, draft)
         await repo.delete_user(uid)
         assert any(r.method == "DELETE" and r.url.params["id"] == f"eq.{uid}" for r in calls)
+
+
+async def test_ping_names_missing_migration_objects_and_fails():
+    import logging
+
+    def handler(request):
+        path = request.url.path.rsplit("/", 1)[-1]
+        if path in ("personal_calendars", "amifree_replace_calendar"):
+            return httpx.Response(404, json={"message": "not found", "code": "42P01"})
+        return httpx.Response(200, json=[])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = await acreate_client(
+            "https://example.supabase.co",
+            "test-service-role-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        logger = logging.getLogger("app.db.supabase")
+        logger.addHandler(Capture())
+        try:
+            await repo.ping()
+        except RuntimeError as exc:
+            assert "out of date" in str(exc)
+        else:
+            raise AssertionError("ping accepted a database without migration 007")
+    assert any("personal_calendars" in m and "amifree_replace_calendar" in m for m in records)
+
+
+async def test_ping_rejects_a_database_behind_the_required_schema_version():
+    def handler(request):
+        if request.url.path.rsplit("/", 1)[-1] == "schema_migrations":
+            return httpx.Response(200, json=[{"version": 7}])
+        return httpx.Response(200, json=[])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = await acreate_client(
+            "https://example.supabase.co",
+            "test-service-role-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        try:
+            await SupabaseRepository(client).ping()
+        except RuntimeError as exc:
+            assert "out of date" in str(exc)
+        else:
+            raise AssertionError("ping accepted schema version 7")

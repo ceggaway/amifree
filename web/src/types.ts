@@ -36,4 +36,6 @@ export type Me = {
   telegram_user_id: number;
   reminders_enabled: boolean;
   nusmods: { connected: boolean; academic_year: string | null; semester: number | null };
+  calendars: { label: string; synced_at: string | null; status: "CONNECTED" | "PENDING" | "ERROR" }[];
+  outside_calendars_connected: boolean;
 };

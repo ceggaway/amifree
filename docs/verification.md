@@ -1,5 +1,20 @@
 # Verification report
 
+## Audit fixes: 13 October 2026
+
+Local checks only, on `main` plus uncommitted changes, using Python 3.12.1 and Node.js 24.8.0. **Not run against live Telegram, OpenAI or a hosted Supabase project**, and migrations `005`–`008` have not been applied to any hosted database. CI (`.github/workflows/ci.yml`) is added but has not yet run on GitHub.
+
+| Layer | Result | Evidence and limits |
+| --- | --- | --- |
+| Python tests | **394 passed** | Includes the PGlite database integration test (not skipped) |
+| Application coverage | **93% statements** | `pytest --cov=app` |
+| PostgreSQL schema and migrations | **24 checks passed** | `npm --prefix scripts/sql-tests test` |
+| Lint, format | Pass | `ruff check`, `ruff format` |
+| Backend smoke | Pass | `scripts/smoke_backend.py` |
+| Mini App tests and build | **11 passed**; build passes | `vitest run`, `tsc --noEmit`, `vite build` |
+
+Changed in this pass: readiness now checks the calendar tables, columns and function; `/api/me` reports real calendar state; `/whosfree` excludes members with no schedule from "no known clash" counts; sign-in, extraction and calendar-link fetches are rate limited; due calendars are selected in the database.
+
 ## Must-haves and Mini App: 9 October 2026
 
 Local checks only, on branch `feat/must-haves`, using Python 3.12.1 and Node.js 24.8.0. **No feature in this section has been run against live Telegram, OpenAI or a hosted Supabase project**, and migrations `001`–`004` have not been applied to any hosted database.

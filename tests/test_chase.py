@@ -93,6 +93,9 @@ async def test_automatic_chase_after_a_day(service_factory, reference):
 
 async def test_poll_nudges_non_voters(service_factory, reference):
     service, repo = service_factory()
+    for telegram_id in (1, 2, 3):  # a timetable, so their empty week counts as known
+        await repo.ensure_user(telegram_id)
+        repo.users[telegram_id].coverage_start = reference - timedelta(days=60)
     bot, transport = make_bot(service)
     outbox = Outbox()
     service.notifier = Notifier(service, outbox)

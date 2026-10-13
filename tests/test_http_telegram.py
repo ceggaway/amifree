@@ -242,3 +242,88 @@ async def test_a_poster_with_a_caption_is_read_like_any_plan(service_factory, re
         assert "photo" not in reply.lower() and "end" in reply.lower()  # asks when it ends
         await bot.process_update(Update.de_json(photo_payload(None, 8), bot.bot))
         assert "not what's inside a picture yet" in transport.sent[-1]["text"]
+
+
+async def webhook_app(service):
+    transport = TelegramTransport()
+    bot = (
+        Application.builder()
+        .token("123456:fake-test-token")
+        .request(transport)
+        .updater(None)
+        .build()
+    )
+    register_handlers(bot, service)
+    settings = Settings(
+        _env_file=None,
+        bot_mode="webhook",
+        app_base_url="https://example.test",
+        telegram_webhook_secret="test_secret_123456",
+    )
+    return create_app(settings, service=service, telegram_application=bot), bot, transport
+
+
+HEADERS = {"X-Telegram-Bot-Api-Secret-Token": "test_secret_123456"}
+DINNER = "CCA dinner Friday 7–9pm at Vivo"
+
+
+async def test_a_retried_update_is_not_repeated_even_after_a_restart(service_factory, reference):
+    service, repo = service_factory(extraction())  # a second extraction would run out of items
+    await onboard(service, reference)
+    app, bot, transport = await webhook_app(service)
+    async with (
+        bot,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="https://example.test", headers=HEADERS
+        ) as client,
+    ):
+        payload = message_payload(DINNER, 40, forward_timestamp=int(reference.timestamp()))
+        assert (await client.post("/telegram/webhook", json=payload)).status_code == 200
+        sent, previews = len(transport.sent), len(repo.events)
+        assert repo.updates[40] == "done"
+        # The process restarted: its in-memory record of recent updates is gone.
+        app.state.deliveries.clear()
+        assert (await client.post("/telegram/webhook", json=payload)).status_code == 200
+        assert (len(transport.sent), len(repo.events)) == (sent, previews)
+        assert len(service.extractor.calls) == 1
+
+
+async def test_a_failure_before_anything_commits_is_retried(service_factory, reference):
+    service, repo = service_factory(TimeoutError("upstream"), extraction())
+    await onboard(service, reference)
+    app, bot, transport = await webhook_app(service)
+    async with (
+        bot,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="https://example.test", headers=HEADERS
+        ) as client,
+    ):
+        payload = message_payload(DINNER, 41, forward_timestamp=int(reference.timestamp()))
+        first = await client.post("/telegram/webhook", json=payload)
+        assert first.status_code == 503 and 41 not in repo.updates  # claim released
+        app.state.deliveries.clear()
+        second = await client.post("/telegram/webhook", json=payload)
+        assert second.status_code == 200 and repo.updates[41] == "done"
+        assert len(service.extractor.calls) == 2
+
+
+async def test_an_update_stuck_in_processing_is_retaken_once_stale(service_factory, reference):
+    service, repo = service_factory(extraction())
+    await onboard(service, reference)
+    app, bot, _ = await webhook_app(service)
+    async with (
+        bot,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="https://example.test", headers=HEADERS
+        ) as client,
+    ):
+        repo.updates[42] = "processing"  # a worker that crashed mid-update
+        payload = message_payload(DINNER, 42, forward_timestamp=int(reference.timestamp()))
+        await client.post("/telegram/webhook", json=payload)
+        assert service.extractor.calls == []  # still fresh: not retaken
+        repo.stale_updates.add(42)
+        await client.post("/telegram/webhook", json=payload)
+        assert len(service.extractor.calls) == 1 and repo.updates[42] == "done"

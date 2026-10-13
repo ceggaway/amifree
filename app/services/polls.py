@@ -65,8 +65,12 @@ def suggest_slots(
     minutes: int,
     busy: dict[str, list[tuple[datetime, datetime]]],
     now: datetime,
+    unknown: int = 0,
 ) -> list[dict]:
-    """The three non-overlapping slots where most participants are free, earliest first on ties."""
+    """The three non-overlapping slots where most participants have no known clash.
+
+    `busy` holds only people whose schedule is known; `unknown` counts joiners with no schedule
+    data, so a slot can say "2 of 3 with a schedule" instead of treating missing data as free."""
     length = timedelta(minutes=minutes)
     candidates = []
     day = start.astimezone(SG).date()
@@ -89,7 +93,13 @@ def suggest_slots(
         if len(chosen) == 3:
             break
     return [
-        {"start_at": slot.isoformat(), "end_at": (slot + length).isoformat(), "free": free}
+        {
+            "start_at": slot.isoformat(),
+            "end_at": (slot + length).isoformat(),
+            "free": free,
+            "of": len(busy),
+            "unknown": unknown,
+        }
         for slot, free in sorted(chosen)
     ]
 
@@ -128,12 +138,22 @@ def poll_card(poll: Poll, joined: int, tally: dict[tuple[int, str], int]) -> Rep
         )
         lines.append(
             f"{index + 1}. {draft.start_at:%a %-d %b %H:%M}–{draft.end_at:%H:%M}"
-            f" · {slot['free']} of {joined} free\n    {votes}"
+            f" · {slot['free']} of {slot.get('of', joined)} with no known clash\n    {votes}"
         )
+    unknown = max((s.get("unknown", 0) for s in poll.slots), default=0)
+    known = poll.slots[0].get("of", joined) if poll.slots else joined
+    coverage = (
+        f"\n{unknown} member{'s' if unknown != 1 else ''} had no schedule to check, so"
+        " they aren't counted. Answer by hand."
+        if unknown
+        else ""
+    )
     return Reply(
         head
-        + f"\nBest slots from {joined} schedules:\n\n"
+        + f"\nBest slots from {known} schedule{'s' if known != 1 else ''}"
+        + " (no known clashes, not confirmed free):\n\n"
         + "\n".join(lines)
+        + coverage
         + "\n\nTap Fill mine to answer from your schedule (only you see the result), or answer by hand.",
         poll_keyboard(poll),
     )
@@ -163,12 +183,19 @@ class PollService:
     async def posted(self, poll_id: str, message_id: int):
         await self.repo.set_poll_message(poll_id, message_id)
 
-    async def busy_spans(self, poll: Poll, user_id: str) -> list[tuple[datetime, datetime]]:
+    async def busy_spans(self, poll: Poll, user_id: str) -> list[tuple[datetime, datetime]] | None:
+        """Busy times in the poll window, or None when we hold no schedule for this person.
+
+        With no timetable, calendar or blocks, "nothing busy" would only mean "nothing known",
+        and must not be counted as free."""
         user = await self.repo.get_user(user_id)
         if not user:
-            return []
+            return None
         window = EventDraft(title="window", start_at=poll.window_start, end_at=poll.window_end)
         blocks, events = await self.repo.busy(user.id, window)
+        synced = any(c.synced_at for c in await self.repo.list_calendars(user.id))
+        if not (user.coverage_start or synced or blocks or events):
+            return None
         definite = blocks + [e for e in events if e.status == Status.GOING]
         return [(b.start_at, b.end_at) for b in definite]
 
@@ -206,13 +233,22 @@ class PollService:
                     alert=f"{len(people)} joined so far. At least {MIN_PARTICIPANTS} are needed, so"
                     " nobody's schedule can be worked out from the result."
                 )
-            busy = {person: await self.busy_spans(poll, person) for person in people}
+            spans = {person: await self.busy_spans(poll, person) for person in people}
+            busy = {person: found for person, found in spans.items() if found is not None}
+            if len(busy) < MIN_PARTICIPANTS:
+                return GroupResult(
+                    alert=f"{len(people)} joined, but only {len(busy)} have a schedule AmIFree can"
+                    f" read. At least {MIN_PARTICIPANTS} are needed, so nobody's schedule can be"
+                    " worked out from the result. Members can send their NUSMods or calendar link"
+                    " to the bot."
+                )
             slots = suggest_slots(
                 poll.window_start,
                 poll.window_end,
                 poll.duration_minutes,
                 busy,
                 self.scheduling.clock(),
+                unknown=len(people) - len(busy),
             )
             if not slots:
                 return GroupResult(alert="There is no time left in that window. Start a new poll.")
@@ -223,6 +259,12 @@ class PollService:
         if poll.status != "OPEN":
             return GroupResult(alert="The organiser hasn't suggested slots yet.")
         if action == "fill":
+            if await self.busy_spans(poll, user.id) is None:
+                # An empty schedule would answer "Free" to everything: say so instead.
+                return GroupResult(
+                    alert="I have no schedule for you yet, so I can't fill this in. Send your"
+                    " NUSMods or calendar link to the bot privately, or answer by hand."
+                )
             votes, summary = {}, []
             for index in range(len(poll.slots)):
                 availability = await self.scheduling.availability(user, slot_draft(poll, index))

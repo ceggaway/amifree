@@ -19,6 +19,7 @@ from app.schemas.event import Event, EventDraft, Status
 from app.services.availability import Availability
 from app.services.date_resolution import Clarification
 from app.services.quick_blocks import MAX_RULES, describe, parse_block
+from app.services.ratelimit import RateLimiter
 
 PLAN_STATUSES = [Status.SAVED, Status.GOING, Status.MAYBE]
 EDITABLE = ("title", "start_at", "end_at", "location", "notes")
@@ -104,10 +105,18 @@ def build_router(settings: Settings) -> APIRouter:
         return await service.repo.ensure_user(telegram_id)
 
     CurrentUser = Annotated[User, Depends(current_user)]
+    sign_in_limit = RateLimiter(30, 60)
+
+    def client_ip(request: Request) -> str:
+        # Behind the host's proxy the last forwarded hop is the one it added, not the caller's claim.
+        forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
+        return forwarded or (request.client.host if request.client else "unknown")
 
     @router.post("/auth/telegram")
     async def authenticate(body: AuthRequest, request: Request):
         service = service_of(request)
+        if not sign_in_limit.allow(client_ip(request)):
+            raise HTTPException(429, "Too many sign-in attempts. Wait a minute and try again.")
         try:
             telegram_id = verify_init_data(body.init_data, token, settings.init_data_max_age)
         except AuthError:
@@ -119,7 +128,8 @@ def build_router(settings: Settings) -> APIRouter:
         }
 
     @router.get("/me")
-    async def me(user: CurrentUser):
+    async def me(request: Request, user: CurrentUser):
+        calendars = await service_of(request).repo.list_calendars(user.id)
         return {
             "telegram_user_id": user.telegram_user_id,
             "reminders_enabled": user.reminders_enabled,
@@ -130,7 +140,15 @@ def build_router(settings: Settings) -> APIRouter:
                 "coverage_start": user.coverage_start,
                 "coverage_end": user.coverage_end,
             },
-            "outside_calendars_connected": False,
+            "calendars": [
+                {
+                    "label": c.label,
+                    "synced_at": c.synced_at.isoformat() if c.synced_at else None,
+                    "status": "ERROR" if c.error else ("CONNECTED" if c.synced_at else "PENDING"),
+                }
+                for c in calendars
+            ],
+            "outside_calendars_connected": any(c.synced_at and not c.error for c in calendars),
         }
 
     async def plans_between(service, user, start, end):

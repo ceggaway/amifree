@@ -55,7 +55,7 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
   const data = (body ?? {}) as Record<string, unknown>;
   let result: unknown;
   if (path === "/api/me") {
-    result = { telegram_user_id: 1, reminders_enabled: true, nusmods: { connected: false } };
+    result = { telegram_user_id: 1, reminders_enabled: true, nusmods: { connected: false }, calendars: [], outside_calendars_connected: false };
   } else if (path.startsWith("/api/plans/")) {
     const id = path.split("/").pop();
     plans = plans.map((p) =>

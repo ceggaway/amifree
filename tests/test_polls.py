@@ -45,6 +45,13 @@ def test_slots_prefer_most_people_free_then_earliest(reference):
     assert suggest_slots(start, end, 60, {"a": []}, end) == []
 
 
+async def with_schedule(repo, *telegram_ids):
+    """Give members a NUSMods timetable, so an empty week reads as free rather than unknown."""
+    for telegram_id in telegram_ids:
+        await repo.ensure_user(telegram_id)
+        repo.users[telegram_id].coverage_start = datetime(2026, 8, 1, tzinfo=SG)
+
+
 async def run_poll(service, repo, joiners=(2, 3)):
     bot, transport = make_bot(service)
     async with bot:
@@ -99,6 +106,7 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
     await service.callback(2, lab.keyboard.inline_keyboard[0][0].callback_data)
     brunch = (await service.message(3, 6, "Brunch Monday 14:00 16:00", reference))[0]
     await service.callback(3, brunch.keyboard.inline_keyboard[2][0].callback_data)
+    await with_schedule(repo, 1, 2, 3)
     bot, transport, _, taps, poll = await run_poll(service, repo)
     async with bot:
         await bot.process_update(
@@ -106,8 +114,9 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
         )
         opened = last_card(transport)
         # Everyone is free from 14:00, so the morning never appears.
-        assert "1. Mon 5 Oct 14:00–16:00 · 3 of 3 free" in opened["text"]
-        assert "2. Mon 5 Oct 16:00–18:00 · 3 of 3 free" in opened["text"]
+        assert "1. Mon 5 Oct 14:00–16:00 · 3 of 3 with no known clash" in opened["text"]
+        assert "2. Mon 5 Oct 16:00–18:00 · 3 of 3 with no known clash" in opened["text"]
+        assert "no known clashes, not confirmed free" in opened["text"]
         # The card shows counts only: no names, no titles of anyone's plans.
         assert "Lab" not in opened["text"] and "Brunch" not in opened["text"]
         taps = buttons(opened["reply_markup"])
@@ -173,3 +182,52 @@ async def test_poll_is_bound_to_its_chat_and_needs_a_topic(service_factory):
         await bot.process_update(Update.de_json(update, bot.bot))
     assert len(repo.polls) == 1 and len(repo.poll_people[poll.id]) == 1
     assert "works in group chats" in (await service.command(1, "whosfree"))[0].text
+
+
+async def test_members_with_no_schedule_are_never_counted_as_free(service_factory):
+    service, repo = service_factory()
+    await with_schedule(repo, 1, 2, 3)
+    bot, transport, _, taps, poll = await run_poll(service, repo, joiners=(2, 3, 4))
+    async with bot:
+        await bot.process_update(
+            Update.de_json(group_tap(taps["Suggest slots (organiser)"], 1, update_id=8300), bot.bot)
+        )
+        text = last_card(transport)["text"]
+    # Member 4 joined but gave AmIFree nothing to check: said so, and not counted.
+    assert "of 3 with no known clash" in text and "of 4" not in text
+    assert "1 member had no schedule to check" in text
+    assert repo.polls[poll.id].slots[0]["of"] == 3 and repo.polls[poll.id].slots[0]["unknown"] == 1
+
+
+async def test_slots_need_three_members_with_a_schedule(service_factory):
+    service, repo = service_factory()
+    await with_schedule(repo, 1, 2)  # joiner 3 has no timetable, calendar or blocks
+    bot, transport, _, taps, poll = await run_poll(service, repo, joiners=(2, 3))
+    async with bot:
+        await bot.process_update(
+            Update.de_json(group_tap(taps["Suggest slots (organiser)"], 1, update_id=8400), bot.bot)
+        )
+        assert "only 2 have a schedule" in alerts(transport)[-1]["text"]
+    assert repo.polls[poll.id].status == "COLLECTING" and repo.polls[poll.id].slots == []
+
+
+async def test_fill_mine_refuses_to_answer_free_for_someone_with_no_schedule(service_factory):
+    service, repo = service_factory()
+    await with_schedule(repo, 1, 2, 3)
+    bot, transport, _, taps, poll = await run_poll(service, repo, joiners=(2, 3, 4))
+    async with bot:
+        await bot.process_update(
+            Update.de_json(group_tap(taps["Suggest slots (organiser)"], 1, update_id=8500), bot.bot)
+        )
+        taps = buttons(last_card(transport)["reply_markup"])
+        await bot.process_update(
+            Update.de_json(group_tap(taps["Fill mine"], 4, update_id=8501), bot.bot)
+        )
+        assert "no schedule for you yet" in alerts(transport)[-1]["text"]
+        # Nothing was recorded for them; members who do have a schedule can still fill.
+        fourth = (await repo.ensure_user(4)).id
+        assert not any(key[1] == fourth for key in repo.poll_votes)
+        await bot.process_update(
+            Update.de_json(group_tap(taps["Fill mine"], 2, update_id=8502), bot.bot)
+        )
+        assert alerts(transport)[-1]["text"].startswith("Filled from your schedule")

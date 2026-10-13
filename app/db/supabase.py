@@ -1,5 +1,6 @@
 """All I/O is async and server-side; every event operation requires its owner."""
 
+import logging
 from datetime import UTC, datetime, time, timedelta
 
 from supabase import AsyncClient
@@ -11,6 +12,8 @@ from app.services.nusmods import ImportResult
 from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
+# The newest migration this code needs; each migration from 008 on records itself.
+SCHEMA_VERSION = 8
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -23,25 +26,64 @@ def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
     )
 
 
+log = logging.getLogger(__name__)
+
+
 class SupabaseRepository:
     def __init__(self, client: AsyncClient, pending_ttl_hours: int = 24):
         self.client = client
         self.pending_ttl_hours = pending_ttl_hours
 
     async def ping(self):
-        # Check all required tables are present, not merely that the host responds.
-        for table in (
-            "users",
-            "timetable_blocks",
-            "events",
-            "event_extractions",
-            "user_actions",
-            "manual_busy_blocks",
-            "group_events",
-            "notification_logs",
-            "polls",
-        ):
-            await self.client.table(table).select("id").limit(1).execute()
+        # Check everything the current code needs (tables, columns and the calendar function),
+        # not merely that the host responds. A missing migration fails here, by name, in the log.
+        required = {
+            "users": "id,calendar_feed_token,calendar_feed_seen_at",
+            "timetable_blocks": "id",
+            "events": "id",
+            "event_extractions": "id",
+            "user_actions": "id",
+            "manual_busy_blocks": "id",
+            "group_events": "id",
+            "notification_logs": "id",
+            "polls": "id",
+            "personal_calendars": "id,user_id,url_hash,label,synced_at,checked_at,error",
+            "calendar_busy_blocks": "id,user_id,calendar_id,start_at,end_at",
+            "schema_migrations": "version,name",
+            "processed_updates": "update_id,status,claimed_at",
+        }
+        missing = []
+        for table, columns in required.items():
+            try:
+                await self.client.table(table).select(columns).limit(1).execute()
+            except Exception:
+                missing.append(table)
+        try:
+            # A nil calendar id owns nothing, so this probes that migration 007's function
+            # exists and is callable without changing any data.
+            await self.client.rpc(
+                "amifree_replace_calendar",
+                {
+                    "p_calendar_id": "00000000-0000-0000-0000-000000000000",
+                    "p_blocks": [],
+                    "p_synced_at": datetime.now(UTC).isoformat(),
+                },
+            ).execute()
+        except Exception:
+            missing.append("function amifree_replace_calendar")
+        if "schema_migrations" not in missing:
+            rows = (
+                await self.client.table("schema_migrations")
+                .select("version")
+                .order("version", desc=True)
+                .limit(1)
+                .execute()
+            ).data
+            if not rows or rows[0]["version"] < SCHEMA_VERSION:
+                missing.append(f"schema version {SCHEMA_VERSION}")
+        if missing:
+            log.error("database_schema_incomplete missing=%s", ", ".join(missing))
+            raise RuntimeError("Database schema is out of date")
 
     async def ensure_user(self, telegram_id: int) -> User:
         result = await self.client.rpc(
@@ -453,17 +495,17 @@ class SupabaseRepository:
         )
 
     async def calendars_due(self, before: datetime, limit: int = 20) -> list[PersonalCalendar]:
+        # Never-checked calendars first, then the stalest; filtered and bounded in the database.
+        cutoff = before.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         rows = (
             await self.client.table("personal_calendars")
             .select("*")
-            .order("id")
-            .limit(5000)
+            .or_(f"checked_at.is.null,checked_at.lt.{cutoff}")
+            .order("checked_at", desc=False, nullsfirst=True)
+            .limit(limit)
             .execute()
         ).data
-        due = [PersonalCalendar.model_validate(r) for r in rows]
-        due = [c for c in due if not c.checked_at or c.checked_at < before]
-        due.sort(key=lambda c: c.checked_at or datetime.min.replace(tzinfo=UTC))
-        return due[:limit]
+        return [PersonalCalendar.model_validate(r) for r in rows]
 
     async def set_feed_token(self, user_id: str, token: str | None):
         # A new (or no) link always resets "seen": the old subscription no longer works.
@@ -502,6 +544,37 @@ class SupabaseRepository:
     async def claim_notifications(self, limit: int = 50) -> list[dict]:
         result = await self.client.rpc("amifree_claim_notifications", {"p_limit": limit}).execute()
         return result.data or []
+
+    async def claim_update(self, update_id: int) -> bool:
+        """True if this caller should process the Telegram update (see migration 008)."""
+        result = await self.client.rpc("amifree_claim_update", {"p_update_id": update_id}).execute()
+        return bool(result.data)
+
+    async def finish_update(self, update_id: int):
+        await self.client.rpc("amifree_finish_update", {"p_update_id": update_id}).execute()
+
+    async def release_update(self, update_id: int):
+        await self.client.rpc("amifree_release_update", {"p_update_id": update_id}).execute()
+
+    async def notification_stats(self, now: datetime) -> dict:
+        """Backlog counts and the age of the oldest undelivered message, for monitoring."""
+        rows = (
+            await self.client.table("notification_logs")
+            .select("status,created_at")
+            .in_("status", ["pending", "sending", "failed"])
+            .limit(5000)
+            .execute()
+        ).data
+        counts = {"pending": 0, "sending": 0, "failed": 0}
+        oldest = None
+        for row in rows:
+            counts[row["status"]] += 1
+            if row["status"] == "failed":
+                continue
+            created = datetime.fromisoformat(row["created_at"])
+            oldest = created if oldest is None else min(oldest, created)
+        age = max(0, int((now - oldest).total_seconds())) if oldest else None
+        return counts | {"oldest_undelivered_seconds": age}
 
     async def finish_notification(self, notification_id: str, ok: bool, permanent: bool):
         await self.client.rpc(

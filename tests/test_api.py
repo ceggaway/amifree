@@ -52,7 +52,7 @@ async def test_sign_in_requires_a_valid_telegram_signature(api):
     token = response.json()["token"]
     me = await client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
     assert me.json()["telegram_user_id"] == 7 and me.json()["nusmods"]["connected"] is False
-    assert me.json()["outside_calendars_connected"] is False
+    assert me.json()["outside_calendars_connected"] is False and me.json()["calendars"] == []
 
 
 async def test_every_route_rejects_missing_forged_and_expired_sessions(api):
@@ -291,3 +291,50 @@ async def test_api_unavailable_without_a_bot_and_cors_is_opt_in(service_factory)
     ):
         with pytest.raises(ValueError):
             Settings(_env_file=None, bot_mode="disabled", **bad)
+
+
+async def test_me_reports_connected_calendars_truthfully(api, reference):
+    client, service, repo = api
+    user = await repo.ensure_user(7)
+    headers = bearer(7)
+    me = (await client.get("/api/me", headers=headers)).json()
+    assert me["outside_calendars_connected"] is False and me["calendars"] == []
+    good, _ = await repo.add_calendar(user.id, "sealed-1", "hash-1", "CCA")
+    bad, _ = await repo.add_calendar(user.id, "sealed-2", "hash-2", "Events")
+    # A link we have not read yet is not "connected".
+    me = (await client.get("/api/me", headers=headers)).json()
+    assert me["outside_calendars_connected"] is False
+    assert {c["status"] for c in me["calendars"]} == {"PENDING"}
+    await repo.replace_calendar(good.id, [], reference)
+    me = (await client.get("/api/me", headers=headers)).json()
+    assert me["outside_calendars_connected"] is True
+    assert {c["label"]: c["status"] for c in me["calendars"]} == {
+        "CCA": "CONNECTED",
+        "Events": "PENDING",
+    }
+    # A revoked link is reported as an error, and never exposes the stored (sealed) URL.
+    repo.calendars[bad.id].error = "revoked"
+    me = (await client.get("/api/me", headers=headers)).json()
+    assert {c["label"]: c["status"] for c in me["calendars"]}["Events"] == "ERROR"
+    assert "sealed" not in str(me) and "revoked" not in str(me)
+    # Someone else's calendars never show up.
+    assert (await client.get("/api/me", headers=bearer(8))).json()["calendars"] == []
+
+
+async def test_sign_in_is_rate_limited_per_caller(api):
+    client, service, repo = api
+    forged = {"init_data": "auth_date=1&hash=0"}
+    codes = [
+        (
+            await client.post(
+                "/api/auth/telegram", json=forged, headers={"x-forwarded-for": "9.9.9.9"}
+            )
+        ).status_code
+        for _ in range(31)
+    ]
+    assert codes[:30] == [401] * 30 and codes[30] == 429
+    # Another caller is unaffected.
+    other = await client.post(
+        "/api/auth/telegram", json=forged, headers={"x-forwarded-for": "8.8.8.8"}
+    )
+    assert other.status_code == 401

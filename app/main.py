@@ -51,6 +51,20 @@ class RedactFeedTokens(logging.Filter):
         return True
 
 
+def telegram_builder():
+    # python-telegram-bot defaults to 5s timeouts, which fail on slow networks.
+    return (
+        Application.builder()
+        .concurrent_updates(False)
+        .connect_timeout(15)
+        .read_timeout(20)
+        .write_timeout(20)
+        .pool_timeout(10)
+        .get_updates_connect_timeout(15)
+        .get_updates_read_timeout(25)
+    )
+
+
 def create_app(
     settings: Settings | None = None, *, service=None, telegram_application=None
 ) -> FastAPI:
@@ -102,10 +116,7 @@ def create_app(
                 calendar_reader=CalendarReader(http),
             )
             bot_app = (
-                Application.builder()
-                .token(settings.telegram_bot_token.get_secret_value())
-                .concurrent_updates(False)
-                .build()
+                telegram_builder().token(settings.telegram_bot_token.get_secret_value()).build()
             )
             register_handlers(bot_app, app.state.service)
             app.state.telegram = bot_app
@@ -244,8 +255,7 @@ def create_app(
             raise HTTPException(503, "Database is unavailable") from None
         return {"status": "ready", "database": "connected"}
 
-    @app.post("/internal/jobs/run")
-    async def run_jobs(request: Request):
+    def jobs_notifier(request: Request):
         secret = settings.jobs_secret.get_secret_value()
         if not secret:
             raise HTTPException(404, "Jobs endpoint is disabled")
@@ -255,7 +265,16 @@ def create_app(
         notifier = getattr(app.state.service, "notifier", None)
         if not app.state.ready or not notifier:
             raise HTTPException(503, "Bot unavailable")
-        return await notifier.run()
+        return notifier
+
+    @app.post("/internal/jobs/run")
+    async def run_jobs(request: Request):
+        return await jobs_notifier(request).run()
+
+    @app.get("/internal/jobs/stats")
+    async def job_stats(request: Request):
+        # Counts only: for an uptime monitor to alert on a stuck or failing outbox.
+        return await jobs_notifier(request).stats()
 
     @app.post("/telegram/webhook")
     async def webhook(request: Request):
@@ -283,11 +302,21 @@ def create_app(
             # business operation (including /delete or a confirmed edit).
             deliveries = app.state.deliveries
             delivery = deliveries.get(update.update_id)
+            repo = getattr(app.state.service, "repo", None)
+            durable = delivery is None and hasattr(repo, "claim_update")
+            if durable and not await repo.claim_update(update.update_id):
+                # Already handled (or being handled) by an earlier attempt, perhaps before a
+                # restart emptied the in-memory record: acknowledge, do not repeat it.
+                return {"ok": True}
             if delivery is None:
                 delivery = Delivery()
                 token = webhook_delivery.set(delivery)
                 try:
                     await app.state.telegram.process_update(update)
+                except BaseException:
+                    if durable:
+                        await repo.release_update(update.update_id)
+                    raise
                 finally:
                     webhook_delivery.reset(token)
             else:
@@ -301,6 +330,12 @@ def create_app(
                 deliveries.move_to_end(update.update_id)
                 while len(deliveries) > 1000:
                     deliveries.popitem(last=False)
+            if durable:
+                if not delivery.failed:
+                    await repo.finish_update(update.update_id)
+                elif delivery.replies is None:
+                    # Failed before anything was committed: let the retry run it again.
+                    await repo.release_update(update.update_id)
             if delivery.failed:
                 raise HTTPException(503, "Update processing or reply delivery failed")
         return {"ok": True}

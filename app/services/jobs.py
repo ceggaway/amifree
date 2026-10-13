@@ -19,6 +19,7 @@ from app.services.reminders import enqueue_nightly, summary
 from app.services.scheduling import synced
 
 log = logging.getLogger(__name__)
+BACKLOG_ALERT_SECONDS = 900
 
 
 class Undeliverable(Exception):
@@ -143,4 +144,26 @@ class Notifier:
             log.warning("calendar_refresh_tick_failed error_type=%s", type(exc).__name__)
             calendars = 0
         extra = {"calendars": calendars} if calendars else {}
-        return {"queued": queued} | extra | await self.deliver()
+        result = {"queued": queued} | extra | await self.deliver()
+        await self.report_backlog()
+        return result
+
+    async def stats(self) -> dict:
+        return await self.repo.notification_stats(self.scheduling.clock())
+
+    async def report_backlog(self):
+        """Make a stuck or failing outbox visible in the logs, where alerts can pick it up."""
+        try:
+            stats = await self.stats()
+        except Exception as exc:
+            log.warning("notification_stats_failed error_type=%s", type(exc).__name__)
+            return
+        age = stats["oldest_undelivered_seconds"] or 0
+        if stats["failed"] or age > BACKLOG_ALERT_SECONDS:
+            log.warning(
+                "notification_backlog pending=%s sending=%s failed=%s oldest_seconds=%s",
+                stats["pending"],
+                stats["sending"],
+                stats["failed"],
+                age,
+            )

@@ -11,6 +11,17 @@ export function Home() {
   const today = dayKey(new Date());
   const tomorrow = dayKey(addDays(new Date(), 1));
   const on = (key: string) => plans.data!.plans.filter((p) => dayKey(p.start_at) === key);
+  const calendars = me.data?.calendars ?? [];
+  const broken = calendars.filter((c) => c.status === "ERROR").length;
+  const calendarNote = me.data
+    ? me.data.outside_calendars_connected
+      ? broken > 0
+        ? ` and your connected calendar${calendars.length > 1 ? "s" : ""} (${broken} can't be read: check /calendar in the bot)`
+        : " and your connected calendar" + (calendars.length > 1 ? "s" : "")
+      : calendars.length > 0
+        ? ". Your calendar link isn't working: check /calendar in the bot"
+        : ". Outside calendars aren't connected: send a calendar link to the bot"
+    : "";
   const clashes = plans.data.plans.filter((p) => p.availability.conflicts.length > 0).length;
   return (
     <>
@@ -18,8 +29,8 @@ export function Home() {
         <strong>{clashes === 0 ? "No clashes in your upcoming plans" : `${clashes} plan${clashes > 1 ? "s" : ""} with a clash`}</strong>
         <span className="hint">
           Checked against your Going plans, busy blocks
-          {me.data?.nusmods.connected ? " and NUSMods timetable" : ". NUSMods isn't connected: send your link to the bot"}
-          . Outside calendars aren't connected.
+          {me.data?.nusmods.connected ? ", NUSMods timetable" : ", no NUSMods timetable (send your link to the bot)"}
+          {calendarNote}.
         </span>
       </section>
       {[["Today", today], ["Tomorrow", tomorrow]].map(([label, key]) => (

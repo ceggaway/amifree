@@ -166,6 +166,34 @@ await check('group cards: organiser-only edits propagate to members and record a
   await db.exec('reset role; set role service_role;');
   await q('delete from users where id=$1',[third.id]);
 });
+await check('deleting a user removes every personal row, in every table that holds one', async () => {
+  const leaver = await one('select * from amifree_ensure_user($1)', [1099]);
+  const tomorrow = '2026-10-09T19:00:00+08:00', later = '2026-10-09T21:00:00+08:00';
+  await q("update users set calendar_feed_token='secret-feed-token-secret-feed-token-0000' where id=$1",[leaver.id]);
+  await q("insert into timetable_blocks(user_id,title,start_at,end_at) values($1,'Lecture',$2,$3)",[leaver.id,tomorrow,later]);
+  await q("insert into manual_busy_blocks(user_id,title,kind,start_at,end_at) values($1,'Busy','ONCE',$2,$3)",[leaver.id,tomorrow,later]);
+  await q("insert into event_extractions(user_id,raw_text,extracted_json,validation_state) values($1,'my private text','{}','VALID')",[leaver.id]);
+  await q("insert into user_actions(user_id,action_type) values($1,'save')",[leaver.id]);
+  await q("insert into group_members(chat_id,user_id) values(-900,$1)",[leaver.id]);
+  await q("insert into notification_logs(user_id,kind,dedupe_key) values($1,'NUDGE','gone')",[leaver.id]);
+  const calendar = await one("insert into personal_calendars(user_id,sealed_url,url_hash,label) values($1,'sealed','h','CCA') returning id",[leaver.id]);
+  await q("insert into calendar_busy_blocks(user_id,calendar_id,start_at,end_at) values($1,$2,$3,$4)",[leaver.id,calendar.id,tomorrow,later]);
+  const poll = await one('select * from amifree_create_poll($1,$2,$3,$4,$5,$6,$7)',[other.id,-901,1,'Sync',60,tomorrow,later]);
+  await q('insert into poll_participants(poll_id,user_id) values($1,$2)',[poll.id,leaver.id]);
+  await q("insert into poll_votes(poll_id,user_id,slot,answer) values($1,$2,0,'BUSY')",[poll.id,leaver.id]);
+  await one('select * from amifree_create_preview($1,$2,$3)',[leaver.id,77,JSON.stringify(draft)]);
+  await q('delete from users where id=$1',[leaver.id]);
+  // Asked of the catalogue, so a table added later without a cascade fails here.
+  const tables = (await q("select table_name from information_schema.columns where table_schema='public' and column_name='user_id'")).rows.map(r=>r.table_name);
+  assert.ok(tables.length >= 11, `found only ${tables.join(',')}`);
+  for (const table of tables) {
+    assert.equal((await one(`select count(*)::int n from ${table} where user_id=$1`,[leaver.id])).n,0,table);
+  }
+  assert.equal((await one('select count(*)::int n from users where calendar_feed_token=$1',['secret-feed-token-secret-feed-token-0000'])).n,0);
+  // The other member's poll survives, with the leaver's participation gone.
+  assert.equal((await one('select count(*)::int n from polls where id=$1',[poll.id])).n,1);
+  await q('delete from polls where id=$1',[poll.id]);
+});
 await check('user deletion cascades to all personal data', async () => {
   await q('delete from users where id=$1',[user.id]);
   for (const table of TABLES.filter(t => t !== 'users')) {
@@ -178,6 +206,35 @@ await check('user deletion cascades to all personal data', async () => {
   assert.equal((await one('select count(*)::int n from events where group_event_id is not null')).n,1);
   await q('delete from group_events');
   await q('delete from events');
+});
+await check('migration ledger and durable update claims behave', async () => {
+  assert.equal((await one('select max(version)::int v from schema_migrations')).v,8);
+  const claim = async (id, stale = 120) =>
+    (await one('select amifree_claim_update($1,$2) claimed',[id,stale])).claimed;
+  assert.equal(await claim(5001),true);
+  // A second delivery while the first is in progress is refused.
+  assert.equal(await claim(5001),false);
+  // An attempt that never finished (crash) may be taken over once it is stale.
+  await q("update processed_updates set claimed_at=now()-interval '10 minutes' where update_id=5001");
+  assert.equal(await claim(5001),true);
+  await q('select amifree_finish_update($1)',[5001]);
+  // A finished update is never processed again, however old.
+  await q("update processed_updates set claimed_at=now()-interval '1 hour' where update_id=5001");
+  assert.equal(await claim(5001),false);
+  // Failing before anything committed releases the claim so the retry runs.
+  assert.equal(await claim(5002),true);
+  await q('select amifree_release_update($1)',[5002]);
+  assert.equal(await claim(5002),true);
+  await q('select amifree_release_update($1)',[5001]);  // done updates cannot be released
+  assert.equal(await claim(5001),false);
+  // Old rows are purged.
+  await q("update processed_updates set claimed_at=now()-interval '8 days' where update_id=5001");
+  assert.equal(await claim(5003),true);
+  assert.equal((await one('select count(*)::int n from processed_updates where update_id=5001')).n,0);
+  await db.exec('reset role; set role anon;');
+  await assert.rejects(q('select * from processed_updates'));
+  await assert.rejects(q('select amifree_claim_update(1,1)'));
+  await db.exec('reset role; set role service_role;');
 });
 await check('development seed is reproducible and scoped to synthetic users', async () => {
   const seed = await readFile(new URL('../../app/db/seed.sql', import.meta.url), 'utf8');

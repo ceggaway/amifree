@@ -60,6 +60,7 @@ from app.services.personal_calendar import (
 from app.services.personal_calendar import URL as CALENDAR_URL
 from app.services.polls import PollService
 from app.services.quick_blocks import HORIZON_DAYS, MAX_RULES, USAGE, describe, parse_block
+from app.services.ratelimit import RateLimiter
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ FEED_PAST, FEED_AHEAD = timedelta(days=30), timedelta(days=400)
 FEED_SEEN_EVERY = timedelta(minutes=10)
 CALENDAR_REFRESH = timedelta(hours=1)
 # Link previews fetch the feed too; they must not count as the user's calendar subscribing.
+SLOW_DOWN = "You're sending a lot very quickly. Give me a minute, then try again."
 PREVIEW_BOTS = ("telegrambot", "whatsapp", "facebookexternalhit", "slackbot", "discordbot")
 
 
@@ -109,6 +111,9 @@ class SchedulingService:
         self.on_group_change = None
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.
         self.notifier = None
+        # Bound what one person can spend: LLM extractions and outbound calendar fetches.
+        self.extraction_limit = RateLimiter(15, 300)
+        self.calendar_limit = RateLimiter(8, 600)
 
     async def flush_notifications(self):
         if self.notifier:
@@ -379,6 +384,8 @@ class SchedulingService:
                 return [Reply(str(exc))]
             if rule:
                 return await self.preview_block(user, rule)
+        if not self.extraction_limit.allow(telegram_id):
+            return [Reply(SLOW_DOWN)]
         started = time.monotonic()
         previous = pending.get("extraction") if pending else None
         if pending:
@@ -665,25 +672,50 @@ class SchedulingService:
             plans = await self.repo.events_between(
                 start - timedelta(days=1), end, [Status.GOING, Status.SAVED], user.id
             )
-            busy = [(b.start_at, b.end_at) for b in blocks] + [
-                (e.start_at, e.end_at) for e in plans if e.end_at > start
+            sure = [(b.start_at, b.end_at) for b in blocks] + [
+                (e.start_at, e.end_at)
+                for e in plans
+                if e.status == Status.GOING and e.end_at > start
             ]
-            gaps = free_gaps(day, busy, now)
+            # Undecided plans never make you "busy": they only mark free time as tentative.
+            saved = [e for e in plans if e.status == Status.SAVED and e.end_at > start]
+            gaps = free_gaps(day, sure + [(e.start_at, e.end_at) for e in saved], now)
+            open_gaps = free_gaps(day, sure, now)
+            tentative = [
+                e
+                for e in saved
+                if any(e.start_at < g_end and e.end_at > g_start for g_start, g_end in open_gaps)
+            ]
+            lines = []
             if gaps:
-                parts.append(
+                lines.append(
                     f"🟢 Free on {label}:\n"
                     + "\n".join(f"• {clock(a)} – {clock(b)}" for a, b in gaps)
                 )
+            if tentative:
+                lines.append(
+                    ("🟡 Otherwise free, but you have a Saved plan (not decided):\n")
+                    if not gaps
+                    else "🟡 Tentative, you have a Saved plan (not decided):\n"
+                )
+                lines[-1] += "\n".join(
+                    f"• {clock(max(e.start_at, start))} – {clock(min(e.end_at, end))} {e.title}"
+                    for e in tentative
+                )
+            if lines:
+                parts.append("\n\n".join(lines))
             elif day == today and now.astimezone(SG).time() >= day_time(22, 30):
                 parts.append("No free time left today. I list free time from 8am to 11pm.")
             else:
                 parts.append(f"🔴 No free time on {label} between 8am and 11pm.")
-        sources = ["your Going and Saved plans", "busy blocks"]
+        sources = ["your Going plans", "busy blocks"]
         if any(c.synced_at for c in await self.repo.list_calendars(user.id)):
             sources.append("personal calendar")
         if user.coverage_start:
             sources.append("NUSMods timetable")
         footer = "Checked: " + ", ".join(sources[:-1]) + " and " + sources[-1] + "."
+        if any("🟡" in p for p in parts):
+            footer += " Saved plans are shown as tentative, not busy."
         return Reply("\n\n".join(parts) + "\n\n" + footer)
 
     # ---- subscribed calendar feed (Apple Calendar first) ----
@@ -777,6 +809,8 @@ class SchedulingService:
     async def connect_calendar(self, user: User, link: str) -> list[Reply]:
         if self.calendar_reader is None:
             return [Reply("Reading calendar links isn't available right now.")]
+        if not self.calendar_limit.allow(user.id):
+            return [Reply(SLOW_DOWN)]
         digest = link_hash(link, self.link_secret)
         calendars = await self.repo.list_calendars(user.id)
         known = any(c.url_hash == digest for c in calendars)

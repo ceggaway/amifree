@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -30,11 +29,12 @@ async def test_real_application_startup_and_shutdown(monkeypatch, mode):
     monkeypatch.setattr(main_module, "SupabaseRepository", lambda *args: repo)
     monkeypatch.setattr(
         main_module,
-        "Application",
-        SimpleNamespace(
-            builder=lambda: (
-                Application.builder().request(transport).get_updates_request(poll_transport)
-            )
+        "telegram_builder",
+        lambda: (
+            Application.builder()
+            .concurrent_updates(False)
+            .request(transport)
+            .get_updates_request(poll_transport)
         ),
     )
     settings = Settings(

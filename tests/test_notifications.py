@@ -316,3 +316,51 @@ async def test_change_alert_offers_to_update_the_calendar(service_factory):
     assert all(
         b.text != "📅 Google Calendar" for row in by_user[3].keyboard.inline_keyboard for b in row
     )
+
+
+async def test_backlog_is_measured_and_a_stuck_outbox_is_logged(service_factory, caplog):
+    service, repo = service_factory()
+    outbox = Outbox()
+    service.notifier = Notifier(service, outbox)
+    user = await repo.ensure_user(424242)
+    await repo.enqueue_notification(user.id, "NUDGE", "a", {})
+    stats = await service.notifier.stats()
+    assert stats["pending"] == 1 and stats["failed"] == 0
+    assert stats["oldest_undelivered_seconds"] is not None
+    # Nothing is wrong yet: no warning for a fresh message.
+    with caplog.at_level("WARNING", logger="app.services.jobs"):
+        await service.notifier.report_backlog()
+    assert "notification_backlog" not in caplog.text
+    # A message stuck for a long time is reported, with counts and no user data.
+    repo.notifications[0]["created_at"] = repo.notifications[0]["created_at"].replace(year=2020)
+    with caplog.at_level("WARNING", logger="app.services.jobs"):
+        await service.notifier.report_backlog()
+    assert "notification_backlog pending=1 sending=0 failed=0" in caplog.text
+    assert str(user.id) not in caplog.text and str(user.telegram_user_id) not in caplog.text
+    # A permanent failure is counted too.
+    repo.notifications[0]["status"] = "failed"
+    assert (await service.notifier.stats())["failed"] == 1
+
+
+async def test_job_stats_endpoint_needs_the_secret_and_returns_counts_only(service_factory):
+    service, repo = service_factory()
+    service.notifier = Notifier(service, Outbox())
+    user = await repo.ensure_user(1)
+    await repo.enqueue_notification(user.id, "NUDGE", "a", {"text": "private"})
+    app = create_app(
+        Settings(_env_file=None, bot_mode="disabled", jobs_secret="job-secret-123"), service=service
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client,
+    ):
+        assert (await client.get("/internal/jobs/stats")).status_code == 403
+        ok = await client.get("/internal/jobs/stats", headers={"X-Jobs-Secret": "job-secret-123"})
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["pending"] == 1 and set(body) == {
+        "pending",
+        "sending",
+        "failed",
+        "oldest_undelivered_seconds",
+    }

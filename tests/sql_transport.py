@@ -55,6 +55,9 @@ RPC_PARAMS = {
     "amifree_poll_close": ["p_poll_id", "p_user_id"],
     "amifree_poll_vote": ["p_poll_id", "p_user_id", "p_votes"],
     "amifree_poll_tally": ["p_poll_id"],
+    "amifree_claim_update": ["p_update_id"],
+    "amifree_finish_update": ["p_update_id"],
+    "amifree_release_update": ["p_update_id"],
 }
 VOID_RPCS = {
     "amifree_cleanup",
@@ -63,8 +66,15 @@ VOID_RPCS = {
     "amifree_import_timetable",
     "amifree_touch_member",
     "amifree_finish_notification",
+    "amifree_finish_update",
+    "amifree_release_update",
 }
-SCALAR_RPCS = {"amifree_enqueue_notification", "amifree_poll_join", "amifree_poll_vote"}
+SCALAR_RPCS = {
+    "amifree_enqueue_notification",
+    "amifree_poll_join",
+    "amifree_poll_vote",
+    "amifree_claim_update",
+}
 TABLES = {
     "users",
     "calendar_busy_blocks",
@@ -81,8 +91,14 @@ TABLES = {
     "polls",
     "poll_participants",
     "poll_votes",
+    "schema_migrations",
+    "processed_updates",
 }
 COLUMNS = {
+    "version",
+    "name",
+    "update_id",
+    "claimed_at",
     "id",
     "calendar_feed_token",
     "calendar_feed_seen_at",
@@ -176,6 +192,21 @@ class SQLGateway:
         for key, value in request.url.params.multi_items():
             if key in ("select", "order", "limit", "offset"):
                 continue
+            if key == "or":
+                # e.g. (checked_at.is.null,checked_at.lt.2026-10-13T00:00:00Z)
+                parts = []
+                for term in value.strip("()").split(","):
+                    column, op, operand = term.split(".", 2)
+                    assert column in COLUMNS
+                    if op == "is":
+                        assert operand == "null"
+                        parts.append(f"{column} is null")
+                    else:
+                        operator = {"lt": "<", "gt": ">", "gte": ">=", "lte": "<="}[op]
+                        values.append(operand)
+                        parts.append(f"{column}{operator}${len(values)}")
+                conditions.append("(" + " or ".join(parts) + ")")
+                continue
             assert key in COLUMNS
             op, operand = value.split(".", 1)
             if op == "in":
@@ -192,13 +223,15 @@ class SQLGateway:
         where = " where " + " and ".join(conditions) if conditions else ""
         if request.method == "GET":
             select = request.url.params.get("select", "*")
-            assert select in ("id", "*")
+            assert select == "*" or all(c in COLUMNS for c in select.split(","))
             sql = f"select {select} from {endpoint}{where}"
             order = request.url.params.get("order")
             if order:
-                column, direction = order.split(".")
+                column, direction, *nulls = order.split(".")
                 assert column in COLUMNS and direction in ("asc", "desc")
-                sql += f" order by {column} {direction}"
+                assert nulls in ([], ["nullsfirst"], ["nullslast"])
+                suffix = {"nullsfirst": " nulls first", "nullslast": " nulls last"}
+                sql += f" order by {column} {direction}{suffix[nulls[0]] if nulls else ''}"
             for key in ("limit", "offset"):
                 if key in request.url.params:
                     sql += f" {key} {int(request.url.params[key])}"

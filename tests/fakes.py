@@ -16,6 +16,7 @@ class MemoryRepository:
         self.group_events = {}
         self.members = set()
         self.notifications = []
+        self.updates, self.stale_updates = {}, set()
         self.polls = {}
         self.poll_people = {}
         self.poll_votes = {}
@@ -326,9 +327,38 @@ class MemoryRepository:
                 "payload": payload,
                 "status": "pending",
                 "attempts": 0,
+                "created_at": datetime.now(UTC),
             }
         )
         return True
+
+    async def claim_update(self, update_id):
+        # Mirrors amifree_claim_update: new updates are claimed; an unfinished one is not
+        # retaken until it is stale, and a finished one never is.
+        state = self.updates.get(update_id)
+        if state is None or (state == "processing" and update_id in self.stale_updates):
+            self.updates[update_id] = "processing"
+            self.stale_updates.discard(update_id)
+            return True
+        return False
+
+    async def finish_update(self, update_id):
+        self.updates[update_id] = "done"
+
+    async def release_update(self, update_id):
+        if self.updates.get(update_id) == "processing":
+            del self.updates[update_id]
+
+    async def notification_stats(self, now):
+        counts = {"pending": 0, "sending": 0, "failed": 0}
+        for n in self.notifications:
+            if n["status"] in counts:
+                counts[n["status"]] += 1
+        open_ = [
+            n["created_at"] for n in self.notifications if n["status"] in ("pending", "sending")
+        ]
+        age = max(0, int((now - min(open_)).total_seconds())) if open_ else None
+        return counts | {"oldest_undelivered_seconds": age}
 
     async def claim_notifications(self, limit=50):
         due = [n for n in self.notifications if n["status"] == "pending"][:limit]

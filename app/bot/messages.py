@@ -25,7 +25,7 @@ In a group: reply /event to a plan message to post a card with Going / Maybe / C
 a private "Am I free?" check and a headcount. /whosfree <what> suggests times from
 the schedules of members who opt in.
 
-Privacy: I only act on messages you send or forward to me, commands and button taps.
+Privacy: I only act on messages you send or forward to me, commands and button taps. Pictures you forward are read for their text and not kept.
 I never read group chats, and your schedule is never shown to a group.
 
 /start — getting started
@@ -58,7 +58,9 @@ class Reply:
 
 
 def details(draft: EventDraft) -> str:
-    result = f"{draft.title}\n{draft.start_at:%a, %d %b %Y · %H:%M} → {draft.end_at:%d %b %H:%M} (Singapore)"
+    result = (
+        f"{draft.title}\n{draft.start_at:%a, %d %b %Y · %H:%M} → {draft.end_at:%d %b %H:%M} SGT"
+    )
     if draft.location:
         result += "\nLocation: " + draft.location
     if draft.notes:

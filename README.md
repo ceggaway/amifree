@@ -114,7 +114,9 @@ Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for
 
 ### Weekly events and posters
 
-A post that repeats on one weekday ("Saturdays, 9:30am-11:30am", "every Tue 7-8pm") asks once: **Just the next one** (a normal card for the coming date), **Every Saturday** (a weekly busy block, previewed before saving) or **Neither**. If its end time is missing, the bot asks for that rather than for a date. Photos, videos and files are read through their caption; a picture with no text gets a short explanation.
+A post that repeats on one weekday ("Saturdays, 9:30am-11:30am", "every Tue 7-8pm") asks once: **Just the next one** (a normal card for the coming date), **Every Saturday** (a weekly busy block, previewed before saving) or **Neither**. If its end time is missing, the bot asks for that rather than for a date. Any forwarded message is read: text, a caption, a forwarded poll (question and options), and **pictures** (a photo, or an image sent as a file). A picture is read by the OpenAI vision model into plain text, which then goes through the same extractor and the same deterministic date/time checks as typed text, so a poster behaves exactly like its words would. The picture is not stored. `READ_PICTURES=false` turns this off, and `OPENAI_VISION_MODEL` picks a different model. A caption and the picture's text are combined; a picture with no event text, or one that can't be read, falls back to the caption or a short explanation. Pictures are limited to 10 per person per 5 minutes. Voice notes, videos without a caption and stickers are not read.
+
+Quick messages work with no end time: `dinner 7pm today`, `dinner 7 tonight` (a day part such as tonight or this evening makes a bare 7 mean 7pm) or `breakfast 9 tmr morning` use `DEFAULT_EVENT_DURATION_MINUTES` (120 by default) and the card says the length is assumed. Set it to 0 to ask for the end time instead.
 
 ### Am I free? (`/free`)
 

@@ -1,6 +1,7 @@
 """Application use cases; no Telegram network calls and no LLM availability decisions."""
 
 import logging
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -39,6 +40,7 @@ from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
     WEEKDAYS,
     Clarification,
+    resolve_time,
     single_event_guard,
     validate_extraction,
     weekly_weekday,
@@ -47,6 +49,7 @@ from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
 from app.services.free_time import free_gaps, parse_free, weekend
 from app.services.group_events import GroupEventService
+from app.services.image_reader import PictureError
 from app.services.personal_calendar import (
     MAX_CALENDARS,
     CalendarLinkError,
@@ -59,7 +62,14 @@ from app.services.personal_calendar import (
 )
 from app.services.personal_calendar import URL as CALENDAR_URL
 from app.services.polls import PollService
-from app.services.quick_blocks import HORIZON_DAYS, MAX_RULES, USAGE, describe, parse_block
+from app.services.quick_blocks import (
+    HORIZON_DAYS,
+    MAX_RULES,
+    USAGE,
+    describe,
+    expand_blocks,
+    parse_block,
+)
 from app.services.ratelimit import RateLimiter
 
 log = logging.getLogger(__name__)
@@ -69,6 +79,71 @@ FEED_PAST, FEED_AHEAD = timedelta(days=30), timedelta(days=400)
 FEED_SEEN_EVERY = timedelta(minutes=10)
 CALENDAR_REFRESH = timedelta(hours=1)
 # Link previews fetch the feed too; they must not count as the user's calendar subscribing.
+ASKED_TIME = {
+    "end_time": "What time does this event end?",
+    "start_time": "What time does this event start?",
+}
+BARE_TIME = re.compile(
+    r"(?:at\s+)?(?:\d{1,2}(?:[:.]\d{2})?\s*(?:[ap]\.?m\.?)?|\d{3,4}\s*(?:hrs?|h)?|noon|midnight)",
+    re.IGNORECASE,
+)
+
+
+TIMEISH = re.compile(r"\d{1,2}[:.]\d{2}|\d\s*[ap]\.?m\b|\b\d{4}\b|\bnoon\b|\bmidnight\b", re.I)
+EDIT_FIELDS = (
+    "title",
+    "date_text",
+    "start_time_text",
+    "end_time_text",
+    "end_date_text",
+    "location",
+    "notes",
+)
+
+
+def bare_venue(extracted: Extraction, previous: dict | None, text: str) -> Extraction:
+    """When an edit reply changed nothing and holds no date or time, take it as the venue.
+
+    The extractor won't "infer a venue" from a bare phrase, so "clb lvl 3" used to come back
+    unchanged. The preview still shows before and after, so a wrong guess is easy to refuse."""
+    answer = " ".join(text.split())
+    if (
+        not previous
+        or extracted.kind == "cancel"
+        or not answer
+        or len(answer) > 120
+        or answer.startswith("/")
+        or TIMEISH.search(answer)
+    ):
+        return extracted
+    current = extracted.model_dump()
+    if any(current.get(f) != previous.get(f) for f in EDIT_FIELDS):
+        return extracted
+    return extracted.model_copy(update={"location": answer})
+
+
+def answer_asked_time(asked: str, previous: dict | None, text: str) -> Extraction | None:
+    """The previous draft with the time just asked for filled in, when the reply is only a time.
+
+    Returns None for anything else, so wordier answers still go through the extractor.
+    Raises Clarification for a time that needs more ("8" is it AM or PM?)."""
+    answer = text.strip()
+    if not previous or not BARE_TIME.fullmatch(answer):
+        return None
+    answer = re.sub(r"^at\s+", "", answer, flags=re.I)
+    resolve_time(answer)
+    field = {"end_time": "end_time_text", "start_time": "start_time_text"}[asked]
+    update = {field: answer, "ambiguity": None}
+    if asked == "end_time":
+        update["end_date_text"] = None
+    return Extraction.model_validate(previous).model_copy(update=update)
+
+
+FREE_PROMPT = (
+    "When do you want to check? Tap a button, or type a date or time,"
+    " like 15 oct, fri, next week or fri 7-9pm."
+)
+FREE_EXAMPLES = "For example: /free fri 7-9pm, /free 15 oct or /free next week"
 SLOW_DOWN = "You're sending a lot very quickly. Give me a minute, then try again."
 PREVIEW_BOTS = ("telegrambot", "whatsapp", "facebookexternalhit", "slackbot", "discordbot")
 
@@ -95,6 +170,7 @@ class SchedulingService:
         *,
         clock: Callable[[], datetime] | None = None,
         calendar_reader=None,
+        image_reader=None,
     ):
         self.repo, self.extractor, self.importer, self.settings = (
             repository,
@@ -105,6 +181,8 @@ class SchedulingService:
         self.clock = clock or (lambda: datetime.now(SG))
         # Reads personal calendar links; None where no network is available (most tests).
         self.calendar_reader = calendar_reader
+        # Reads the text in forwarded pictures; None leaves pictures to their captions.
+        self.image_reader = image_reader
         self.groups = GroupEventService(self)
         self.polls = PollService(self)
         # Set by the bot layer: re-renders a group card after its headcount changes.
@@ -113,6 +191,7 @@ class SchedulingService:
         self.notifier = None
         # Bound what one person can spend: LLM extractions and outbound calendar fetches.
         self.extraction_limit = RateLimiter(15, 300)
+        self.picture_limit = RateLimiter(10, 300)  # a picture is also an extraction afterwards
         self.calendar_limit = RateLimiter(8, 600)
 
     async def flush_notifications(self):
@@ -310,12 +389,52 @@ class SchedulingService:
             if rule.kind == "WEEKLY" and typed
             else ""
         )
+        overlap = await self.block_overlaps(user, rule)
+        warning = (
+            "\n\n⚠️ This overlaps your plans:\n"
+            + overlap
+            + "\nSaving the block marks them as clashes."
+            if overlap
+            else ""
+        )
         return [
             Reply(
-                "Block this time?\n\n" + describe(rule) + note,
+                "Block this time?\n\n" + describe(rule) + note + warning,
                 confirm_keyboard(nonce, "Save block"),
             )
         ]
+
+    async def block_overlaps(self, user: User, rule: BlockRule) -> str:
+        """Bullet list of the user's upcoming plans a busy block would sit on top of."""
+        now = self.clock()
+        window_start = datetime.combine(now.astimezone(SG).date(), day_time(0), SG)
+        window_end = window_start + timedelta(days=HORIZON_DAYS)
+        occurrences = expand_blocks([rule], window_start, window_end)
+        if not occurrences:
+            return ""
+        plans = await self.repo.events_between(
+            min(o.start_at for o in occurrences),
+            max(o.end_at for o in occurrences),
+            [Status.GOING, Status.MAYBE, Status.SAVED],
+            user.id,
+        )
+        hits = sorted(
+            (
+                e
+                for e in plans
+                if any(e.start_at < o.end_at and e.end_at > o.start_at for o in occurrences)
+            ),
+            key=lambda e: (e.start_at, e.id),
+        )
+        labels = {Status.GOING: "Going", Status.MAYBE: "Maybe", Status.SAVED: "Saved"}
+        lines = [
+            f"• {e.title[:60]} ({e.start_at.astimezone(SG):%a %-d %b}, "
+            f"{time_range(e.start_at, e.end_at)}, {labels[e.status]})"
+            for e in hits[:5]
+        ]
+        if len(hits) > 5:
+            lines.append(f"• and {len(hits) - 5} more")
+        return "\n".join(lines)
 
     async def list_events(self, user: User, page: int = 0, plans: bool = False) -> list[Reply]:
         events = await self.repo.recent_events(user.id)
@@ -346,6 +465,17 @@ class SchedulingService:
             )
         return replies
 
+    async def read_picture(self, telegram_id: int, data: bytes, mime: str) -> str | None:
+        """The event text in a picture. None when pictures can't be read right now.
+
+        Raises PictureError for a picture that isn't usable or when sent too fast: the vision
+        call is the most expensive one, so it has its own per-person limit."""
+        if self.image_reader is None:
+            return None
+        if not self.picture_limit.allow(telegram_id):
+            raise PictureError(SLOW_DOWN)
+        return await self.image_reader.read(data, mime)
+
     async def message(
         self, telegram_id: int, message_id: int, text: str, reference: datetime
     ) -> list[Reply]:
@@ -370,6 +500,28 @@ class SchedulingService:
             # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
             return [Reply(onboarding.NOT_A_SCHEDULE_LINK)]
         pending = user.pending
+        if pending and pending["stage"] == "free":
+            answer = await self.answer_free(user, text, reference)
+            if answer is not None:
+                return answer
+            pending = None  # not a date: treat it as the message it is
+        if pending and pending["stage"] == "block_ask":
+            # "What time is this block?" is answered here, not by the event extractor.
+            earlier = re.sub(
+                r"\s+\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?$", "", pending["text"], flags=re.I
+            )
+            try:
+                rule = parse_block(f"{earlier} {text}", reference)
+            except Clarification as exc:
+                await self.repo.set_pending(
+                    user.id, {"stage": "block_ask", "text": f"{earlier} {text}"[:200]}
+                )
+                return [Reply(str(exc))]
+            if rule:
+                await self.repo.set_pending(user.id, None)
+                return await self.preview_block(user, rule)
+            pending = None  # not a block after all
+            await self.repo.set_pending(user.id, None)
         if pending and pending["stage"] in ("confirm", "choose", "delete", "block", "recurring"):
             return [
                 Reply(
@@ -381,13 +533,22 @@ class SchedulingService:
             try:
                 rule = parse_block(text, reference)
             except Clarification as exc:
+                # Remember the half-given block so the next message completes it.
+                await self.repo.set_pending(user.id, {"stage": "block_ask", "text": text[:200]})
                 return [Reply(str(exc))]
             if rule:
                 return await self.preview_block(user, rule)
-        if not self.extraction_limit.allow(telegram_id):
-            return [Reply(SLOW_DOWN)]
         started = time.monotonic()
         previous = pending.get("extraction") if pending else None
+        answered = None
+        if pending and pending.get("asked") and not pending.get("event_id"):
+            # A bare time answering "What time does this event end?" needs no LLM.
+            try:
+                answered = answer_asked_time(pending["asked"], previous, text)
+            except Clarification as exc:
+                return [Reply(f"{exc}\n/cancel to discard this draft.")]
+        if answered is None and not self.extraction_limit.allow(telegram_id):
+            return [Reply(SLOW_DOWN)]
         if pending:
             if not pending.get("use_next_message_reference"):
                 reference = datetime.fromisoformat(pending["reference"])
@@ -403,7 +564,7 @@ class SchedulingService:
         else:
             source = text
             await self.safe_action(user.id, "forward", metadata={"message_id": message_id})
-        extracted = await self.extractor.extract(text, reference, previous)
+        extracted = answered or await self.extractor.extract(text, reference, previous)
         if not (pending and pending.get("event_id")):  # edits of saved events keep their kind
             extracted = settle_kind(extracted, clarifying=bool(pending), text=source)
         if pending:
@@ -428,6 +589,9 @@ class SchedulingService:
             "extraction": extracted.model_dump(mode="json"),
         }
         if pending and pending.get("event_id"):
+            # "clb lvl 3" alone, with nothing else changed, is the new venue.
+            extracted = bare_venue(extracted, previous, text)
+            state["extraction"] = extracted.model_dump(mode="json")
             state.update(
                 {
                     "event_id": pending["event_id"],
@@ -491,6 +655,10 @@ class SchedulingService:
                 default_minutes=self.settings.default_event_duration_minutes,
             )
         except Clarification as exc:
+            # Remember which question was asked, so a bare "18:00" can answer it directly.
+            for asked, question in ASKED_TIME.items():
+                if str(exc).startswith(question):
+                    state["asked"] = asked
             await self.repo.set_pending(user.id, state)
             return [Reply(str(exc) + "\n/cancel to discard this draft.")]
         event = await self.repo.create_preview(user.id, message_id, draft)
@@ -628,11 +796,35 @@ class SchedulingService:
 
     async def free_command(self, user: User, args: str) -> list[Reply]:
         if not args.strip():
-            return [Reply("When do you want to check?", free_keyboard())]
+            # The next plain message is read as the answer, so a date can simply be typed.
+            await self.repo.set_pending(user.id, {"stage": "free"})
+            return [Reply(FREE_PROMPT, free_keyboard())]
         try:
             query = parse_free(args, self.clock())
         except Clarification as exc:
-            return [Reply(f"{exc}\nFor example: /free fri 7-9pm or /free tomorrow")]
+            return [Reply(f"{exc}\n{FREE_EXAMPLES}")]
+        if query.slot is not None:
+            return [await self.free_slot(user, query)]
+        return [await self.free_days(user, query.days)]
+
+    async def answer_free(self, user: User, text: str, reference: datetime) -> list[Reply] | None:
+        """A typed reply to "When do you want to check?". None when it isn't one."""
+        # A long or multi-line message is an invitation, not a date: let it through.
+        if len(text) > 60 or "\n" in text.strip():
+            await self.repo.set_pending(user.id, None)
+            return None
+        try:
+            looks_like_block = parse_block(text, reference) is not None
+        except Clarification:
+            looks_like_block = True
+        if looks_like_block:
+            await self.repo.set_pending(user.id, None)
+            return None
+        try:
+            query = parse_free(text, self.clock())
+        except Clarification as exc:
+            return [Reply(f"{exc}\n{FREE_EXAMPLES}\n/cancel to stop.")]
+        await self.repo.set_pending(user.id, None)
         if query.slot is not None:
             return [await self.free_slot(user, query)]
         return [await self.free_days(user, query.days)]
@@ -672,51 +864,36 @@ class SchedulingService:
             plans = await self.repo.events_between(
                 start - timedelta(days=1), end, [Status.GOING, Status.SAVED], user.id
             )
-            sure = [(b.start_at, b.end_at) for b in blocks] + [
-                (e.start_at, e.end_at)
+            # (start, end, name, decided): Saved plans are listed but never make you busy.
+            items = [(b.start_at, b.end_at, b.title, True) for b in blocks] + [
+                (e.start_at, e.end_at, e.title, e.status == Status.GOING)
                 for e in plans
-                if e.status == Status.GOING and e.end_at > start
+                if e.end_at > start
             ]
-            # Undecided plans never make you "busy": they only mark free time as tentative.
-            saved = [e for e in plans if e.status == Status.SAVED and e.end_at > start]
-            gaps = free_gaps(day, sure + [(e.start_at, e.end_at) for e in saved], now)
-            open_gaps = free_gaps(day, sure, now)
-            tentative = [
-                e
-                for e in saved
-                if any(e.start_at < g_end and e.end_at > g_start for g_start, g_end in open_gaps)
+            items = sorted(i for i in items if i[0] < end and i[1] > start)
+            gaps = free_gaps(day, [(a, b) for a, b, _, decided in items if decided], now)
+            if not items:
+                if day == today and now.astimezone(SG).time() >= day_time(22, 30):
+                    parts.append("No free time left today. I list free time from 8am to 11pm.")
+                else:
+                    parts.append(f"🟢 Free all day on {label}.")
+                continue
+            lines = [
+                f"• {clock(max(a, start))} – {clock(min(b, end))} {name[:60]}"
+                + ("" if decided else " (Saved, not decided)")
+                for a, b, name, decided in items
             ]
-            lines = []
+            decided = any(item[3] for item in items)
+            head = f"🔴 Busy on {label}:" if decided else f"🟡 Nothing confirmed on {label}:"
+            text = head + "\n" + "\n".join(lines)
             if gaps:
-                lines.append(
-                    f"🟢 Free on {label}:\n"
-                    + "\n".join(f"• {clock(a)} – {clock(b)}" for a, b in gaps)
-                )
-            if tentative:
-                lines.append(
-                    ("🟡 Otherwise free, but you have a Saved plan (not decided):\n")
-                    if not gaps
-                    else "🟡 Tentative, you have a Saved plan (not decided):\n"
-                )
-                lines[-1] += "\n".join(
-                    f"• {clock(max(e.start_at, start))} – {clock(min(e.end_at, end))} {e.title}"
-                    for e in tentative
-                )
-            if lines:
-                parts.append("\n\n".join(lines))
+                text += "\n\n🟢 Free: " + ", ".join(f"{clock(a)} – {clock(b)}" for a, b in gaps)
             elif day == today and now.astimezone(SG).time() >= day_time(22, 30):
-                parts.append("No free time left today. I list free time from 8am to 11pm.")
+                text += "\n\nNo free time left today."
             else:
-                parts.append(f"🔴 No free time on {label} between 8am and 11pm.")
-        sources = ["your Going plans", "busy blocks"]
-        if any(c.synced_at for c in await self.repo.list_calendars(user.id)):
-            sources.append("personal calendar")
-        if user.coverage_start:
-            sources.append("NUSMods timetable")
-        footer = "Checked: " + ", ".join(sources[:-1]) + " and " + sources[-1] + "."
-        if any("🟡" in p for p in parts):
-            footer += " Saved plans are shown as tentative, not busy."
-        return Reply("\n\n".join(parts) + "\n\n" + footer)
+                text += "\n\nNo free time between 8am and 11pm."
+            parts.append(text)
+        return Reply("\n\n".join(parts))
 
     # ---- subscribed calendar feed (Apple Calendar first) ----
 
@@ -980,6 +1157,8 @@ class SchedulingService:
                 "free:tomorrow": (today + timedelta(days=1),),
                 "free:weekend": weekend(today),
             }[data]
+            if user.pending and user.pending.get("stage") == "free":
+                await self.repo.set_pending(user.id, None)
             reply = await self.free_days(user, days)
             return [Reply(reply.text, edit=True)]
         if data == "pcal:off":
@@ -1008,9 +1187,19 @@ class SchedulingService:
                 await self.repo.delete_user(user.id)
                 return [Reply("Your AmIFree data has been deleted. Use /start to set up again.")]
             if pending["stage"] == "block":
-                await self.repo.create_block(user.id, BlockRule.model_validate(pending["rule"]))
+                rule = BlockRule.model_validate(pending["rule"])
+                await self.repo.create_block(user.id, rule)
                 await self.repo.set_pending(user.id, None)
                 await self.safe_action(user.id, "block")
+                overlap = await self.block_overlaps(user, rule)
+                if overlap:
+                    return [
+                        Reply(
+                            "Blocked. ⚠️ It clashes with your plans:\n"
+                            + overlap
+                            + "\n/events shows each card. /blocks lists your busy blocks."
+                        )
+                    ]
                 return [
                     Reply("Blocked. Plans that overlap it will show a clash. /blocks lists them.")
                 ]

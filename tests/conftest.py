@@ -48,7 +48,12 @@ def service_factory(reference):
             repo,
             QueueExtractor(*items),
             Importer(),
-            Settings(_env_file=None, bot_mode="disabled", **settings),
+            # Most tests exercise the "ask for the end time" path; production assumes a length.
+            Settings(
+                _env_file=None,
+                bot_mode="disabled",
+                **({"default_event_duration_minutes": 0} | settings),
+            ),
             clock=lambda: reference,
         )
         return service, repo

@@ -21,7 +21,19 @@ RELATIVE = {
     "tmr": 1,
     "tmrw": 1,
     "tml": 1,
+    "later today": 0,
+    "this morning": 0,
+    "this afternoon": 0,
+    "this evening": 0,
+    "this eve": 0,
+    "today night": 0,
+    "tomorrow morning": 1,
+    "tomorrow afternoon": 1,
+    "tomorrow evening": 1,
     "tomorrow night": 1,
+    "tmr morning": 1,
+    "tmr afternoon": 1,
+    "tmr evening": 1,
     "tmr night": 1,
     "day after tomorrow": 2,
 }
@@ -246,6 +258,23 @@ def restore_meridiem(raw: str | None, source: str) -> str | None:
     return f"{raw.strip()}{match[1]}m" if match else raw
 
 
+_EVENING = re.compile(
+    r"\b(?:tonight|tonite|tmr night|tomorrow night|this evening|this eve|"
+    r"(?:today|tomorrow|tmr|this)\s+(?:afternoon|evening|night)|(?:in the )?(?:evening|night))\b",
+    re.IGNORECASE,
+)
+_MORNING = re.compile(r"\b(?:this morning|(?:today|tomorrow|tmr) morning|in the morning)\b", re.I)
+
+
+def day_part_meridiem(source: str) -> str | None:
+    """ "7 tonight" and "dinner this evening at 7" mean 7pm; "9 this morning" means 9am."""
+    if _MORNING.search(source):
+        return "am"
+    if _EVENING.search(source):
+        return "pm"
+    return None
+
+
 _OTHER_TIMEZONE = re.compile(
     r"\b(?:uk|us|usa|eastern|pacific|central|london|european|japan|korea|india|australia|"
     r"est|edt|pst|pdt|cst|cet|cest|bst|gmt|utc|jst|kst|aest)\s+time\b"
@@ -266,6 +295,22 @@ def _spoken_noon(extraction: Extraction, source: str) -> Extraction:
     return extraction.model_copy(update=update) if update else extraction
 
 
+def _with_day_part(raw: str | None, part: str | None) -> str | None:
+    """A bare hour gets the day part's am/pm ("7" + "tonight" -> "7pm"); anything else is kept."""
+    if not raw or not part:
+        return raw
+    m = re.fullmatch(r"\s*(\d{1,2})(?:[:.]\d{2})?\s*", raw)
+    if not m:
+        return raw
+    hour = int(m[1])
+    if (part == "pm" and 1 <= hour <= 11) or (part == "am" and 1 <= hour <= 12):
+        return raw.strip() + part
+    return raw
+
+
+_AM_OR_PM = re.compile(r"\bam\b.*\bpm\b|\bpm\b.*\bam\b|am/pm|a\.m\.", re.IGNORECASE)
+
+
 def validate_extraction(
     extraction: Extraction,
     source: str,
@@ -274,6 +319,15 @@ def validate_extraction(
     default_minutes=0,
     existing: EventDraft | None = None,
 ) -> EventDraft:
+    part = day_part_meridiem(source)
+    if (
+        extraction.ambiguity
+        and part
+        and _AM_OR_PM.search(extraction.ambiguity)
+        and _with_day_part(extraction.start_time_text, part) != extraction.start_time_text
+    ):
+        # "dinner at 7 tonight": the day part already says pm.
+        extraction = extraction.model_copy(update={"ambiguity": None})
     if extraction.ambiguity:
         raise Clarification("Please clarify the event date and time: " + extraction.ambiguity[:200])
     if _OTHER_TIMEZONE.search(source):
@@ -313,10 +367,18 @@ def validate_extraction(
             "end_time_text": restore_meridiem(extraction.end_time_text, source),
         }
     )
+    extraction = extraction.model_copy(
+        update={
+            "start_time_text": _with_day_part(extraction.start_time_text, part),
+            "end_time_text": _with_day_part(extraction.end_time_text, part),
+        }
+    )
     if not extraction.date_text and existing is None:
         raise Clarification("What date is this event?")
     if not extraction.start_time_text and existing is None:
-        raise Clarification("What time does this event start? Include AM/PM or use 24-hour time.")
+        raise Clarification(
+            "What time does this event start? Please type in 24-hour time (eg. 07:00, 18:00)."
+        )
     d = (
         resolve_date(extraction.date_text, reference)
         if extraction.date_text
@@ -361,7 +423,9 @@ def validate_extraction(
         end = start + timedelta(minutes=default_minutes)
         assumed = True
     else:
-        raise Clarification("What time does this event end? Include AM/PM or use 24-hour time.")
+        raise Clarification(
+            "What time does this event end? Please type in 24-hour time (eg. 07:00, 18:00)."
+        )
     if end <= start:
         raise Clarification(
             "The end time must follow the start. For an overnight event, include the end date."

@@ -14,12 +14,26 @@ from telegram.ext import (
 
 from app.bot.delivery import webhook_delivery
 from app.bot.messages import Reply, send_reply
+from app.services.image_reader import MAX_BYTES, PictureError
 from app.services.jobs import Notifier, Undeliverable
 from app.services.nusmods import ImportError
+from app.services.scheduling import SLOW_DOWN
 
 log = logging.getLogger(__name__)
 GROUP_COMMANDS = {"event", "plan", "whosfree"}
 PRIVATE_ONLY = "Please use AmIFree in a private chat. Open the bot and send /start."
+NO_TEXT = (
+    "I couldn't find any event details there. Forward the post or picture again, or type"
+    " them, like:\nDinner Fri 7-9pm at Vivo"
+)
+UNSUPPORTED_PICTURE = (
+    "I can't read pictures right now. Forward the post with its text, or type the details,"
+    " like:\nDinner Fri 7-9pm at Vivo"
+)
+PICTURE_UNREADABLE = (
+    "I couldn't read that picture just now. Forward it with its caption, or type the"
+    " details, like:\nDinner Fri 7-9pm at Vivo"
+)
 ERROR = "I couldn't process that message. Please try again, or send the date/time manually. /cancel clears a pending draft."
 
 
@@ -60,11 +74,13 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
                 pass
             message = update.effective_message
             reference = message.forward_origin.date if message.forward_origin else message.date
-            # Event posts are often a poster with the details in its caption.
-            text = message.text or message.caption or ""
-            replies = await service.message(
-                update.effective_user.id, message.message_id, text, reference
-            )
+            text, notice = await gather_text(message, context, service, update.effective_user.id)
+            if not text.strip():
+                replies = [Reply(notice or NO_TEXT)]
+            else:
+                replies = await service.message(
+                    update.effective_user.id, message.message_id, text, reference
+                )
         await send(update, replies)
     except ImportError as exc:
         await send(update, [Reply(str(exc))])
@@ -81,6 +97,42 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
             type(exc).__name__,
         )
         await send(update, [Reply(ERROR)])
+
+
+async def gather_text(message, context, service, telegram_id: int) -> tuple[str, str | None]:
+    """All the words in a forwarded message, whatever it carries.
+
+    Text and captions are used as they are. A poll contributes its question and options.
+    A picture (a photo, or an image sent as a file) is read for its text and added after the
+    caption. Returns (text, a notice to show when there is no text at all)."""
+    parts = [message.text or message.caption or ""]
+    if message.poll:
+        parts += [message.poll.question] + [o.text for o in message.poll.options]
+    picture, mime = None, "image/jpeg"
+    if message.photo:
+        picture = message.photo[-1]
+    elif message.document and (message.document.mime_type or "").startswith("image/"):
+        picture, mime = message.document, message.document.mime_type
+    notice = None
+    if picture is not None and service.image_reader is None:
+        notice = UNSUPPORTED_PICTURE  # pictures can't be read here: only the caption counts
+    elif picture is not None:
+        try:
+            if (picture.file_size or 0) > MAX_BYTES:
+                raise PictureError("too large")
+            file = await context.bot.get_file(picture.file_id)
+            data = bytes(await file.download_as_bytearray())
+            seen = await service.read_picture(telegram_id, data, mime)
+            if seen:
+                parts.append(seen)
+        except PictureError as exc:
+            # A caption can still carry the plan; without one, say what went wrong.
+            notice = str(exc) if str(exc) == SLOW_DOWN else PICTURE_UNREADABLE
+        except Exception as exc:
+            # Download or vision-API trouble must not lose the caption or the user's message.
+            log.warning("picture_read_failed error_type=%s", type(exc).__name__)
+            notice = PICTURE_UNREADABLE
+    return "\n".join(p.strip() for p in parts if p and p.strip()), notice
 
 
 def split_command(text: str) -> tuple[str, str]:
@@ -198,9 +250,9 @@ async def unsupported(update, context):
             update,
             [
                 Reply(
-                    "I can read the words in a post, but not what's inside a picture yet. "
-                    "Forward the post with its text, or type the details, like:\n"
-                    "Dinner Fri 7-9pm at Vivo"
+                    "I can read text, posters and screenshots, but not voice notes, videos or"
+                    " stickers. Forward the post with its text or picture, or type the"
+                    " details, like:\nDinner Fri 7-9pm at Vivo"
                 )
             ],
         )
@@ -274,6 +326,12 @@ def register_handlers(application: Application, service):
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message))
     # A photo, video or file with a caption: read the caption like any forwarded plan.
     application.add_handler(MessageHandler(filters.CAPTION & ~filters.COMMAND, message))
+    # A picture on its own (a poster or a screenshot), an image sent as a file, or a poll.
+    application.add_handler(
+        MessageHandler(
+            (filters.PHOTO | filters.Document.IMAGE | filters.POLL) & ~filters.COMMAND, message
+        )
+    )
     application.add_handler(MessageHandler(filters.COMMAND, command))
     application.add_handler(MessageHandler(filters.ALL, unsupported))
     application.add_error_handler(error_handler)

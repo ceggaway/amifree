@@ -40,12 +40,34 @@ def weekend(today: date) -> tuple[date, ...]:
     return (saturday, saturday + timedelta(days=1))
 
 
+MONTHS = (
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+    r"sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+)
+# "oct 15" / "october 15th" read like "15 oct", which the date resolver already understands.
+MONTH_FIRST = re.compile(
+    rf"\b({MONTHS})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?!\s*[:.]\d)", re.IGNORECASE
+)
+
+
+def week_days(today: date, *, next_week: bool) -> tuple[date, ...]:
+    monday = today - timedelta(days=today.weekday())
+    if next_week:
+        return tuple(monday + timedelta(days=7 + i) for i in range(7))
+    return tuple(today + timedelta(days=i) for i in range(7 - today.weekday()))
+
+
 def parse_free(text: str, reference: datetime) -> FreeQuery:
     raw = " ".join(text.split())
     today = reference.astimezone(SG).date()
     lowered = raw.lower().strip(" ?.!")
     if lowered in ("weekend", "this weekend", "the weekend"):
         return FreeQuery(days=weekend(today))
+    if lowered in ("this week", "rest of the week", "the week"):
+        return FreeQuery(days=week_days(today, next_week=False))
+    if lowered == "next week":
+        return FreeQuery(days=week_days(today, next_week=True))
+    raw = MONTH_FIRST.sub(lambda m: f"{m[2]} {m[1]}", raw)
     # A bare trailing number ("fri 7") is a time too, so the user is asked "AM or PM?".
     times = RANGE.search(raw) or SINGLE.search(raw) or BARE_END.search(raw)
     date_text = (raw[: times.start()] + " " + raw[times.end() :]) if times else raw

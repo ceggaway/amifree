@@ -22,6 +22,7 @@ from app.bot.handlers import register_handlers
 from app.config import Settings
 from app.db.supabase import SupabaseRepository
 from app.services.event_extractor import EventExtractor
+from app.services.image_reader import ImageReader
 from app.services.nusmods import NUSModsImporter
 from app.services.personal_calendar import CalendarReader
 from app.services.scheduling import SchedulingService
@@ -114,6 +115,11 @@ def create_app(
                 NUSModsImporter(http, settings.nusmods_academic_year),
                 settings,
                 calendar_reader=CalendarReader(http),
+                image_reader=(
+                    ImageReader(ai, settings.openai_vision_model or settings.openai_model)
+                    if settings.read_pictures
+                    else None
+                ),
             )
             bot_app = (
                 telegram_builder().token(settings.telegram_bot_token.get_secret_value()).build()

@@ -152,10 +152,10 @@ def expand_blocks(rules: Iterable[BlockRule], start: datetime, end: datetime) ->
 def describe(rule: BlockRule) -> str:
     if rule.kind == "ONCE":
         start, end = rule.start_at.astimezone(SG), rule.end_at.astimezone(SG)
-        return f"{rule.title}\n{start:%a, %d %b %Y · %H:%M} → {end:%H:%M} (Singapore)"
+        return f"{rule.title}\n{start:%a, %d %b %Y · %H:%M} → {end:%H:%M} SGT"
     text = (
         f"{rule.title}\nEvery {WEEKDAYS[rule.weekday].capitalize()} "
-        f"{rule.start_time:%H:%M} → {rule.end_time:%H:%M} (Singapore)\n"
+        f"{rule.start_time:%H:%M} → {rule.end_time:%H:%M} SGT\n"
         f"From {rule.start_date:%d %b %Y}"
     )
     if rule.until_date:

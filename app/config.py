@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     app_base_url: str = ""
     telegram_webhook_secret: SecretStr = SecretStr("")
     nusmods_academic_year: str = ""
-    default_event_duration_minutes: int = Field(default=0, ge=0, le=1440)
+    # Used when a message gives a start but no end ('dinner 7pm today'); the card says so.
+    default_event_duration_minutes: int = Field(default=120, ge=0, le=1440)
+    read_pictures: bool = True
+    openai_vision_model: str = ""
     retain_extractions: bool = False
     extraction_retention_days: int = Field(default=7, ge=1, le=90)
     pending_ttl_hours: int = Field(default=24, ge=1, le=168)

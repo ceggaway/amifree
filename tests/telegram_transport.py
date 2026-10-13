@@ -22,6 +22,9 @@ class TelegramTransport(BaseRequest):
         pass
 
     async def do_request(self, url, method, request_data=None, **kwargs):
+        if "/file/bot" in url:  # a file download, not a Bot API call
+            self.calls.append(("download", {"url": url}))
+            return 200, b"\xff\xd8fake-jpeg-bytes"
         endpoint = url.rsplit("/", 1)[-1]
         params = request_data.parameters if request_data else {}
         self.calls.append((endpoint, params))
@@ -39,6 +42,13 @@ class TelegramTransport(BaseRequest):
                 "date": 1791100800,
                 "chat": {"id": int(params["chat_id"]), "type": "private"},
                 "text": params["text"],
+            }
+        elif endpoint == "getFile":
+            result = {
+                "file_id": params["file_id"],
+                "file_unique_id": "u1",
+                "file_size": 17,
+                "file_path": "photos/poster.jpg",
             }
         elif endpoint == "getUpdates":
             await asyncio.sleep(0.01)
@@ -102,3 +112,42 @@ def callback_payload(data, telegram_id=1, *, group=False):
             },
         },
     }
+
+
+def document_payload(mime="image/png", caption=None, message_id=1, telegram_id=1):
+    """An image sent as a file (uncompressed), which Telegram delivers as a document."""
+    payload = message_payload("x", message_id, telegram_id)
+    message = payload["message"]
+    del message["text"]
+    message["document"] = {
+        "file_id": "scan",
+        "file_unique_id": "d1",
+        "file_name": "poster.png",
+        "mime_type": mime,
+        "file_size": 20,
+    }
+    if caption is not None:
+        message["caption"] = caption
+    return payload
+
+
+def poll_payload(question, options, message_id=1, telegram_id=1):
+    payload = message_payload("x", message_id, telegram_id)
+    message = payload["message"]
+    del message["text"]
+    message["poll"] = {
+        "id": "poll-1",
+        "question": question,
+        "options": [
+            {"text": o, "voter_count": 0, "persistent_id": f"opt-{i}"}
+            for i, o in enumerate(options)
+        ],
+        "total_voter_count": 0,
+        "is_closed": False,
+        "is_anonymous": True,
+        "type": "regular",
+        "allows_multiple_answers": False,
+        "allows_revoting": True,
+        "members_only": False,
+    }
+    return payload

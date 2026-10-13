@@ -49,3 +49,37 @@ Test changes: `tests/sql_transport.py` learned multi-column select, `or` filters
 
 - Telegram request timeouts raised (`telegram_builder()` in `app/main.py`); fixes `TimedOut`.
 - `date_resolution.py` / `test_date_formats.py`: your earlier uncommitted edits, untouched.
+
+## Tester feedback list (13 October, `CS3216 final proj.pdf`)
+
+All six fixed; tests in `tests/test_feedback_fixes.py`.
+
+| # | Report | Fix |
+| --- | --- | --- |
+| 1 | Location edit showed the same before and after | `bare_venue` in `scheduling.py`: an edit reply that changes nothing and holds no date or time becomes the new venue. The before/after preview still lets the user refuse it. |
+| 2 | `/free` only offered three days | `/free` now leaves a pending "free" question, so a typed `15 oct`, `oct 15`, `fri`, `this week`, `next week` or `fri 7-9pm` is answered. A long message, an invitation or a `busy ...` block is not swallowed. |
+| 3 | "8PM" / "2000" not accepted as an end time | The bot remembers which time it asked for (`asked`), and a bare time answers it directly with `resolve_time`, skipping the LLM. Prompt reworded to "Please type in 24-hour time (eg. 07:00, 18:00)." |
+| 4 | Full-day-free message and "Checked:" footer | `/free` lists busy items (blocks, plans, calendar entries) then free gaps; a fully free day says "Free all day". Saved plans are listed as "(Saved, not decided)" and never make you busy. Footer removed. |
+| 5 | Block over a Going plan gave no warning; "(Singapore)" | `block_overlaps`: the block preview lists overlapping Going, Maybe and Saved plans. "(Singapore)" is now "SGT" in block and event previews. |
+| 6 | Clash only visible later in `/events` | The "Blocked." confirmation lists the plans it clashes with. |
+| 5b | (found in the screenshot) "What time is this block?" then "18:30-19:00" was read as an event | The half-given block is remembered (`block_ask`), and the next message completes it. |
+
+Behaviour to know: the "Fill mine"/"Free" wording in polls is unchanged; `/free` for a partly busy day
+shows both the busy list and the free gaps.
+
+## Pictures and quick messages (13 October)
+
+- `app/services/image_reader.py`: OpenAI vision turns a forwarded picture into plain text
+  (`store=False`, image treated as untrusted content). The text then uses the existing extractor and
+  date/time guards, so there is one set of rules for typed and pictured plans.
+- `app/bot/handlers.py` `gather_text`: text, caption, poll question and options, photo, and image
+  sent as a file. Caption and picture text are combined. A failed read falls back to the caption.
+- Rate limit: 10 pictures per person per 5 minutes (`picture_limit`), in addition to the extraction limit.
+- Quick messages: `DEFAULT_EVENT_DURATION_MINUTES` now defaults to 120 (was 0 = always ask); the
+  card labels the length as assumed. `tonight`, `this evening`, `tmr morning` etc. resolve a bare hour
+  to am/pm and clear a model "am or pm" flag.
+- Config: `READ_PICTURES` (default true), `OPENAI_VISION_MODEL` (blank = `OPENAI_MODEL`). The
+  deployment's own env must set `DEFAULT_EVENT_DURATION_MINUTES` if it overrides the default.
+- Tests default the duration to 0 in `service_factory` so the older ask-for-end-time tests are unchanged.
+- Not covered by tests against the real API: the actual vision model's output quality. Needs a live
+  check with real posters and screenshots (suggest 10 to 20 samples) before relying on it.

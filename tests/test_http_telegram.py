@@ -241,7 +241,7 @@ async def test_a_poster_with_a_caption_is_read_like_any_plan(service_factory, re
         reply = transport.sent[-1]["text"]
         assert "photo" not in reply.lower() and "end" in reply.lower()  # asks when it ends
         await bot.process_update(Update.de_json(photo_payload(None, 8), bot.bot))
-        assert "not what's inside a picture yet" in transport.sent[-1]["text"]
+        assert "I can't read pictures right now" in transport.sent[-1]["text"]
 
 
 async def webhook_app(service):

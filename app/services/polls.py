@@ -193,9 +193,11 @@ class PollService:
             return None
         window = EventDraft(title="window", start_at=poll.window_start, end_at=poll.window_end)
         blocks, events = await self.repo.busy(user.id, window)
-        synced = any(c.synced_at for c in await self.repo.list_calendars(user.id))
-        if not (user.coverage_start or synced or blocks or events):
-            return None
+        if not (blocks or events or user.coverage_start):
+            # Nothing in this window: still a known schedule if they use AmIFree for one at all.
+            synced = any(c.synced_at for c in await self.repo.list_calendars(user.id))
+            if not (synced or await self.repo.list_blocks(user.id)):
+                return None
         definite = blocks + [e for e in events if e.status == Status.GOING]
         return [(b.start_at, b.end_at) for b in definite]
 

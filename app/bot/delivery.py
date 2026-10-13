@@ -13,6 +13,8 @@ class Delivery:
     replies: list[Reply] | None = None
     sent: int = 0
     failed: bool = False
+    # True while this update holds a database claim that is not yet finished or released.
+    claimed: bool = False
 
     async def flush(self, update: Update):
         while self.sent < len(self.replies or []):

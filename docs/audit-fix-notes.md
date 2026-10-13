@@ -12,7 +12,7 @@ checked against the code before being worked on.
 | P0-03 | `/api/me` hardcoded `outside_calendars_connected: False` | `app/api/routes.py` returns per-calendar `label`/`status`/`synced_at` and a real flag. `web/src/pages/Home.tsx` copy follows it (connected / link not working / not connected). Sealed URLs and error text are never returned. |
 | P0-04 | `/whosfree` counted members with no data as free | `app/services/polls.py`: members with no timetable, synced calendar, blocks or plans are left out of slot counts and reported as "had no schedule to check". Suggestions need 3 members **with** a schedule. Card says "no known clash", not "free". |
 | P0-05 | No CI | `.github/workflows/ci.yml`: lint, format, smoke, tests + coverage, SQL tests, web build. `docs/verification.md` refreshed. |
-| P1-01 | No rate limiting | `app/services/ratelimit.py`. Sign-in 30/min per caller; extraction 15 per 5 min per user; calendar-link fetch 8 per 10 min per user. In-process, single worker. |
+| P1-01 | No rate limiting | `app/services/ratelimit.py`. Sign-in 120/min per caller (first `X-Forwarded-For` hop); extraction 15 per 5 min per user; calendar-link fetch 8 per 10 min per user. In-process, single worker. |
 | P1-05 | `calendars_due` read 5000 rows into Python | Filters (`checked_at` null or stale), orders and limits in the database. |
 
 Test changes: `tests/sql_transport.py` learned multi-column select, `or` filters and
@@ -83,3 +83,35 @@ shows both the busy list and the free gaps.
 - Tests default the duration to 0 in `service_factory` so the older ask-for-end-time tests are unchanged.
 - Not covered by tests against the real API: the actual vision model's output quality. Needs a live
   check with real posters and screenshots (suggest 10 to 20 samples) before relying on it.
+
+## Self-audit pass (13 October)
+
+A review of everything on this branch, plus the flows it touches. Found and fixed:
+
+| Finding | Fix |
+| --- | --- |
+| A `/free` or half-typed block question left open swallowed a later message ("Dinner fri 7-9pm" got a date error; a plan was glued onto a block) | Questions expire after 15 minutes (`PROMPT_TTL`), only short single-line replies count as answers, a non-answer is handled as an ordinary message, and the examples are shown only if it was not an event either. A block reply must be a time range, or the missing end time. |
+| `/free next week` could exceed Telegram's 4096-character limit | At most 8 busy items per day and a 3900-character cap with a clear note. |
+| A retried webhook delivery never marked its update finished | `Delivery.claimed`; the update is finished when a retry finally delivers the replies. |
+| Sign-in limit keyed on the proxy hop: one bucket for every user | Keyed on the first forwarded hop; limit raised to 120/min. |
+| A bare "night"/"evening" anywhere in a post made a bare hour pm ("Games Night Fri 7") | Only explicit phrases count (tonight, this evening, fri night, tmr morning, in the afternoon), and only for hours that fit the part. |
+| Poll "has a schedule" looked only inside the poll window | Also counts a synced calendar or any busy-block rule. |
+| NUSMods import and group `/event` extraction were not rate limited | Both limited. |
+| Readiness made 15 sequential database calls | Run together; a total failure is reported as "unreachable", not as missing migrations. |
+| One slow LLM call blocked every user (the lag seen in testing) | Per-user and per-chat ordering with up to 32 updates in parallel, in both polling and webhook modes. |
+| Bare end hour was asked about even when obvious ("9" after a 7pm start) | Read as the first am/pm after the start; still asked when neither fits. |
+| "ok thanks" during an edit became the venue | Small talk is never taken as a venue. |
+
+Checked and left alone: calendar link fetching (host allowlist re-checked on every redirect, size cap),
+Mini App auth (signature, age, token expiry), reminders (one per user per day), notification claiming
+(atomic in the database), so concurrent updates are safe there.
+
+A 360,000-call randomised run over the date, time, block and `/free` parsers raised no unexpected
+exception.
+
+### Still not proven (needs live accounts or the owner)
+
+- Real vision-model output on real posters and screenshots.
+- Real Telegram, OpenAI and hosted Supabase behaviour, including migrations `005`-`008`.
+- Concurrency under real load. It is tested with simulated slow requests, not production traffic.
+- Multi-replica deployments are still unsupported: rate limits, locks and reply progress are in-process.

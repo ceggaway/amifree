@@ -105,12 +105,15 @@ def build_router(settings: Settings) -> APIRouter:
         return await service.repo.ensure_user(telegram_id)
 
     CurrentUser = Annotated[User, Depends(current_user)]
-    sign_in_limit = RateLimiter(30, 60)
+    # Sign-in is already gated by Telegram's signature; this only bounds a flood of bad
+    # attempts. Generous on purpose: a shared key must never lock real users out.
+    sign_in_limit = RateLimiter(120, 60)
 
     def client_ip(request: Request) -> str:
-        # Behind the host's proxy the last forwarded hop is the one it added, not the caller's claim.
-        forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
-        return forwarded or (request.client.host if request.client else "unknown")
+        # Hosting proxies (Render included) put the caller first in X-Forwarded-For. Keying on
+        # the last hop would be the proxy itself: one bucket for everybody.
+        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        return forwarded[:64] or (request.client.host if request.client else "unknown")
 
     @router.post("/auth/telegram")
     async def authenticate(body: AuthRequest, request: Request):

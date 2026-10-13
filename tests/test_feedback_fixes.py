@@ -84,12 +84,39 @@ async def test_a_reply_that_is_not_a_date_still_works_as_a_message(service_facto
     assert block.text.startswith("Block this time?")
 
 
-async def test_an_unclear_date_is_asked_again_with_examples(service_factory, reference):
-    service, repo = service_factory()
+async def test_an_unclear_answer_gets_the_examples_and_never_blocks_later_messages(
+    service_factory, reference
+):
+    service, repo = service_factory(extraction(kind="unknown"), extraction())
+    await onboard(service, reference)
     await service.command(1, "free")
     reply = (await service.message(1, 5, "someday", reference))[0]
     assert "For example: /free fri 7-9pm" in reply.text
-    assert (await repo.ensure_user(1)).pending["stage"] == "free"
+    # The question is closed: the next message is an ordinary one.
+    assert not (await repo.ensure_user(1)).pending
+    card = (await service.message(1, 6, TEXT, reference))[0]
+    assert "No clashes found" in card.text
+
+
+async def test_a_short_plan_sent_after_free_is_a_plan_not_a_date_error(service_factory, reference):
+    service, repo = service_factory(extraction())
+    await onboard(service, reference)
+    await service.command(1, "free")
+    card = (await service.message(1, 5, "Dinner fri 7-9pm", reference))[0]
+    assert "No clashes found" in card.text and len(repo.events) == 1
+
+
+async def test_an_old_free_question_is_forgotten(service_factory, reference):
+    from datetime import timedelta
+
+    service, repo = service_factory(extraction(kind="unknown"))
+    await onboard(service, reference)
+    await service.command(1, "free")
+    service.clock = lambda: reference + timedelta(minutes=16)
+    reply = (await service.message(1, 5, "15 oct", reference))[0]
+    # Too late to be an answer: it is read as a message, and is not an event.
+    assert "couldn't find an event" in reply.text
+    assert not (await repo.ensure_user(1)).pending
 
 
 # 3. End time answered in 24-hour (or am/pm) time -----------------------------------------
@@ -114,7 +141,8 @@ async def test_am_pm_answers_work_too_and_an_unclear_one_is_asked_again(service_
     service, repo = service_factory(extraction(end_time_text=None))
     await onboard(service, reference)
     await service.message(1, 2, "CCA dinner Friday 7pm at Vivo", reference)
-    unclear = (await service.message(1, 3, "9", reference))[0]
+    # "5" could not follow a 7pm start either way, so it is asked about rather than guessed.
+    unclear = (await service.message(1, 3, "5", reference))[0]
     assert "AM or PM" in unclear.text and (await repo.ensure_user(1)).pending
     card = (await service.message(1, 4, "9PM", reference))[0]
     assert "No clashes found" in card.text
@@ -168,3 +196,44 @@ async def test_a_block_time_can_be_sent_in_a_second_message(service_factory, ref
     assert preview.text.startswith("Block this time?")
     assert "18:30 → 19:30 SGT" in preview.text
     assert "CCA dinner" in preview.text  # the 7pm dinner starts inside the block
+
+
+async def test_a_single_end_time_completes_a_half_typed_block(service_factory, reference):
+    service, _ = service_factory()
+    await service.message(1, 3, "busy 9 oct 18:30", reference)
+    preview = (await service.message(1, 4, "19:30", reference))[0]
+    assert preview.text.startswith("Block this time?") and "18:30 → 19:30 SGT" in preview.text
+
+
+async def test_an_unrelated_message_is_not_glued_onto_a_half_typed_block(
+    service_factory, reference
+):
+    service, repo = service_factory(extraction())
+    await onboard(service, reference)
+    ask = (await service.message(1, 3, "busy sat", reference))[0]
+    assert ask.text.startswith("What time is this block?")
+    card = (await service.message(1, 4, TEXT, reference))[0]
+    # A plan with its own time is a plan: no block titled after it, and the question is closed.
+    assert "No clashes found" in card.text and "Block this time?" not in card.text
+    assert not await repo.list_blocks((await repo.ensure_user(1)).id)
+    assert not (await repo.ensure_user(1)).pending
+
+
+async def test_a_bare_end_hour_is_read_as_the_first_time_after_the_start(
+    service_factory, reference
+):
+    service, repo = service_factory(extraction(start_time_text="7pm", end_time_text=None))
+    await onboard(service, reference)
+    await service.message(1, 2, "CCA dinner Friday 7pm at Vivo", reference)
+    card = (await service.message(1, 3, "9", reference))[0]
+    assert "No clashes found" in card.text
+    event = next(iter(repo.events.values()))
+    assert (event.start_at.hour, event.end_at.hour) == (19, 21)
+
+
+async def test_small_talk_is_not_saved_as_a_venue(service_factory, reference):
+    service, _ = service_factory(extraction(), extraction(**UNCHANGED))
+    confirmed = await going_dinner(service, reference)
+    await service.callback(1, tap(confirmed[0], "Edit"))
+    preview = (await service.message(1, 3, "ok thanks", reference))[0]
+    assert "Location: ok" not in preview.text

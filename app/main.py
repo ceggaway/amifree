@@ -17,6 +17,7 @@ from telegram import BotCommand, MenuButtonWebApp, Update, WebAppInfo
 from telegram.ext import Application
 
 from app.api.routes import build_router
+from app.bot.concurrency import KeyedLocks, PerUserProcessor, update_keys
 from app.bot.delivery import Delivery, webhook_delivery
 from app.bot.handlers import register_handlers
 from app.config import Settings
@@ -56,7 +57,7 @@ def telegram_builder():
     # python-telegram-bot defaults to 5s timeouts, which fail on slow networks.
     return (
         Application.builder()
-        .concurrent_updates(False)
+        .concurrent_updates(PerUserProcessor())
         .connect_timeout(15)
         .read_timeout(20)
         .write_timeout(20)
@@ -77,7 +78,7 @@ def create_app(
         app.state.ready = False
         app.state.service = service
         app.state.telegram = telegram_application
-        app.state.webhook_lock = asyncio.Lock()
+        app.state.update_locks = KeyedLocks()
         app.state.deliveries = OrderedDict()
         if service is not None:
             app.state.ready = True
@@ -303,24 +304,26 @@ def create_app(
             update = Update.de_json(payload, app.state.telegram.bot)
         except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
             raise HTTPException(400, "Invalid Telegram update") from None
-        async with app.state.webhook_lock:
+        # Different people are handled at the same time; one person's updates (and one
+        # chat's) stay in order. A retry of an update waits for the attempt still running.
+        async with app.state.update_locks.hold(update_keys(update)):
             # Retain reply progress so a delivery retry does not repeat a successful
             # business operation (including /delete or a confirmed edit).
             deliveries = app.state.deliveries
             delivery = deliveries.get(update.update_id)
             repo = getattr(app.state.service, "repo", None)
-            durable = delivery is None and hasattr(repo, "claim_update")
-            if durable and not await repo.claim_update(update.update_id):
-                # Already handled (or being handled) by an earlier attempt, perhaps before a
-                # restart emptied the in-memory record: acknowledge, do not repeat it.
-                return {"ok": True}
             if delivery is None:
-                delivery = Delivery()
+                claimed = hasattr(repo, "claim_update")
+                if claimed and not await repo.claim_update(update.update_id):
+                    # Already handled (or being handled) by an earlier attempt, perhaps before
+                    # a restart emptied the in-memory record: acknowledge, do not repeat it.
+                    return {"ok": True}
+                delivery = Delivery(claimed=claimed)
                 token = webhook_delivery.set(delivery)
                 try:
                     await app.state.telegram.process_update(update)
                 except BaseException:
-                    if durable:
+                    if claimed:
                         await repo.release_update(update.update_id)
                     raise
                 finally:
@@ -336,12 +339,15 @@ def create_app(
                 deliveries.move_to_end(update.update_id)
                 while len(deliveries) > 1000:
                     deliveries.popitem(last=False)
-            if durable:
+            if delivery.claimed:
                 if not delivery.failed:
+                    # Also reached when a retry finally delivers the replies.
                     await repo.finish_update(update.update_id)
+                    delivery.claimed = False
                 elif delivery.replies is None:
                     # Failed before anything was committed: let the retry run it again.
                     await repo.release_update(update.update_id)
+                    delivery.claimed = False
             if delivery.failed:
                 raise HTTPException(503, "Update processing or reply delivery failed")
         return {"ok": True}

@@ -70,6 +70,9 @@ from app.services.quick_blocks import (
     expand_blocks,
     parse_block,
 )
+from app.services.quick_blocks import (
+    RANGE as BLOCK_RANGE,
+)
 from app.services.ratelimit import RateLimiter
 
 log = logging.getLogger(__name__)
@@ -90,6 +93,11 @@ BARE_TIME = re.compile(
 
 
 TIMEISH = re.compile(r"\d{1,2}[:.]\d{2}|\d\s*[ap]\.?m\b|\b\d{4}\b|\bnoon\b|\bmidnight\b", re.I)
+# Words that make a reply small talk rather than a place ("ok thanks", "never mind").
+NOT_A_VENUE = frozenset(
+    "ok okay k yes no nope yep yeah sure fine thanks thank you ty hi hello hey nvm never mind "
+    "nevermind cancel stop same change none nothing pls please lol".split()
+)
 EDIT_FIELDS = (
     "title",
     "date_text",
@@ -107,10 +115,12 @@ def bare_venue(extracted: Extraction, previous: dict | None, text: str) -> Extra
     The extractor won't "infer a venue" from a bare phrase, so "clb lvl 3" used to come back
     unchanged. The preview still shows before and after, so a wrong guess is easy to refuse."""
     answer = " ".join(text.split())
+    words = set(re.findall(r"[a-z']+", answer.lower()))
     if (
         not previous
         or extracted.kind == "cancel"
         or not answer
+        or (words and words <= NOT_A_VENUE)
         or len(answer) > 120
         or answer.startswith("/")
         or TIMEISH.search(answer)
@@ -122,23 +132,52 @@ def bare_venue(extracted: Extraction, previous: dict | None, text: str) -> Extra
     return extracted.model_copy(update={"location": answer})
 
 
-def answer_asked_time(asked: str, previous: dict | None, text: str) -> Extraction | None:
+def answer_asked_time(
+    asked: str, previous: dict | None, text: str
+) -> tuple[Extraction, str] | None:
     """The previous draft with the time just asked for filled in, when the reply is only a time.
 
-    Returns None for anything else, so wordier answers still go through the extractor.
-    Raises Clarification for a time that needs more ("8" is it AM or PM?)."""
+    Returns (draft, the time as understood), or None for anything else so wordier answers
+    still go through the extractor. Raises Clarification for a time that needs more.
+    An end time given as a bare hour takes the first am/pm after the start: "9" after a
+    7pm start is 9pm."""
     answer = text.strip()
     if not previous or not BARE_TIME.fullmatch(answer):
         return None
-    answer = re.sub(r"^at\s+", "", answer, flags=re.I)
-    resolve_time(answer)
+    answer = re.sub(r"^at\s+", "", answer, flags=re.I).strip()
+    try:
+        resolve_time(answer)
+    except Clarification:
+        inferred = (
+            _after_start(answer, previous.get("start_time_text")) if asked == "end_time" else None
+        )
+        if inferred is None:
+            raise
+        answer = inferred
     field = {"end_time": "end_time_text", "start_time": "start_time_text"}[asked]
     update = {field: answer, "ambiguity": None}
     if asked == "end_time":
         update["end_date_text"] = None
-    return Extraction.model_validate(previous).model_copy(update=update)
+    return Extraction.model_validate(previous).model_copy(update=update), answer
 
 
+def _after_start(answer: str, start_text: str | None) -> str | None:
+    """ "9" or "9.30" as am or pm, whichever comes first after the start time; None if unclear."""
+    if not start_text or not re.fullmatch(r"\d{1,2}(?:[:.]\d{2})?", answer):
+        return None
+    try:
+        start = resolve_time(start_text)
+        options = [(resolve_time(answer + suffix), suffix) for suffix in ("am", "pm")]
+    except Clarification:
+        return None
+    later = sorted((t, suffix) for t, suffix in options if t > start)
+    return answer + later[0][1] if later else None
+
+
+# How long the bot waits for a typed answer to "When do you want to check?" or
+# "What time is this block?" before treating the next message as a new one.
+PROMPT_TTL = timedelta(minutes=15)
+MAX_FREE_LINES = 8  # busy items listed per day by /free
 FREE_PROMPT = (
     "When do you want to check? Tap a button, or type a date or time,"
     " like 15 oct, fri, next week or fri 7-9pm."
@@ -493,6 +532,8 @@ class SchedulingService:
         if calendar_link:
             return await self.connect_calendar(user, calendar_link)
         if "nusmods.com" in text.lower() and text.strip().startswith(("http://", "https://")):
+            if not self.calendar_limit.allow(user.id):
+                return [Reply(SLOW_DOWN)]
             result = await self.importer.import_link(text.strip(), reference)
             await self.repo.import_timetable(user.id, result)
             return [Reply(onboarding.nusmods_added(result.academic_year, result.semester))]
@@ -500,28 +541,20 @@ class SchedulingService:
             # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
             return [Reply(onboarding.NOT_A_SCHEDULE_LINK)]
         pending = user.pending
-        if pending and pending["stage"] == "free":
-            answer = await self.answer_free(user, text, reference)
-            if answer is not None:
-                return answer
-            pending = None  # not a date: treat it as the message it is
-        if pending and pending["stage"] == "block_ask":
-            # "What time is this block?" is answered here, not by the event extractor.
-            earlier = re.sub(
-                r"\s+\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?$", "", pending["text"], flags=re.I
-            )
-            try:
-                rule = parse_block(f"{earlier} {text}", reference)
-            except Clarification as exc:
-                await self.repo.set_pending(
-                    user.id, {"stage": "block_ask", "text": f"{earlier} {text}"[:200]}
-                )
-                return [Reply(str(exc))]
-            if rule:
-                await self.repo.set_pending(user.id, None)
-                return await self.preview_block(user, rule)
-            pending = None  # not a block after all
+        free_hint = None
+        if pending and pending["stage"] in ("free", "block_ask"):
+            # A question the bot asked: its answer is short and comes soon. Anything else, or
+            # anything later, is an ordinary message and must not be swallowed by the question.
+            stage = pending["stage"]
             await self.repo.set_pending(user.id, None)
+            if self.prompt_fresh(pending) and len(text) <= 60 and "\n" not in text.strip():
+                if stage == "free":
+                    answer, free_hint = await self.answer_free(user, text, reference)
+                else:
+                    answer = await self.answer_block(user, pending["text"], text, reference)
+                if answer is not None:
+                    return answer
+            pending = None
         if pending and pending["stage"] in ("confirm", "choose", "delete", "block", "recurring"):
             return [
                 Reply(
@@ -534,7 +567,7 @@ class SchedulingService:
                 rule = parse_block(text, reference)
             except Clarification as exc:
                 # Remember the half-given block so the next message completes it.
-                await self.repo.set_pending(user.id, {"stage": "block_ask", "text": text[:200]})
+                await self.ask(user, "block_ask", text=text[:200])
                 return [Reply(str(exc))]
             if rule:
                 return await self.preview_block(user, rule)
@@ -544,9 +577,12 @@ class SchedulingService:
         if pending and pending.get("asked") and not pending.get("event_id"):
             # A bare time answering "What time does this event end?" needs no LLM.
             try:
-                answered = answer_asked_time(pending["asked"], previous, text)
+                found = answer_asked_time(pending["asked"], previous, text)
             except Clarification as exc:
                 return [Reply(f"{exc}\n/cancel to discard this draft.")]
+            if found:
+                # The time as understood ("9pm" for a bare "9") is what gets verified below.
+                answered, text = found
         if answered is None and not self.extraction_limit.allow(telegram_id):
             return [Reply(SLOW_DOWN)]
         if pending:
@@ -627,6 +663,8 @@ class SchedulingService:
                     Reply("Which event should this change apply to?", choose_keyboard(candidates))
                 ]
             return await self.prepare(user, extracted, state, candidates[0])
+        if extracted.kind == "unknown" and free_hint:
+            return [Reply(free_hint)]
         if extracted.kind == "unknown":
             return [
                 Reply(
@@ -797,7 +835,7 @@ class SchedulingService:
     async def free_command(self, user: User, args: str) -> list[Reply]:
         if not args.strip():
             # The next plain message is read as the answer, so a date can simply be typed.
-            await self.repo.set_pending(user.id, {"stage": "free"})
+            await self.ask(user, "free")
             return [Reply(FREE_PROMPT, free_keyboard())]
         try:
             query = parse_free(args, self.clock())
@@ -807,27 +845,60 @@ class SchedulingService:
             return [await self.free_slot(user, query)]
         return [await self.free_days(user, query.days)]
 
-    async def answer_free(self, user: User, text: str, reference: datetime) -> list[Reply] | None:
-        """A typed reply to "When do you want to check?". None when it isn't one."""
-        # A long or multi-line message is an invitation, not a date: let it through.
-        if len(text) > 60 or "\n" in text.strip():
-            await self.repo.set_pending(user.id, None)
-            return None
+    async def ask(self, user: User, stage: str, **state):
+        """Leave a question open; `prompt_fresh` decides how long its answer is expected."""
+        await self.repo.set_pending(
+            user.id, {"stage": stage, "at": self.clock().isoformat(), **state}
+        )
+
+    def prompt_fresh(self, pending: dict) -> bool:
         try:
-            looks_like_block = parse_block(text, reference) is not None
+            asked = datetime.fromisoformat(pending.get("at", ""))
+        except ValueError:
+            return False
+        return timedelta(0) <= self.clock() - asked <= PROMPT_TTL
+
+    async def answer_free(
+        self, user: User, text: str, reference: datetime
+    ) -> tuple[list[Reply] | None, str | None]:
+        """A typed reply to "When do you want to check?".
+
+        Returns (replies, None) when it was a date or time. Otherwise (None, a hint): the
+        message is handled normally, and the hint is shown only if it wasn't an event either."""
+        try:
+            if parse_block(text, reference) is not None:
+                return None, None
         except Clarification:
-            looks_like_block = True
-        if looks_like_block:
-            await self.repo.set_pending(user.id, None)
-            return None
+            return None, None  # "busy sat" is a block being typed, not a date
         try:
             query = parse_free(text, self.clock())
         except Clarification as exc:
-            return [Reply(f"{exc}\n{FREE_EXAMPLES}\n/cancel to stop.")]
-        await self.repo.set_pending(user.id, None)
+            return None, f"{exc}\n{FREE_EXAMPLES}"
         if query.slot is not None:
-            return [await self.free_slot(user, query)]
-        return [await self.free_days(user, query.days)]
+            return [await self.free_slot(user, query)], None
+        return [await self.free_days(user, query.days)], None
+
+    async def answer_block(
+        self, user: User, earlier: str, text: str, reference: datetime
+    ) -> list[Reply] | None:
+        """A reply to "What time is this block?": a time range, or the missing end time.
+
+        None when the reply isn't a time, so it is handled as an ordinary message."""
+        reply = text.strip()
+        trailing = re.search(r"\s+(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?)$", earlier, flags=re.I)
+        head = earlier[: trailing.start()] if trailing else earlier
+        if BLOCK_RANGE.fullmatch(reply):
+            combined = f"{head} {reply}"  # "18:30-19:00" replaces a lone "18:30"
+        elif trailing and BARE_TIME.fullmatch(reply):
+            combined = f"{head} {trailing[1].strip()}-{reply}"  # "19:00" completes "18:30"
+        else:
+            return None
+        try:
+            rule = parse_block(combined, reference)
+        except Clarification as exc:
+            await self.ask(user, "block_ask", text=earlier)
+            return [Reply(str(exc))]
+        return await self.preview_block(user, rule) if rule else None
 
     async def free_slot(self, user: User, query) -> Reply:
         slot = query.slot
@@ -879,10 +950,12 @@ class SchedulingService:
                     parts.append(f"🟢 Free all day on {label}.")
                 continue
             lines = [
-                f"• {clock(max(a, start))} – {clock(min(b, end))} {name[:60]}"
+                f"• {clock(max(a, start))} – {clock(min(b, end))} {name[:40]}"
                 + ("" if decided else " (Saved, not decided)")
-                for a, b, name, decided in items
+                for a, b, name, decided in items[:MAX_FREE_LINES]
             ]
+            if len(items) > MAX_FREE_LINES:
+                lines.append(f"• and {len(items) - MAX_FREE_LINES} more")
             decided = any(item[3] for item in items)
             head = f"🔴 Busy on {label}:" if decided else f"🟡 Nothing confirmed on {label}:"
             text = head + "\n" + "\n".join(lines)
@@ -893,7 +966,10 @@ class SchedulingService:
             else:
                 text += "\n\nNo free time between 8am and 11pm."
             parts.append(text)
-        return Reply("\n\n".join(parts))
+        text = "\n\n".join(parts)
+        if len(text) > 3900:  # Telegram refuses anything over 4096 characters
+            text = text[:3900].rsplit("\n", 1)[0] + "\n…\nAsk about fewer days to see the rest."
+        return Reply(text)
 
     # ---- subscribed calendar feed (Apple Calendar first) ----
 

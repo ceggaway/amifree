@@ -96,3 +96,5 @@ async def test_webhook_failure_recovery_and_duplicate_delivery(service_factory, 
         assert (await client.post("/telegram/webhook", json=payload)).status_code == 200
         assert [r["text"] for r in transport.sent] == ["First response", "Second response"]
         assert len(calls) == (1 if fail_reply else 2)
+        # However it got there (a retried send, or a rerun), the update ends up finished.
+        assert repo.updates[payload["update_id"]] == "done"

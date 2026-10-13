@@ -1,5 +1,6 @@
 """All I/O is async and server-side; every event operation requires its owner."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime, time, timedelta
 
@@ -52,35 +53,51 @@ class SupabaseRepository:
             "schema_migrations": "version,name",
             "processed_updates": "update_id,status,claimed_at",
         }
-        missing = []
-        for table, columns in required.items():
+
+        async def has_table(table, columns):
             try:
                 await self.client.table(table).select(columns).limit(1).execute()
             except Exception:
-                missing.append(table)
-        try:
+                return table
+            return None
+
+        async def has_function():
             # A nil calendar id owns nothing, so this probes that migration 007's function
             # exists and is callable without changing any data.
-            await self.client.rpc(
-                "amifree_replace_calendar",
-                {
-                    "p_calendar_id": "00000000-0000-0000-0000-000000000000",
-                    "p_blocks": [],
-                    "p_synced_at": datetime.now(UTC).isoformat(),
-                },
-            ).execute()
-        except Exception:
-            missing.append("function amifree_replace_calendar")
-        if "schema_migrations" not in missing:
-            rows = (
-                await self.client.table("schema_migrations")
-                .select("version")
-                .order("version", desc=True)
-                .limit(1)
-                .execute()
-            ).data
+            try:
+                await self.client.rpc(
+                    "amifree_replace_calendar",
+                    {
+                        "p_calendar_id": "00000000-0000-0000-0000-000000000000",
+                        "p_blocks": [],
+                        "p_synced_at": datetime.now(UTC).isoformat(),
+                    },
+                ).execute()
+            except Exception:
+                return "function amifree_replace_calendar"
+            return None
+
+        async def has_version():
+            try:
+                rows = (
+                    await self.client.table("schema_migrations")
+                    .select("version")
+                    .order("version", desc=True)
+                    .limit(1)
+                    .execute()
+                ).data
+            except Exception:
+                return None  # reported as the missing schema_migrations table
             if not rows or rows[0]["version"] < SCHEMA_VERSION:
-                missing.append(f"schema version {SCHEMA_VERSION}")
+                return f"schema version {SCHEMA_VERSION}"
+            return None
+
+        # Together, so a readiness probe costs one round trip's time, not fifteen.
+        checks = [has_table(t, c) for t, c in required.items()] + [has_function(), has_version()]
+        missing = [found for found in await asyncio.gather(*checks) if found]
+        if len(missing) >= len(required):
+            log.error("database_unreachable")
+            raise RuntimeError("Database is unreachable")
         if missing:
             log.error("database_schema_incomplete missing=%s", ", ".join(missing))
             raise RuntimeError("Database schema is out of date")

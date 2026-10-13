@@ -59,6 +59,8 @@ class GroupEventService:
         if len(text) > 4000:
             return GroupResult(post=Reply("That message is too long for an event card."))
         user = await self.repo.ensure_user(telegram_id)
+        if not self.scheduling.extraction_limit.allow(telegram_id):
+            return GroupResult(alert="You're sending a lot very quickly. Give it a minute.")
         extracted = await self.scheduling.extractor.extract(text, reference, None)
         if extracted.kind == "unknown":
             return GroupResult(post=Reply("I couldn't find an event in that message. " + USAGE))

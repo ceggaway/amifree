@@ -330,11 +330,16 @@ async def test_sign_in_is_rate_limited_per_caller(api):
                 "/api/auth/telegram", json=forged, headers={"x-forwarded-for": "9.9.9.9"}
             )
         ).status_code
-        for _ in range(31)
+        for _ in range(121)
     ]
-    assert codes[:30] == [401] * 30 and codes[30] == 429
+    assert codes[:120] == [401] * 120 and codes[120] == 429
     # Another caller is unaffected.
     other = await client.post(
-        "/api/auth/telegram", json=forged, headers={"x-forwarded-for": "8.8.8.8"}
+        "/api/auth/telegram", json=forged, headers={"x-forwarded-for": "8.8.8.8, 10.0.0.1"}
     )
     assert other.status_code == 401
+    # The proxy hop is shared by everyone, so it is never the key: this caller is still limited.
+    same = await client.post(
+        "/api/auth/telegram", json=forged, headers={"x-forwarded-for": "9.9.9.9, 10.0.0.1"}
+    )
+    assert same.status_code == 429

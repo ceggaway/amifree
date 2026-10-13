@@ -258,20 +258,34 @@ def restore_meridiem(raw: str | None, source: str) -> str | None:
     return f"{raw.strip()}{match[1]}m" if match else raw
 
 
-_EVENING = re.compile(
-    r"\b(?:tonight|tonite|tmr night|tomorrow night|this evening|this eve|"
-    r"(?:today|tomorrow|tmr|this)\s+(?:afternoon|evening|night)|(?:in the )?(?:evening|night))\b",
-    re.IGNORECASE,
+_DAY = (
+    r"(?:today|tomorrow|tmr|tmrw|this|mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?"
 )
-_MORNING = re.compile(r"\b(?:this morning|(?:today|tomorrow|tmr) morning|in the morning)\b", re.I)
+# Explicit phrases only. A bare "night" or "evening" is often part of a title ("Games Night").
+_DAY_PARTS = (
+    (re.compile(rf"\b(?:{_DAY}\s+morning|in the morning)\b", re.I), "am", range(5, 12)),
+    (
+        re.compile(rf"\b(?:{_DAY}\s+afternoon|in the afternoon)\b", re.I),
+        "pm",
+        (12, 1, 2, 3, 4, 5, 6),
+    ),
+    (
+        re.compile(
+            rf"\b(?:tonight|tonite|{_DAY}\s+(?:evening|eve|night)|in the evening|at night)\b", re.I
+        ),
+        "pm",
+        range(5, 12),
+    ),
+)
 
 
-def day_part_meridiem(source: str) -> str | None:
-    """ "7 tonight" and "dinner this evening at 7" mean 7pm; "9 this morning" means 9am."""
-    if _MORNING.search(source):
-        return "am"
-    if _EVENING.search(source):
-        return "pm"
+def day_part_meridiem(source: str, hour: int | None = None) -> str | None:
+    """ "7 tonight" means 7pm and "9 tmr morning" means 9am.
+
+    With `hour`, only when that hour fits the part: "11 this afternoon" is left to be asked."""
+    for pattern, meridiem, hours in _DAY_PARTS:
+        if pattern.search(source) and (hour is None or hour in hours):
+            return meridiem
     return None
 
 
@@ -295,17 +309,13 @@ def _spoken_noon(extraction: Extraction, source: str) -> Extraction:
     return extraction.model_copy(update=update) if update else extraction
 
 
-def _with_day_part(raw: str | None, part: str | None) -> str | None:
+def _with_day_part(raw: str | None, source: str) -> str | None:
     """A bare hour gets the day part's am/pm ("7" + "tonight" -> "7pm"); anything else is kept."""
-    if not raw or not part:
-        return raw
-    m = re.fullmatch(r"\s*(\d{1,2})(?:[:.]\d{2})?\s*", raw)
+    m = re.fullmatch(r"\s*(\d{1,2})(?:[:.]\d{2})?\s*", raw or "")
     if not m:
         return raw
-    hour = int(m[1])
-    if (part == "pm" and 1 <= hour <= 11) or (part == "am" and 1 <= hour <= 12):
-        return raw.strip() + part
-    return raw
+    part = day_part_meridiem(source, int(m[1]))
+    return raw.strip() + part if part else raw
 
 
 _AM_OR_PM = re.compile(r"\bam\b.*\bpm\b|\bpm\b.*\bam\b|am/pm|a\.m\.", re.IGNORECASE)
@@ -319,12 +329,10 @@ def validate_extraction(
     default_minutes=0,
     existing: EventDraft | None = None,
 ) -> EventDraft:
-    part = day_part_meridiem(source)
     if (
         extraction.ambiguity
-        and part
         and _AM_OR_PM.search(extraction.ambiguity)
-        and _with_day_part(extraction.start_time_text, part) != extraction.start_time_text
+        and _with_day_part(extraction.start_time_text, source) != extraction.start_time_text
     ):
         # "dinner at 7 tonight": the day part already says pm.
         extraction = extraction.model_copy(update={"ambiguity": None})
@@ -369,8 +377,8 @@ def validate_extraction(
     )
     extraction = extraction.model_copy(
         update={
-            "start_time_text": _with_day_part(extraction.start_time_text, part),
-            "end_time_text": _with_day_part(extraction.end_time_text, part),
+            "start_time_text": _with_day_part(extraction.start_time_text, source),
+            "end_time_text": _with_day_part(extraction.end_time_text, source),
         }
     )
     if not extraction.date_text and existing is None:

@@ -195,7 +195,7 @@ python -c 'import secrets; print(secrets.token_hex(32))'
 
 The server registers `/telegram/webhook` with Telegram on startup. Incoming requests must carry the matching `X-Telegram-Bot-Api-Secret-Token`. Never run polling and webhook instances for the same bot simultaneously. Stop the local polling process before deploying. Follow the [Render FastAPI deployment guide](https://render.com/docs/deploy-fastapi) for service creation and [port configuration](https://render.com/docs/web-services#port-binding).
 
-Use one replica and one worker for this MVP. Webhook updates are serialized and polling processes one update at a time; database versions reject stale writes. Multiple replicas would require shared locking and a durable update queue. During deployment, stop the old instance before starting a second worker for the same bot. No deployment has been performed by this project setup.
+Use one replica and one worker for this MVP. Within that worker, different people are handled at the same time (up to 32 updates), while each person's updates, and each chat's, are processed strictly in order (`app/bot/concurrency.py`); database versions reject stale writes. One slow extraction or picture read therefore delays only the person who sent it. Multiple replicas would require shared locking and a durable update queue. During deployment, stop the old instance before starting a second worker for the same bot. No deployment has been performed by this project setup.
 
 ## MVP assumptions
 
@@ -235,6 +235,6 @@ The bundled `app/data/academic-calendar.json` covers AY2024/25–2026/27 and com
 
 ### Webhook failure recovery
 
-Failed processing or reply delivery returns HTTP 503 so Telegram can retry. The running worker retains reply progress and completed update IDs for its latest 1,000 handled updates. Retries resume unsent replies without repeating completed business operations; duplicate completed updates are acknowledged without additional replies. This cache is in memory and is lost on restart or eviction. Continue to run one worker. Existing database event/message uniqueness and event version checks remain the fallback replay guards; this is not durable exactly-once delivery. A reply accepted by Telegram before a network timeout may be delivered twice on retry.
+Failed processing or reply delivery returns HTTP 503 so Telegram can retry. The running worker retains reply progress and completed update IDs for its latest 1,000 handled updates. Retries resume unsent replies without repeating completed business operations; duplicate completed updates are acknowledged without additional replies. This cache is in memory and is lost on restart or eviction, so migration `008` also records each update in `processed_updates`: a retry of a finished update is acknowledged and not repeated even after a restart, a failure before anything was committed releases the claim so the retry runs, and an attempt that crashed is retaken after two minutes. Continue to run one worker. This is not durable exactly-once delivery: replies are not in an outbox. A reply accepted by Telegram before a network timeout may be delivered twice on retry.
 
 Times with a colon and no AM/PM suffix are treated as 24-hour time, including mixed ranges such as `07:00–9pm`. Abbreviated ranges such as `7–9pm` still share the suffix.

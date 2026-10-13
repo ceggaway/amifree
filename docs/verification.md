@@ -6,7 +6,7 @@ Local checks only, on `main` plus uncommitted changes, using Python 3.12.1 and N
 
 | Layer | Result | Evidence and limits |
 | --- | --- | --- |
-| Python tests | **425 passed** | Includes the PGlite database integration test (not skipped) |
+| Python tests | **438 passed** | Includes the PGlite database integration test (not skipped) |
 | Application coverage | **93% statements** | `pytest --cov=app` |
 | PostgreSQL schema and migrations | **24 checks passed** | `npm --prefix scripts/sql-tests test` |
 | Lint, format | Pass | `ruff check`, `ruff format` |

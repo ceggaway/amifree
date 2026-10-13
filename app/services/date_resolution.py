@@ -246,6 +246,26 @@ def restore_meridiem(raw: str | None, source: str) -> str | None:
     return f"{raw.strip()}{match[1]}m" if match else raw
 
 
+_OTHER_TIMEZONE = re.compile(
+    r"\b(?:uk|us|usa|eastern|pacific|central|london|european|japan|korea|india|australia|"
+    r"est|edt|pst|pdt|cst|cet|cest|bst|gmt|utc|jst|kst|aest)\s+time\b"
+    r"|\b(?:gmt|utc|est|edt|pst|pdt|cet|cest|bst)\b",
+    re.IGNORECASE,
+)
+
+
+def _spoken_noon(extraction: Extraction, source: str) -> Extraction:
+    """The model turns "noon" into "12", which is not in the message and fails verification."""
+    update = {}
+    for field in ("start_time_text", "end_time_text"):
+        value = (getattr(extraction, field) or "").strip()
+        if value in ("12", "12:00", "12.00") and not in_source(value, source):
+            word = re.search(r"\b(noon|midday)\b", source, re.I)
+            if word:
+                update[field] = word[1].lower()
+    return extraction.model_copy(update=update) if update else extraction
+
+
 def validate_extraction(
     extraction: Extraction,
     source: str,
@@ -256,6 +276,12 @@ def validate_extraction(
 ) -> EventDraft:
     if extraction.ambiguity:
         raise Clarification("Please clarify the event date and time: " + extraction.ambiguity[:200])
+    if _OTHER_TIMEZONE.search(source):
+        raise Clarification(
+            "That time looks like it is in another timezone. Send me the Singapore time, "
+            "for example: Call Friday 8-9pm."
+        )
+    extraction = _spoken_noon(extraction, source)
     for field in ("date_text", "start_time_text", "end_time_text", "end_date_text"):
         value = getattr(extraction, field)
         if value and not in_source(value, source):

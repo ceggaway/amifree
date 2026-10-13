@@ -122,3 +122,24 @@ def test_other_overnight_ranges_still_need_an_end_date():
             "Games Fri 11pm-2am",
             MONDAY,
         )
+
+
+def test_model_rewriting_noon_as_12_still_verifies():
+    source = "Lunch Thursday noon to 1.30pm at Frontier"
+    draft = validate_extraction(
+        extraction(date_text="Thursday", start_time_text="12", end_time_text="1.30pm"),
+        source,
+        MONDAY,
+    )
+    assert draft.start_at == datetime(2026, 10, 15, 12, 0, tzinfo=SG)
+    assert draft.end_at == datetime(2026, 10, 15, 13, 30, tzinfo=SG)
+
+
+@pytest.mark.parametrize("source", ["Call with mentor Friday 8-9pm UK time", "Webinar Fri 9pm EST"])
+def test_other_timezone_asks_instead_of_saving(source):
+    with pytest.raises(Clarification):
+        validate_extraction(
+            extraction(date_text="Friday", start_time_text="8", end_time_text="9pm"),
+            source,
+            MONDAY,
+        )

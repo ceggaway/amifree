@@ -208,7 +208,7 @@ await check('user deletion cascades to all personal data', async () => {
   await q('delete from events');
 });
 await check('migration ledger and durable update claims behave', async () => {
-  assert.equal((await one('select max(version)::int v from schema_migrations')).v,9);
+  assert.equal((await one('select max(version)::int v from schema_migrations')).v,10);
   const claim = async (id, stale = 120) =>
     (await one('select amifree_claim_update($1,$2) claimed',[id,stale])).claimed;
   assert.equal(await claim(5001),true);
@@ -312,6 +312,26 @@ await check('migration 009: series, attendance, plans and detection are private 
   assert.equal((await one('select creator_user_id from event_series where id=$1', [series.id])).creator_user_id, null);
   await q('delete from group_events where series_id=$1', [series.id]);
   await q('delete from event_series where id=$1', [series.id]);
+});
+await check('migration 010: availability goes with its owner, payments are recorded once', async () => {
+  const owner = await one('select * from amifree_ensure_user($1)', [1301]);
+  const poll = await one('select * from amifree_create_poll($1,$2,$3,$4,$5,$6,$7)', [owner.id,-920,1,'Sync',60,'2026-10-12T00:00:00+08:00','2026-10-13T00:00:00+08:00']);
+  await q("insert into poll_availability(poll_id,user_id,free) values($1,$2,'[\"2026-10-12T09:00:00+08:00\"]')", [poll.id, owner.id]);
+  await assert.rejects(q("insert into poll_availability(poll_id,user_id,free) values($1,$2,'{}')", [poll.id, owner.id]));
+  await assert.rejects(q("insert into poll_availability(poll_id,user_id,free) values($1,$2,'{\"a\":1}')", [poll.id, owner.id]));
+  await q("insert into pro_payments(charge_id,chat_id,telegram_id,stars,days) values('c1',-920,1301,250,30)");
+  await assert.rejects(q("insert into pro_payments(charge_id,chat_id,telegram_id,stars,days) values('c1',-920,1301,250,30)"));
+  await assert.rejects(q("insert into pro_payments(charge_id,chat_id,telegram_id,stars,days) values('c2',-920,1301,-1,30)"));
+  await db.exec('reset role; set role anon;');
+  await assert.rejects(q('select * from poll_availability'));
+  await assert.rejects(q('select * from pro_payments'));
+  await db.exec('reset role; set role service_role;');
+  await q('delete from users where id=$1', [owner.id]);
+  assert.equal((await one('select count(*)::int n from poll_availability')).n, 0);
+  // A payment is a financial record: it survives the buyer leaving.
+  assert.equal((await one("select count(*)::int n from pro_payments where charge_id='c1'")).n, 1);
+  await q("delete from pro_payments where charge_id='c1'");
+  await q('delete from polls where id=$1', [poll.id]);
 });
 await db.close();
 console.log(`${count} PostgreSQL schema checks passed.`);

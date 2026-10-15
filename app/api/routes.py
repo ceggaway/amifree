@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 
 from app.api.auth import AuthError, issue_token, session_key, verify_init_data, verify_token
-from app.api.schemas import AuthRequest, BlockRequest, PlanPatch
+from app.api.schemas import AuthRequest, AvailabilityRequest, BlockRequest, PlanPatch
 from app.config import Settings
 from app.models.user import User
 from app.schemas.event import Event, EventDraft, Status
@@ -286,6 +286,30 @@ def build_router(settings: Settings) -> APIRouter:
             raise HTTPException(429, "Too many refreshes. Wait a minute and try again.")
         found = await service.polls.heatmap(user.id, valid_id(poll_id))
         # Not a participant and no such poll look the same.
+        if found is None:
+            raise HTTPException(404, "Not found")
+        return found
+
+    @router.get("/polls/{poll_id}/availability")
+    async def my_availability(poll_id: str, request: Request, user: CurrentUser):
+        """The caller's own grid for a poll: pre-filled from their schedule, never sharing why."""
+        if not heatmap_limit.allow(user.id):
+            raise HTTPException(429, "Too many refreshes. Wait a minute and try again.")
+        found = await service_of(request).polls.my_grid(user.id, valid_id(poll_id))
+        if found is None:
+            raise HTTPException(404, "Not found")
+        return found
+
+    @router.put("/polls/{poll_id}/availability")
+    async def save_availability(
+        poll_id: str, body: AvailabilityRequest, request: Request, user: CurrentUser
+    ):
+        if not heatmap_limit.allow(user.id):
+            raise HTTPException(429, "Too many requests. Wait a minute and try again.")
+        try:
+            found = await service_of(request).polls.save_grid(user.id, valid_id(poll_id), body.free)
+        except ValueError as exc:
+            raise HTTPException(409 if "closed" in str(exc) else 422, str(exc)) from None
         if found is None:
             raise HTTPException(404, "Not found")
         return found

@@ -11,6 +11,7 @@ class TelegramTransport(BaseRequest):
         self.calls = []
         self.sent = []
         self.documents = []
+        self.invoices = []
         self.admins = set()  # telegram ids reported as group admins by getChatMember
         self.blocked = set()  # telegram ids the bot cannot message
 
@@ -52,6 +53,13 @@ class TelegramTransport(BaseRequest):
                     " can_invite_users can_post_stories can_edit_stories can_delete_stories"
                 ).split():
                     result[flag] = False
+        elif endpoint == "sendInvoice":
+            self.invoices.append(params)
+            result = {
+                "message_id": 900 + len(self.invoices),
+                "date": 1791100800,
+                "chat": {"id": int(params["chat_id"]), "type": "private"},
+            }
         elif endpoint == "sendDocument":
             if int(params["chat_id"]) in self.blocked:
                 return 403, json.dumps(

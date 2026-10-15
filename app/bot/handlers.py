@@ -11,6 +11,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    PreCheckoutQueryHandler,
     filters,
 )
 
@@ -22,7 +23,7 @@ from app.services.nusmods import ImportError
 from app.services.scheduling import SLOW_DOWN
 
 log = logging.getLogger(__name__)
-GROUP_COMMANDS = {"event", "plan", "whosfree", "stats", "export", "detect"}
+GROUP_COMMANDS = {"event", "plan", "whosfree", "stats", "export", "detect", "attendance", "pro"}
 PRIVATE_ONLY = "Please use AmIFree in a private chat. Open the bot and send /start."
 NO_TEXT = (
     "I couldn't find any event details there. Forward the post or picture again, or type"
@@ -213,6 +214,24 @@ async def deliver_group(update: Update, service, result):
             await service.polls.posted(result.poll_id, sent.message_id)
         if result.suggestion_id:
             await service.detection.posted(result.suggestion_id, sent.message_id)
+    if result.invoice:
+        invoice = result.invoice
+        try:
+            from telegram import LabeledPrice
+
+            await update.get_bot().send_invoice(
+                chat_id=update.effective_user.id,
+                title=invoice["title"],
+                description=invoice["description"],
+                payload=f"pro:{invoice['chat_id']}",
+                currency="XTR",  # Telegram Stars: no provider token
+                prices=[LabeledPrice("Clubs Pro", invoice["stars"])],
+                provider_token="",
+            )
+        except (Forbidden, BadRequest):
+            await update.effective_message.reply_text(
+                "I can't message you yet. Open a private chat with me, tap Start, then try /pro again."
+            )
     if result.dm:
         bot = update.get_bot()
         try:
@@ -257,6 +276,10 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
                 )
             elif name == "stats":
                 result = await service.groups.stats(user.id, update.effective_chat.id)
+            elif name == "attendance":
+                result = await service.groups.attendance_command(user.id, update.effective_chat.id)
+            elif name == "pro":
+                result = await service.pro.status(update.effective_chat.id)
             elif name == "export":
                 result = await service.groups.export(user.id, update.effective_chat.id, args)
             elif name == "detect":
@@ -493,6 +516,33 @@ def register_handlers(application: Application, service):
             command,
         )
     )
+
+    async def precheckout(update, context):
+        query = update.pre_checkout_query
+        problem = service.pro.validate(query.invoice_payload, query.currency, query.total_amount)
+        await query.answer(ok=problem is None, error_message=problem)
+
+    async def paid(update, context):
+        payment = update.effective_message.successful_payment
+        try:
+            text = await service.pro.complete(
+                update.effective_user.id,
+                payment.invoice_payload,
+                payment.telegram_payment_charge_id,
+                payment.currency,
+                payment.total_amount,
+            )
+        except Exception as exc:
+            # The money moved: never lose the record to a transient error. Telegram retries.
+            delivery = webhook_delivery.get()
+            if delivery is not None:
+                delivery.failed = True
+            log.error("payment_record_failed error_type=%s", type(exc).__name__)
+            raise
+        await send(update, [Reply(text)])
+
+    application.add_handler(PreCheckoutQueryHandler(precheckout))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, paid))
     application.add_handler(CallbackQueryHandler(callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message))
     # A photo, video or file with a caption: read the caption like any forwarded plan.

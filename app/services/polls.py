@@ -174,7 +174,11 @@ def slot_draft(poll: Poll, index: int) -> EventDraft:
 
 
 def poll_card(
-    poll: Poll, joined: int, tally: dict[tuple[int, str], int], heatmap_url: str | None = None
+    poll: Poll,
+    joined: int,
+    tally: dict[tuple[int, str], int],
+    heatmap_url: str | None = None,
+    mine_url: str | None = None,
 ) -> Reply:
     hours = poll.duration_minutes / 60
     length = f"{hours:g}h" if poll.duration_minutes % 30 == 0 else f"{poll.duration_minutes}min"
@@ -196,7 +200,7 @@ def poll_card(
             + " sees how many people are free in each slot, never who is busy or why."
             + f"\n\nJoined: {joined}. Slots are suggested when the reply time passes,"
             + f" or when the organiser taps Suggest ({MIN_PARTICIPANTS} must have joined).",
-            poll_keyboard(poll, heatmap_url),
+            poll_keyboard(poll, heatmap_url, mine_url),
         )
     lines = []
     for index, slot in enumerate(poll.slots):
@@ -225,7 +229,7 @@ def poll_card(
         + coverage
         + deadline
         + "\n\nTap Fill mine to answer from your schedule (only you see the result), or answer by hand.",
-        poll_keyboard(poll, heatmap_url),
+        poll_keyboard(poll, heatmap_url, mine_url),
     )
 
 
@@ -238,8 +242,14 @@ class PollService:
 
     async def render(self, poll: Poll) -> Reply:
         joined = len(await self.repo.poll_participants(poll.id))
-        link = self.scheduling.settings.heatmap_link(poll.id)
-        return poll_card(poll, joined, await self.repo.poll_tally(poll.id), link)
+        s = self.scheduling.settings
+        return poll_card(
+            poll,
+            joined,
+            await self.repo.poll_tally(poll.id),
+            s.heatmap_link(poll.id),
+            s.availability_link(poll.id),
+        )
 
     async def create(
         self, telegram_id: int, chat_id: int, message_id: int, args: str
@@ -266,7 +276,27 @@ class PollService:
         await self.repo.set_poll_message(poll_id, message_id)
 
     async def busy_spans(self, poll: Poll, user_id: str) -> list[tuple[datetime, datetime]] | None:
-        """Busy times in the poll window, or None when we hold no schedule for this person.
+        """Busy times in the poll window, or None when we know nothing about this person.
+
+        A member who set their own times is known even without a schedule: every cell they
+        did not tick counts as busy, on top of whatever their schedule already blocks."""
+        spans = await self.schedule_spans(poll, user_id)
+        submitted = await self.repo.get_availability(poll.id, user_id)
+        if submitted is None:
+            return spans
+        ticked = set(submitted)
+        extra = [(cell, cell + STEP) for cell in self.cells(poll) if cell.isoformat() not in ticked]
+        return (spans or []) + extra
+
+    @staticmethod
+    def cells(poll: Poll) -> list[datetime]:
+        days = heatmap_cells(poll.window_start, poll.window_end, {}, poll.window_start)
+        return [datetime.fromisoformat(c["start_at"]) for d in days for c in d["cells"]]
+
+    async def schedule_spans(
+        self, poll: Poll, user_id: str
+    ) -> list[tuple[datetime, datetime]] | None:
+        """Busy times from the member's schedule only, or None when we hold none.
 
         With no timetable, calendar or blocks, "nothing busy" would only mean "nothing known",
         and must not be counted as free."""
@@ -332,6 +362,78 @@ class PollService:
                 opened += 1
                 await self.scheduling.poll_changed(poll.id)
         return opened
+
+    async def may_answer(self, poll: Poll, user_id: str) -> bool:
+        if user_id in await self.repo.poll_participants(poll.id):
+            return True
+        return user_id in await self.repo.group_member_ids(poll.chat_id)
+
+    async def my_grid(self, user_id: str, poll_id: str) -> dict | None:
+        """The member's own grid. Blocked cells say only that they are blocked, never why."""
+        poll = await self.repo.get_poll(poll_id)
+        if not poll or not await self.may_answer(poll, user_id):
+            return None
+        spans = await self.schedule_spans(poll, user_id)
+        submitted = await self.repo.get_availability(poll.id, user_id)
+        ticked = set(submitted or [])
+        now = self.scheduling.clock()
+        days = heatmap_cells(poll.window_start, poll.window_end, {}, max(poll.window_start, now))
+        for day in days:
+            for cell in day["cells"]:
+                start = datetime.fromisoformat(cell["start_at"])
+                blocked = any(
+                    start < b_end and start + STEP > b_start for b_start, b_end in spans or []
+                )
+                if blocked:
+                    state = "busy"
+                elif submitted is not None:
+                    state = "free" if cell["start_at"] in ticked else "off"
+                else:
+                    # Nothing ticked yet: pre-select what the schedule leaves open, but never
+                    # assume free for someone whose schedule we do not hold.
+                    state = "free" if spans is not None else "off"
+                cell["state"] = state
+                cell.pop("free", None)
+        return {
+            "poll_id": poll.id,
+            "title": poll.title,
+            "duration_minutes": poll.duration_minutes,
+            "closed": poll.status == "CLOSED",
+            "deadline_at": poll.deadline_at.isoformat() if poll.deadline_at else None,
+            "known": spans is not None,
+            "submitted": submitted is not None,
+            "days": days,
+        }
+
+    async def save_grid(self, user_id: str, poll_id: str, free: list[str]) -> dict | None:
+        """Store the cells a member ticked. Cells their schedule blocks are dropped."""
+        poll = await self.repo.get_poll(poll_id)
+        if not poll or not await self.may_answer(poll, user_id):
+            return None
+        if poll.status == "CLOSED":
+            raise ValueError("This poll is closed.")
+        valid = {c.isoformat() for c in self.cells(poll)}
+        chosen = set()
+        for raw in free:
+            try:
+                cell = datetime.fromisoformat(raw).astimezone(SG)
+            except ValueError:
+                raise ValueError("A time in your answer isn't valid.") from None
+            if cell.isoformat() in valid:
+                chosen.add(cell.isoformat())
+        spans = await self.schedule_spans(poll, user_id)
+        kept = sorted(
+            c
+            for c in chosen
+            if not any(
+                datetime.fromisoformat(c) < b_end and datetime.fromisoformat(c) + STEP > b_start
+                for b_start, b_end in spans or []
+            )
+        )
+        await self.repo.poll_join(poll.id, user_id)
+        await self.repo.set_availability(poll.id, user_id, kept)
+        await self.scheduling.poll_changed(poll.id)
+        return {"saved": len(kept), "dropped": len(chosen) - len(kept)}
 
     async def heatmap(self, user_id: str, poll_id: str) -> dict | None:
         """Free counts per half hour for a poll's participants; None when it isn't theirs to see.

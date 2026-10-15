@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     pro_chat_ids: str = ""
     # A group card is edited at most this often; changes inside the window are combined.
     card_edit_interval_seconds: float = Field(default=3.0, ge=0, le=60)
+    # Export and the per-event stats breakdown are free for everyone. Set true to make them
+    # part of Clubs Pro (a group_plans row, PRO_CHAT_IDS, or a Telegram Stars purchase).
+    export_requires_pro: bool = False
+    pro_price_stars: int = Field(default=250, ge=1, le=100_000)
+    pro_days: int = Field(default=30, ge=1, le=366)
+    # Telegram id that gets a private message when background jobs keep failing. 0 disables it.
+    alert_telegram_id: int = Field(default=0, ge=0)
+    alert_cooldown_minutes: int = Field(default=60, ge=1, le=1440)
     # Event detection: language-model checks allowed per group per hour.
     detection_per_hour: int = Field(default=20, ge=1, le=200)
 
@@ -95,6 +103,10 @@ class Settings(BaseSettings):
             f"https://t.me/{self.bot_username.lstrip('@')}/{self.mini_app_short_name}"
             f"?startapp=poll_{poll_id}"
         )
+
+    def availability_link(self, poll_id: str) -> str | None:
+        link = self.heatmap_link(poll_id)
+        return link.replace("startapp=poll_", "startapp=mine_") if link else None
 
     def require_credentials(self):
         missing = [

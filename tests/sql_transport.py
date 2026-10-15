@@ -99,6 +99,8 @@ TABLES = {
     "group_plans",
     "group_settings",
     "event_suggestions",
+    "poll_availability",
+    "pro_payments",
 }
 COLUMNS = {
     "version",
@@ -170,6 +172,13 @@ COLUMNS = {
     "location",
     "notes",
     "assumed_duration",
+    "free",
+    "charge_id",
+    "stars",
+    "days",
+    "paid_at",
+    "marked_at",
+    "telegram_id",
 }
 
 
@@ -256,11 +265,14 @@ class SQLGateway:
             sql = f"select {select} from {endpoint}{where}"
             order = request.url.params.get("order")
             if order:
-                column, direction, *nulls = order.split(".")
-                assert column in COLUMNS and direction in ("asc", "desc")
-                assert nulls in ([], ["nullsfirst"], ["nullslast"])
-                suffix = {"nullsfirst": " nulls first", "nullslast": " nulls last"}
-                sql += f" order by {column} {direction}{suffix[nulls[0]] if nulls else ''}"
+                terms = []
+                for term in order.split(","):
+                    column, direction, *nulls = term.split(".")
+                    assert column in COLUMNS and direction in ("asc", "desc")
+                    assert nulls in ([], ["nullsfirst"], ["nullslast"])
+                    suffix = {"nullsfirst": " nulls first", "nullslast": " nulls last"}
+                    terms.append(f"{column} {direction}{suffix[nulls[0]] if nulls else ''}")
+                sql += " order by " + ", ".join(terms)
             for key in ("limit", "offset"):
                 if key in request.url.params:
                     sql += f" {key} {int(request.url.params[key])}"

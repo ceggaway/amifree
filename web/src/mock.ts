@@ -56,6 +56,33 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
   let result: unknown;
   if (path === "/api/me") {
     result = { telegram_user_id: 1, reminders_enabled: true, nusmods: { connected: false }, calendars: [], outside_calendars_connected: false };
+  } else if (path.startsWith("/api/polls/") && path.endsWith("/availability")) {
+    if (method === "PUT") {
+      result = { saved: ((data.free as string[]) ?? []).length, dropped: 0 };
+    } else {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      d.setHours(0, 0, 0, 0);
+      result = {
+        poll_id: "mock",
+        title: "Project meeting",
+        duration_minutes: 120,
+        closed: false,
+        deadline_at: null,
+        known: true,
+        submitted: false,
+        days: [
+          {
+            date: d.toISOString().slice(0, 10),
+            cells: Array.from({ length: 28 }, (_, i) => {
+              const start = new Date(d);
+              start.setHours(8 + Math.floor(i / 2), (i % 2) * 30);
+              return { start_at: start.toISOString(), state: i >= 4 && i < 8 ? "busy" : "free" };
+            }),
+          },
+        ],
+      };
+    }
   } else if (path.startsWith("/api/polls/")) {
     const day = (offset: number) => {
       const d = new Date();

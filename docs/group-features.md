@@ -14,7 +14,9 @@ the Group features table in the README.
 | "Still coming?" | `GroupEventService.enqueue_confirmations`, `confirm_attendance` | `attendance_checks`, kind `CONFIRM` |
 | Recurring events | `app/services/recurrence.py`, `GroupEventService.create_series` | `event_series`, `group_events.series_id` |
 | Heatmap | `PollService.heatmap`, `GET /api/polls/{id}/heatmap`, `web/src/pages/Heatmap.tsx` | none (computed) |
-| Stats and export | `GroupEventService.stats`, `export` | `group_plans`, `group_members.display_name` |
+| Stats, export, attendance list | `GroupEventService.stats`, `export`, `attendance_panel` | `attendance`, `group_members.display_name` |
+| Clubs Pro (Telegram Stars) | `app/services/pro.py`, payment handlers in `app/bot/handlers.py` | `group_plans`, `pro_payments` (migration 010) |
+| Members' own availability | `PollService.my_grid`, `save_grid`, `web/src/pages/MyTimes.tsx` | `poll_availability` (migration 010) |
 | Event detection | `app/services/detection.py` | `group_settings`, `event_suggestions` |
 
 ## What runs on the tick
@@ -54,12 +56,33 @@ Each step is isolated: one failing is logged and the rest still run.
 - **A series is materialised.** Every session is a normal card row, so RSVPs, chase,
   "still coming?", attendance and export need no special cases. Sessions without a posted
   card are never chased or asked about.
-- **Pro is a flag, not a payment.** `group_plans.tier` or `PRO_CHAT_IDS`. Payments can set the
-  same row later.
-- **Manual attendance ticking is not built.** Attendance is self check-in ("I'm here").
+- **Everything is free first.** `EXPORT_REQUIRES_PRO=false` by default. The Stars purchase flow is
+  built and tested, so turning it on needs only that setting (and a price in `PRO_PRICE_STARS`).
+- **Attendance is two ways:** members tap **I'm here**, and the organiser can tick names in a
+  private panel (`/attendance`), including "everyone who said Going came".
+- **A submitted grid replaces the schedule for those cells.** Cells a member leaves unticked
+  count as busy, on top of what their schedule blocks. Ticked cells the schedule blocks are
+  dropped on save.
+
+## Monitoring
+
+Set `ALERT_TELEGRAM_ID` to your Telegram id. The bot then messages you when a background step
+(`confirmations`, `ended`, `posted`, `suggested`, `cleaned`) fails three ticks in a row, or when
+the message queue's oldest item is more than 15 minutes old. Each alert repeats at most once per
+`ALERT_COOLDOWN_MINUTES`. `GET /internal/jobs/stats` shows queue counts and `step_failures`.
+
+## Scale
+
+List queries read in pages of 1,000 (up to 50 pages), so a group above 1,000 active members is
+read in full. Per-person nudges and DMs are sent one at a time, so a very large group's first
+chase takes a while but never drops anyone.
+
+## Refunds and disputes
+
+Stars payments are recorded in `pro_payments` (one row per Telegram charge). To refund, use
+Telegram's `refundStarPayment` for the charge id, then shorten `group_plans.expires_at` by hand.
 
 ## Not built yet
 
-- Members editing their own availability grid in the Mini App (the heatmap is read-only).
-- The organiser ticking names after the event.
-- Telegram Stars (or any payment) for Clubs Pro.
+- Nothing from the original list. Possible next steps: drag-to-select in the grid, recurring
+  availability ("every Tuesday evening"), and automatic refund handling.

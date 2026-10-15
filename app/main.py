@@ -148,7 +148,9 @@ def create_app(
                     BotCommand("event", "Post an event card (reply to a plan, or add details)"),
                     BotCommand("whosfree", "Find a time: /whosfree project meeting 2h next week"),
                     BotCommand("stats", "Turnout for your events (sent privately)"),
-                    BotCommand("export", "Attendance CSV, Clubs Pro (sent privately)"),
+                    BotCommand("attendance", "Mark who came to your latest event"),
+                    BotCommand("export", "Attendance CSV (sent privately)"),
+                    BotCommand("pro", "Clubs Pro for this group"),
                     BotCommand("detect", "Admins: suggest cards for plans (on or off)"),
                 ],
                 scope=BotCommandScopeAllGroupChats(),
@@ -164,14 +166,15 @@ def create_app(
             if settings.bot_mode == "polling":
                 await bot_app.bot.delete_webhook(drop_pending_updates=False)
                 await bot_app.updater.start_polling(
-                    allowed_updates=["message", "callback_query"], drop_pending_updates=False
+                    allowed_updates=["message", "callback_query", "pre_checkout_query"],
+                    drop_pending_updates=False,
                 )
                 stack.push_async_callback(bot_app.updater.stop)
             else:
                 await bot_app.bot.set_webhook(
                     url=settings.app_base_url.rstrip("/") + "/telegram/webhook",
                     secret_token=settings.telegram_webhook_secret.get_secret_value(),
-                    allowed_updates=["message", "callback_query"],
+                    allowed_updates=["message", "callback_query", "pre_checkout_query"],
                 )
 
             async def retention():

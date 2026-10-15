@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,3 +30,10 @@ class PlanPatch(BaseModel):
     end_at: datetime | None = None
     location: str | None = Field(default=None, max_length=300)
     notes: str | None = Field(default=None, max_length=1000)
+
+
+class AvailabilityRequest(BaseModel):
+    """The half-hour cells (ISO start times) a member is free in."""
+
+    model_config = ConfigDict(extra="forbid")
+    free: list[Annotated[str, Field(min_length=10, max_length=40)]] = Field(max_length=800)

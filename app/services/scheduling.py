@@ -63,6 +63,7 @@ from app.services.personal_calendar import (
 )
 from app.services.personal_calendar import URL as CALENDAR_URL
 from app.services.polls import PollService
+from app.services.pro import ProService
 from app.services.quick_blocks import (
     HORIZON_DAYS,
     MAX_RULES,
@@ -232,6 +233,7 @@ class SchedulingService:
         self.post_group_card = None
         self.delete_group_message = None
         self.detection = DetectionService(self)
+        self.pro = ProService(self)
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.
         self.notifier = None
         # Bound what one person can spend: LLM extractions and outbound calendar fetches.
@@ -340,7 +342,16 @@ class SchedulingService:
             return await self.list_events(user)
         if command == "plans":
             return await self.list_events(user, plans=True)
-        if command in ("event", "plan", "whosfree", "stats", "export", "detect"):
+        if command in (
+            "event",
+            "plan",
+            "whosfree",
+            "stats",
+            "export",
+            "detect",
+            "attendance",
+            "pro",
+        ):
             return [Reply(f"/{command} works in group chats. Add me to a group and use it there.")]
         if command == "reminders":
             choice = args.lower()
@@ -1228,6 +1239,8 @@ class SchedulingService:
             return await self.groups.confirm_attendance(telegram_id, data)
         if data.startswith("ser:"):
             return await self.groups.series_action(user, data)
+        if data.startswith(("at:", "ap:", "aa:")):
+            return await self.groups.attendance_action(user, data)
         if data.startswith(("events:", "plans:")):
             prefix, _, page = data.partition(":")
             if not page.isascii() or not page.isdigit() or len(page) > 8:

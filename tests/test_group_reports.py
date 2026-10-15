@@ -54,15 +54,15 @@ async def test_stats_are_private_and_free(service_factory):
     assert any("sent you your turnout stats privately" in p["text"] for p in transport.sent)
     private = [p for p in transport.sent if int(p["chat_id"]) == 1][-1]["text"]
     assert "Sessions held: 1" in private and "Going 3 · came 2 · turnout 67%" in private
-    assert "Clubs Pro" in private  # the breakdown and CSV are the paid part
+    assert "By event:" in private  # free for everyone unless EXPORT_REQUIRES_PRO is set
     # Someone else's events are not in your numbers.
     async with bot:
         await run(bot, "/stats", 71, telegram_id=2)
     assert "No finished events of yours" in transport.sent[-1]["text"]
 
 
-async def test_export_is_pro_only_and_arrives_as_a_private_csv(service_factory):
-    service, repo = service_factory(extraction())
+async def test_export_is_pro_only_when_switched_on(service_factory):
+    service, repo = service_factory(extraction(), export_requires_pro=True)
     bot, transport, event = await finished_event(service, repo)
     async with bot:
         await run(bot, "/export", 72)
@@ -94,8 +94,19 @@ async def test_export_is_pro_only_and_arrives_as_a_private_csv(service_factory):
     }
 
 
+async def test_export_is_free_by_default(service_factory):
+    service, repo = service_factory(extraction())
+    bot, transport, event = await finished_event(service, repo)
+    async with bot:
+        await run(bot, "/export", 77)
+    assert len(transport.documents) == 1
+    assert "turnout 67%" in transport.documents[0]["caption"]
+
+
 async def test_pro_chats_can_be_listed_in_settings(service_factory):
-    service, repo = service_factory(extraction(), pro_chat_ids=f"123, {CHAT}")
+    service, repo = service_factory(
+        extraction(), pro_chat_ids=f"123, {CHAT}", export_requires_pro=True
+    )
     bot, transport, event = await finished_event(service, repo)
     async with bot:
         await run(bot, "/export 30", 74)

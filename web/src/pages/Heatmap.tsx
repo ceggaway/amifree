@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import { bestCell, dayLookup, rowTimes, shade } from "../heatmap";
 import type { Heatmap as HeatmapData } from "../types";
@@ -67,6 +67,7 @@ export function Heatmap() {
       <p className="hint" aria-live="polite">
         {picked || "Tap a cell to see the count."}
       </p>
+      <Link to={`/poll/${id}/mine`}>Set my own times</Link>
     </section>
   );
 }

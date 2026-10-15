@@ -21,6 +21,7 @@ from app.services.scheduling import synced
 
 log = logging.getLogger(__name__)
 BACKLOG_ALERT_SECONDS = 900
+FAILURES_BEFORE_ALERT = 3  # consecutive ticks a background step must fail
 
 
 class Undeliverable(Exception):
@@ -35,6 +36,8 @@ class Notifier:
         # The in-process timer and POST /internal/jobs/run may overlap; posting a session
         # card twice is the one step the database cannot de-duplicate, so runs take turns.
         self.running = asyncio.Lock()
+        self.step_failures: dict[str, int] = {}
+        self.alerted: dict[str, datetime] = {}
 
     async def render(self, user, row: dict) -> Reply | None:
         payload = row["payload"]
@@ -194,13 +197,37 @@ class Notifier:
                 count = await step(now)
             except Exception as exc:
                 log.warning("group_tick_failed step=%s error_type=%s", name, type(exc).__name__)
+                self.step_failures[name] = self.step_failures.get(name, 0) + 1
+                if self.step_failures[name] >= FAILURES_BEFORE_ALERT:
+                    await self.alert(
+                        f"step:{name}",
+                        f"the background step '{name}' has failed {self.step_failures[name]}"
+                        f" times in a row ({type(exc).__name__}). Group cards may be stale.",
+                    )
                 continue
+            self.step_failures.pop(name, None)
             if count:
                 found[name] = count
         return found
 
+    async def alert(self, key: str, text: str):
+        """Tell the operator once per cooldown. Never raises: monitoring must not break jobs."""
+        settings = self.scheduling.settings
+        if not settings.alert_telegram_id:
+            return
+        now = self.scheduling.clock()
+        last = self.alerted.get(key)
+        if last and now - last < timedelta(minutes=settings.alert_cooldown_minutes):
+            return
+        self.alerted[key] = now
+        try:
+            await self.send(settings.alert_telegram_id, Reply("⚠️ AmIFree: " + text))
+        except Exception as exc:
+            log.warning("alert_not_delivered error_type=%s", type(exc).__name__)
+
     async def stats(self) -> dict:
-        return await self.repo.notification_stats(self.scheduling.clock())
+        found = await self.repo.notification_stats(self.scheduling.clock())
+        return found | {"step_failures": dict(self.step_failures)}
 
     async def report_backlog(self):
         """Make a stuck or failing outbox visible in the logs, where alerts can pick it up."""
@@ -210,6 +237,13 @@ class Notifier:
             log.warning("notification_stats_failed error_type=%s", type(exc).__name__)
             return
         age = stats["oldest_undelivered_seconds"] or 0
+        if age > BACKLOG_ALERT_SECONDS:
+            # Failed rows alone are normal (people who blocked the bot); a stuck queue is not.
+            await self.alert(
+                "backlog",
+                f"{stats['pending']} messages waiting, oldest {age // 60} min."
+                " Telegram or the database may be down.",
+            )
         if stats["failed"] or age > BACKLOG_ALERT_SECONDS:
             log.warning(
                 "notification_backlog pending=%s sending=%s failed=%s oldest_seconds=%s",

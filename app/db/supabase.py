@@ -23,7 +23,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -37,6 +37,8 @@ def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
 
 
 log = logging.getLogger(__name__)
+PAGE = 1000  # PostgREST caps one response at this many rows
+MAX_PAGES = 50
 
 
 class SupabaseRepository:
@@ -64,6 +66,8 @@ class SupabaseRepository:
             "group_plans": "chat_id",
             "group_settings": "chat_id",
             "event_suggestions": "id",
+            "poll_availability": "poll_id",
+            "pro_payments": "charge_id",
             "personal_calendars": "id,user_id,url_hash,label,synced_at,checked_at,error",
             "calendar_busy_blocks": "id,user_id,calendar_id,start_at,end_at",
             "schema_migrations": "version,name",
@@ -117,6 +121,21 @@ class SupabaseRepository:
         if missing:
             log.error("database_schema_incomplete missing=%s", ", ".join(missing))
             raise RuntimeError("Database schema is out of date")
+
+    @staticmethod
+    async def _all(build) -> list[dict]:
+        """Every row of a query. `build()` returns a fresh, ordered query without a limit.
+
+        Rows come back in pages, so a group with more than 1,000 people is not silently cut."""
+        rows: list[dict] = []
+        for page in range(MAX_PAGES):
+            query = build().range(page * PAGE, page * PAGE + PAGE - 1)
+            batch = (await query.execute()).data
+            rows += batch
+            if len(batch) < PAGE:
+                return rows
+        log.warning("query_truncated rows=%s", len(rows))
+        return rows
 
     async def ensure_user(self, telegram_id: int) -> User:
         result = await self.client.rpc(
@@ -676,15 +695,16 @@ class SupabaseRepository:
         return poll
 
     async def polls_past_deadline(self, now: datetime) -> list[Poll]:
-        rows = (
-            await self.client.table("polls")
-            .select("*")
-            .eq("status", "COLLECTING")
-            .lte("deadline_at", now.isoformat())
-            .gt("window_end", now.isoformat())
-            .limit(200)
-            .execute()
-        ).data
+        rows = await self._all(
+            lambda: (
+                self.client.table("polls")
+                .select("*")
+                .eq("status", "COLLECTING")
+                .lte("deadline_at", now.isoformat())
+                .gt("window_end", now.isoformat())
+                .order("id")
+            )
+        )
         return [Poll.model_validate(r) for r in rows]
 
     async def set_poll_message(self, poll_id: str, message_id: int):
@@ -707,15 +727,15 @@ class SupabaseRepository:
         return result.data if isinstance(result.data, int) else None
 
     async def poll_participants(self, poll_id: str) -> list[str]:
-        result = (
-            await self.client.table("poll_participants")
-            .select("*")
-            .eq("poll_id", poll_id)
-            .order("user_id")
-            .limit(1000)
-            .execute()
+        rows = await self._all(
+            lambda: (
+                self.client.table("poll_participants")
+                .select("*")
+                .eq("poll_id", poll_id)
+                .order("user_id")
+            )
         )
-        return [row["user_id"] for row in result.data]
+        return [row["user_id"] for row in rows]
 
     async def poll_open(self, poll_id: str, user_id: str, slots: list[dict]) -> Poll | None:
         result = await self.client.rpc(
@@ -740,10 +760,13 @@ class SupabaseRepository:
         return {(row["slot"], row["answer"]): row["n"] for row in result.data or []}
 
     async def _column(self, table: str, column: str, **filters) -> list[str]:
-        q = self.client.table(table).select("*")
-        for key, value in filters.items():
-            q = q.eq(key, value)
-        return [row[column] for row in (await q.limit(1000).execute()).data]
+        def build():
+            q = self.client.table(table).select("*")
+            for key, value in filters.items():
+                q = q.eq(key, value)
+            return q.order(column)
+
+        return [row[column] for row in await self._all(build)]
 
     async def group_member_ids(self, chat_id: int) -> list[str]:
         return await self._column("group_members", "user_id", chat_id=chat_id)
@@ -759,28 +782,30 @@ class SupabaseRepository:
     ) -> tuple[list[GroupEvent], list[Poll]]:
         """Cards at least a day old that are still open. Old cards age out after two weeks."""
         oldest = (created_before - timedelta(days=14)).isoformat()
-        events = (
-            await self.client.table("group_events")
-            .select("*")
-            .eq("status", "ACTIVE")
-            # Only cards in the group: unposted series sessions must not fill the page.
-            .gt("message_id", 0)
-            .lte("created_at", created_before.isoformat())
-            .gte("created_at", oldest)
-            .gt("start_at", now.isoformat())
-            .limit(200)
-            .execute()
-        ).data
-        polls = (
-            await self.client.table("polls")
-            .select("*")
-            .neq("status", "CLOSED")
-            .lte("created_at", created_before.isoformat())
-            .gte("created_at", oldest)
-            .gt("window_end", now.isoformat())
-            .limit(200)
-            .execute()
-        ).data
+        events = await self._all(
+            lambda: (
+                self.client.table("group_events")
+                .select("*")
+                .eq("status", "ACTIVE")
+                # Only cards in the group: unposted series sessions are not chased.
+                .gt("message_id", 0)
+                .lte("created_at", created_before.isoformat())
+                .gte("created_at", oldest)
+                .gt("start_at", now.isoformat())
+                .order("id")
+            )
+        )
+        polls = await self._all(
+            lambda: (
+                self.client.table("polls")
+                .select("*")
+                .neq("status", "CLOSED")
+                .lte("created_at", created_before.isoformat())
+                .gte("created_at", oldest)
+                .gt("window_end", now.isoformat())
+                .order("id")
+            )
+        )
         return [GroupEvent.model_validate(e) for e in events], [
             Poll.model_validate(p) for p in polls
         ]
@@ -824,50 +849,54 @@ class SupabaseRepository:
     # ---- group features: names, series, attendance, plans, detection ----
 
     async def member_names(self, chat_id: int) -> dict[str, tuple[str | None, str | None]]:
-        rows = (
-            await self.client.table("group_members")
-            .select("user_id,display_name,username")
-            .eq("chat_id", chat_id)
-            .limit(1000)
-            .execute()
-        ).data
+        rows = await self._all(
+            lambda: (
+                self.client.table("group_members")
+                .select("user_id,display_name,username")
+                .eq("chat_id", chat_id)
+                .order("user_id")
+            )
+        )
         return {r["user_id"]: (r.get("display_name"), r.get("username")) for r in rows}
 
     async def group_answers(self, group_event_id: str) -> dict[str, str]:
         """Each responder's answer on a card: user id -> GOING, MAYBE, DECLINED or SAVED."""
-        rows = (
-            await self.client.table("events")
-            .select("user_id,status")
-            .eq("group_event_id", group_event_id)
-            .limit(1000)
-            .execute()
-        ).data
+        rows = await self._all(
+            lambda: (
+                self.client.table("events")
+                .select("user_id,status")
+                .eq("group_event_id", group_event_id)
+                .order("user_id")
+            )
+        )
         return {r["user_id"]: r["status"] for r in rows}
 
     async def group_events_starting(self, start: datetime, end: datetime) -> list[GroupEvent]:
-        rows = (
-            await self.client.table("group_events")
-            .select("*")
-            .eq("status", "ACTIVE")
-            .gte("start_at", start.isoformat())
-            .lt("start_at", end.isoformat())
-            .order("start_at", desc=False)
-            .limit(500)
-            .execute()
-        ).data
+        rows = await self._all(
+            lambda: (
+                self.client.table("group_events")
+                .select("*")
+                .eq("status", "ACTIVE")
+                .gte("start_at", start.isoformat())
+                .lt("start_at", end.isoformat())
+                .order("start_at", desc=False)
+                .order("id")
+            )
+        )
         return [GroupEvent.model_validate(r) for r in rows]
 
     async def ended_group_events(self, now: datetime) -> list[GroupEvent]:
         """Cards that finished in the last week and were not yet redrawn as ended."""
-        rows = (
-            await self.client.table("group_events")
-            .select("*")
-            .eq("status", "ACTIVE")
-            .lte("end_at", now.isoformat())
-            .gte("end_at", (now - timedelta(days=7)).isoformat())
-            .limit(500)
-            .execute()
-        ).data
+        rows = await self._all(
+            lambda: (
+                self.client.table("group_events")
+                .select("*")
+                .eq("status", "ACTIVE")
+                .lte("end_at", now.isoformat())
+                .gte("end_at", (now - timedelta(days=7)).isoformat())
+                .order("id")
+            )
+        )
         found = [GroupEvent.model_validate(r) for r in rows]
         return [g for g in found if g.ended_at is None and (g.message_id or 0) > 0]
 
@@ -890,24 +919,31 @@ class SupabaseRepository:
         )
 
     async def attendance_checks(self, group_event_id: str) -> dict[str, str]:
-        rows = (
-            await self.client.table("attendance_checks")
-            .select("user_id,answer")
-            .eq("group_event_id", group_event_id)
-            .limit(1000)
-            .execute()
-        ).data
+        rows = await self._all(
+            lambda: (
+                self.client.table("attendance_checks")
+                .select("user_id,answer")
+                .eq("group_event_id", group_event_id)
+                .order("user_id")
+            )
+        )
         return {r["user_id"]: r["answer"] for r in rows}
 
     async def check_in(self, group_event_id: str, user_id: str, marked_by: str):
+        await self.mark_attendance(group_event_id, user_id, True, marked_by)
+
+    async def mark_attendance(
+        self, group_event_id: str, user_id: str, present: bool, marked_by: str
+    ):
         await (
             self.client.table("attendance")
             .upsert(
                 {
                     "group_event_id": group_event_id,
                     "user_id": user_id,
-                    "present": True,
+                    "present": present,
                     "marked_by": marked_by,
+                    "marked_at": datetime.now(UTC).isoformat(),
                 },
                 on_conflict="group_event_id,user_id",
             )
@@ -915,13 +951,14 @@ class SupabaseRepository:
         )
 
     async def attendees(self, group_event_id: str) -> set[str]:
-        rows = (
-            await self.client.table("attendance")
-            .select("user_id,present")
-            .eq("group_event_id", group_event_id)
-            .limit(1000)
-            .execute()
-        ).data
+        rows = await self._all(
+            lambda: (
+                self.client.table("attendance")
+                .select("user_id,present")
+                .eq("group_event_id", group_event_id)
+                .order("user_id")
+            )
+        )
         return {r["user_id"] for r in rows if r["present"]}
 
     async def create_series(
@@ -1030,16 +1067,17 @@ class SupabaseRepository:
     async def chat_events_by(
         self, chat_id: int, creator_user_id: str, since: datetime
     ) -> list[GroupEvent]:
-        rows = (
-            await self.client.table("group_events")
-            .select("*")
-            .eq("chat_id", chat_id)
-            .eq("creator_user_id", creator_user_id)
-            .gte("start_at", since.isoformat())
-            .order("start_at", desc=False)
-            .limit(500)
-            .execute()
-        ).data
+        rows = await self._all(
+            lambda: (
+                self.client.table("group_events")
+                .select("*")
+                .eq("chat_id", chat_id)
+                .eq("creator_user_id", creator_user_id)
+                .gte("start_at", since.isoformat())
+                .order("start_at", desc=False)
+                .order("id")
+            )
+        )
         return [GroupEvent.model_validate(r) for r in rows]
 
     async def group_tier(self, chat_id: int, now: datetime) -> str:
@@ -1146,11 +1184,96 @@ class SupabaseRepository:
         await self.client.table("event_suggestions").delete().eq("id", suggestion_id).execute()
 
     async def expired_suggestions(self, before: datetime) -> list[Suggestion]:
+        rows = await self._all(
+            lambda: (
+                self.client.table("event_suggestions")
+                .select("*")
+                .lte("created_at", before.isoformat())
+                .order("id")
+            )
+        )
+        return [Suggestion.model_validate(r) for r in rows]
+
+    # ---- poll availability, Clubs Pro payments ----
+
+    async def set_availability(self, poll_id: str, user_id: str, free: list[str]):
+        await (
+            self.client.table("poll_availability")
+            .upsert(
+                {
+                    "poll_id": poll_id,
+                    "user_id": user_id,
+                    "free": free,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+                on_conflict="poll_id,user_id",
+            )
+            .execute()
+        )
+
+    async def get_availability(self, poll_id: str, user_id: str) -> list[str] | None:
         rows = (
-            await self.client.table("event_suggestions")
-            .select("*")
-            .lte("created_at", before.isoformat())
-            .limit(200)
+            await self.client.table("poll_availability")
+            .select("free")
+            .eq("poll_id", poll_id)
+            .eq("user_id", user_id)
+            .limit(1)
             .execute()
         ).data
-        return [Suggestion.model_validate(r) for r in rows]
+        return rows[0]["free"] if rows else None
+
+    async def poll_availability(self, poll_id: str) -> dict[str, list[str]]:
+        rows = await self._all(
+            lambda: (
+                self.client.table("poll_availability")
+                .select("user_id,free")
+                .eq("poll_id", poll_id)
+                .order("user_id")
+            )
+        )
+        return {r["user_id"]: r["free"] for r in rows}
+
+    async def record_payment(
+        self, charge_id: str, chat_id: int, telegram_id: int, stars: int, days: int
+    ) -> bool:
+        """True the first time a Telegram charge is seen; a replayed update returns False."""
+        found = (
+            await self.client.table("pro_payments")
+            .select("charge_id")
+            .eq("charge_id", charge_id)
+            .limit(1)
+            .execute()
+        ).data
+        if found:
+            return False
+        await (
+            self.client.table("pro_payments")
+            .insert(
+                {
+                    "charge_id": charge_id,
+                    "chat_id": chat_id,
+                    "telegram_id": telegram_id,
+                    "stars": stars,
+                    "days": days,
+                }
+            )
+            .execute()
+        )
+        return True
+
+    async def extend_group_pro(self, chat_id: int, days: int, now: datetime) -> datetime:
+        """Pro until `days` after the later of now and the current expiry."""
+        rows = (
+            await self.client.table("group_plans")
+            .select("tier,expires_at")
+            .eq("chat_id", chat_id)
+            .limit(1)
+            .execute()
+        ).data
+        base = now
+        if rows and rows[0]["tier"] == "PRO" and rows[0].get("expires_at"):
+            current = datetime.fromisoformat(rows[0]["expires_at"].replace("Z", "+00:00"))
+            base = max(now, current)
+        until = base + timedelta(days=days)
+        await self.set_group_tier(chat_id, "PRO", until)
+        return until

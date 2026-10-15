@@ -5,6 +5,7 @@ own schedule is returned as a private alert for the person who tapped.
 """
 
 import csv
+import hashlib
 import io
 import logging
 import re
@@ -14,7 +15,7 @@ from uuid import UUID
 
 from telegram.error import BadRequest, Forbidden
 
-from app.bot.keyboards import attendance_keyboard, series_keyboard
+from app.bot.keyboards import attendance_keyboard, attendance_panel_keyboard, series_keyboard
 from app.bot.messages import Reply, group_card, private_verdict, time_range
 from app.schemas.event import SG, EventDraft, GroupEvent, Status
 from app.services.chase import enqueue_nudges
@@ -53,6 +54,7 @@ class GroupResult:
     suggestion_id: str | None = None  # set when `post` is a detection suggestion to record
     adopt_event_id: str | None = None  # the edited message becomes this event's card
     delete_message: bool = False  # remove the message whose button was tapped
+    invoice: dict | None = None  # a Telegram Stars invoice to send to the person who asked
 
 
 def parse_id(value: str) -> str | None:
@@ -60,6 +62,12 @@ def parse_id(value: str) -> str | None:
         return str(UUID(value))
     except ValueError:
         return None
+
+
+def dataclass_edit(reply: Reply) -> Reply:
+    """Redraw the message the button was on instead of sending a new one."""
+    reply.edit = True
+    return reply
 
 
 def clock_date(when: datetime) -> str:
@@ -436,6 +444,12 @@ class GroupEventService:
             return True
         return await self.repo.group_tier(chat_id, self.scheduling.clock()) == "PRO"
 
+    async def can_export(self, chat_id: int) -> bool:
+        """Free for everyone unless EXPORT_REQUIRES_PRO is set."""
+        if not self.scheduling.settings.export_requires_pro:
+            return True
+        return await self.is_pro(chat_id)
+
     async def report(self, user, chat_id: int, days: int):
         since = self.scheduling.clock() - timedelta(days=days)
         events = await self.repo.chat_events_by(chat_id, user.id, since)
@@ -505,24 +519,24 @@ class GroupEventService:
             f"Going {going} · came {came} · turnout {self.turnout(going, came)}\n"
             "Counts people who tapped I'm here, so it is only as complete as check-in."
         )
-        if await self.is_pro(chat_id):
+        if await self.can_export(chat_id):
             lines = [
                 f"• {title[:40]}: {n} session(s), turnout {self.turnout(g, c)}"
                 for title, n, g, c in series.values()
             ]
             text += "\n\nBy event:\n" + "\n".join(lines[:15])
         else:
-            text += "\n\nPer-event breakdown and CSV export are part of Clubs Pro."
+            text += "\n\nPer-event breakdown and CSV export are part of Clubs Pro. See /pro."
         return GroupResult(
             post=Reply("📬 I sent you your turnout stats privately."), dm=Reply(text)
         )
 
     async def export(self, telegram_id: int, chat_id: int, args: str = "") -> GroupResult:
-        if not await self.is_pro(chat_id):
+        if not await self.can_export(chat_id):
             return GroupResult(
                 post=Reply(
                     "Attendance export is part of Clubs Pro. /stats shows turnout for free."
-                    " Ask the AmIFree team to enable Pro for this group."
+                    " /pro shows how to upgrade this group."
                 )
             )
         user = await self.repo.ensure_user(telegram_id)
@@ -552,6 +566,105 @@ class GroupEventService:
                 caption, document=(f"attendance-{clock_date(self.scheduling.clock())}.csv", content)
             ),
         )
+
+    # ---- the organiser marks who came ----
+
+    @staticmethod
+    def hex_id(event_id: str) -> str:
+        return event_id.replace("-", "")
+
+    @staticmethod
+    def from_hex(value: str) -> str | None:
+        try:
+            return str(UUID(hex=value))
+        except ValueError:
+            return None
+
+    async def people_for(self, event: GroupEvent) -> tuple[list[str], dict[str, str], set[str]]:
+        """Everyone who answered or checked in: Going first, then by name."""
+        answers = await self.repo.group_answers(event.id)
+        present = await self.repo.attendees(event.id)
+        names = await self.repo.member_names(event.chat_id)
+
+        def label(user_id: str) -> str:
+            name, username = names.get(user_id, (None, None))
+            return name or (f"@{username}" if username else "Someone")
+
+        order = {"GOING": 0, "MAYBE": 1, "SAVED": 2, "DECLINED": 3}
+        people = sorted(
+            set(answers) | present,
+            key=lambda u: (order.get(answers.get(u, ""), 4), label(u).lower(), u),
+        )
+        return people, {u: label(u) for u in people}, present
+
+    async def attendance_panel(self, event: GroupEvent, page: int = 0) -> Reply:
+        people, labels, present = await self.people_for(event)
+        when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+        if not people:
+            return Reply(f"{event.title} · {when}\nNobody has answered or checked in yet.")
+        pages = max(1, -(-len(people) // 16))
+        page = max(0, min(page, pages - 1))
+        digest = hashlib.sha1("".join(people).encode()).hexdigest()[:4]
+        going = await self.repo.group_answers(event.id)
+        text = (
+            f"📋 {event.title} · {when}\nTap a name to mark who came."
+            f"\nCame: {len(present)} · said Going: "
+            f"{sum(1 for s in going.values() if s == Status.GOING.value)}"
+        )
+        keyboard = attendance_panel_keyboard(
+            self.hex_id(event.id),
+            [(labels[u], u in present) for u in people],
+            digest,
+            page,
+            pages,
+        )
+        return Reply(text, keyboard)
+
+    async def attendance_command(self, telegram_id: int, chat_id: int) -> GroupResult:
+        """/attendance in a group: the organiser's latest event that has started, sent privately."""
+        user = await self.repo.ensure_user(telegram_id)
+        now = self.scheduling.clock()
+        mine = await self.repo.chat_events_by(chat_id, user.id, now - timedelta(days=30))
+        started = [e for e in mine if e.status == "ACTIVE" and e.start_at <= now]
+        if not started:
+            return GroupResult(
+                post=Reply("You have no event that has started in the last 30 days in this group.")
+            )
+        event = started[-1]
+        return GroupResult(
+            post=Reply("📬 I sent you the attendance list privately."),
+            dm=await self.attendance_panel(event),
+        )
+
+    async def attendance_action(self, user, data: str) -> list[Reply]:
+        """at:<event>:<index>:<digest> toggles one person; ap: changes page; aa: marks all Going."""
+        parts = data.split(":")
+        event_id = self.from_hex(parts[1]) if len(parts) >= 2 else None
+        event = await self.repo.get_group_event(event_id) if event_id else None
+        if not event or event.creator_user_id != user.id:
+            return [Reply("Only the organiser can mark attendance.")]
+        kind, people = parts[0], (await self.people_for(event))[0]
+        if kind == "ap" and len(parts) == 3 and parts[2].isdigit():
+            return [dataclass_edit(await self.attendance_panel(event, int(parts[2])))]
+        if kind == "aa":
+            answers = await self.repo.group_answers(event.id)
+            for person in people:
+                if answers.get(person) == Status.GOING.value:
+                    await self.repo.mark_attendance(event.id, person, True, user.id)
+        elif kind == "at" and len(parts) == 4 and parts[2].isdigit():
+            digest = hashlib.sha1("".join(people).encode()).hexdigest()[:4]
+            index = int(parts[2])
+            if parts[3] != digest or index >= len(people):
+                # The list changed since this panel was drawn: show the fresh one.
+                return [dataclass_edit(await self.attendance_panel(event))]
+            _, _, present = await self.people_for(event)
+            person = people[index]
+            await self.repo.mark_attendance(event.id, person, person not in present, user.id)
+        else:
+            return [Reply("That button isn't valid.")]
+        await self.scheduling.group_changed(event.id)
+        page = int(parts[2]) // 16 if kind == "at" else 0
+        return [dataclass_edit(await self.attendance_panel(event, page))]
 
     async def begin_change(self, user, payload: str) -> list[Reply]:
         """Handle /start edit_<id> or cancel_<id>, reached from the card's organiser buttons."""

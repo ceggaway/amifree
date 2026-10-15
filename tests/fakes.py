@@ -41,6 +41,8 @@ class MemoryRepository:
         self.tiers = {}  # chat id -> (tier, expires_at)
         self.detection = {}  # chat id -> bool
         self.suggestions = {}
+        self.availability = {}  # (poll id, user id) -> [ISO cell starts]
+        self.payments = {}  # charge id -> (chat id, telegram id, stars, days)
 
     async def ping(self):
         if not self.available:
@@ -563,8 +565,37 @@ class MemoryRepository:
     async def check_in(self, group_event_id, user_id, marked_by):
         self.attended[(group_event_id, user_id)] = marked_by
 
+    async def mark_attendance(self, group_event_id, user_id, present, marked_by):
+        if present:
+            self.attended[(group_event_id, user_id)] = marked_by
+        else:
+            self.attended.pop((group_event_id, user_id), None)
+
     async def attendees(self, group_event_id):
         return {u for (g, u) in self.attended if g == group_event_id}
+
+    async def set_availability(self, poll_id, user_id, free):
+        self.availability[(poll_id, user_id)] = list(free)
+
+    async def get_availability(self, poll_id, user_id):
+        found = self.availability.get((poll_id, user_id))
+        return list(found) if found is not None else None
+
+    async def poll_availability(self, poll_id):
+        return {u: list(v) for (p, u), v in self.availability.items() if p == poll_id}
+
+    async def record_payment(self, charge_id, chat_id, telegram_id, stars, days):
+        if charge_id in self.payments:
+            return False
+        self.payments[charge_id] = (chat_id, telegram_id, stars, days)
+        return True
+
+    async def extend_group_pro(self, chat_id, days, now):
+        tier, expires = self.tiers.get(chat_id, ("FREE", None))
+        base = max(now, expires) if tier == "PRO" and expires else now
+        until = base + timedelta(days=days)
+        self.tiers[chat_id] = ("PRO", until)
+        return until
 
     async def create_series(self, user_id, chat_id, message_id, fields):
         for s in self.series.values():
@@ -682,6 +713,7 @@ class MemoryRepository:
         self.members = {m for m in self.members if m[1] != user_id}
         self.names = {k: v for k, v in self.names.items() if k[1] != user_id}
         self.checks = {k: v for k, v in self.checks.items() if k[1] != user_id}
+        self.availability = {k: v for k, v in self.availability.items() if k[1] != user_id}
         self.attended = {k: v for k, v in self.attended.items() if k[1] != user_id}
         self.notifications = [n for n in self.notifications if n["user_id"] != user_id]
         for people in self.poll_people.values():

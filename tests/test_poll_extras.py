@@ -120,5 +120,8 @@ async def test_poll_card_links_to_the_mini_app_when_configured(service_factory):
     markup = json.loads(markup) if isinstance(markup, str) else markup
     urls = [b["url"] for row in markup["inline_keyboard"] for b in row if b.get("url")]
     poll = next(iter(repo.polls.values()))
-    assert urls == [f"https://t.me/AmIFreeBot/free?startapp=poll_{poll.id}"]
+    assert urls == [
+        f"https://t.me/AmIFreeBot/free?startapp=poll_{poll.id}",
+        f"https://t.me/AmIFreeBot/free?startapp=mine_{poll.id}",
+    ]
     assert alerts(transport) == []

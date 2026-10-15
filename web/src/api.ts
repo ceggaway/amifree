@@ -1,5 +1,5 @@
 import { initData } from "./telegram";
-import type { Availability, Block, Heatmap, Me, Plan, Rule } from "./types";
+import type { Availability, Block, Heatmap, Me, MyGrid, Plan, Rule } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -64,6 +64,9 @@ export const api = {
     request<{ saved: boolean; block: Rule }>("POST", "/api/blocks", { text, confirm }),
   removeBlock: (id: string) => request<void>("DELETE", `/api/blocks/${id}`),
   pollHeatmap: (id: string) => request<Heatmap>("GET", `/api/polls/${id}/heatmap`),
+  myGrid: (id: string) => request<MyGrid>("GET", `/api/polls/${id}/availability`),
+  saveGrid: (id: string, free: string[]) =>
+    request<{ saved: number; dropped: number }>("PUT", `/api/polls/${id}/availability`, { free }),
   patchPlan: (id: string, body: Record<string, unknown>) =>
     request<Plan>("PATCH", `/api/plans/${id}`, body),
 };

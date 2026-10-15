@@ -188,3 +188,54 @@ async def test_plans_settings_suggestions_and_poll_deadlines():
             organiser.id, -500, 61, "Sync", 60, start, start + timedelta(days=1), NOW
         )
         assert again.deadline_at == deadline
+
+
+async def test_large_groups_are_read_in_full():
+    """PostgREST answers at most 1,000 rows at once; a bigger group must not be cut."""
+    async with database() as (db, repo):
+        organiser = await repo.ensure_user(1)
+        event = await repo.create_group_event(organiser.id, -700, 80, draft(date(2026, 10, 9)))
+        await db.query(
+            "insert into users(telegram_user_id) select 100000+n from generate_series(1,1300) n"
+        )
+        await db.query(
+            "insert into group_members(chat_id,user_id) select -700,id from users"
+            " where telegram_user_id>100000"
+        )
+        await db.query(
+            "insert into events(user_id,group_event_id,title,start_at,end_at,status)"
+            " select id,$1,'x',now(),now()+interval '1 hour','GOING' from users"
+            " where telegram_user_id>100000",
+            [event.id],
+        )
+        assert len(await repo.group_member_ids(-700)) == 1301  # 1,300 plus the organiser
+        answers = await repo.group_answers(event.id)
+        assert len(answers) == 1300 and set(answers.values()) == {"GOING"}
+        assert len(await repo.member_names(-700)) == 1301
+        assert len(await repo.group_responder_ids(event.id)) == 1300
+
+
+async def test_availability_and_payments_in_postgresql():
+    async with database() as (db, repo):
+        organiser = await repo.ensure_user(1)
+        start = datetime(2026, 10, 12, tzinfo=SG)
+        poll = await repo.create_poll(
+            organiser.id, -500, 90, "Sync", 60, start, start + timedelta(days=1)
+        )
+        assert await repo.get_availability(poll.id, organiser.id) is None
+        await repo.set_availability(poll.id, organiser.id, ["2026-10-12T08:00:00+08:00"])
+        await repo.set_availability(poll.id, organiser.id, ["2026-10-12T09:00:00+08:00"])
+        assert await repo.get_availability(poll.id, organiser.id) == ["2026-10-12T09:00:00+08:00"]
+        assert await repo.poll_availability(poll.id) == {
+            organiser.id: ["2026-10-12T09:00:00+08:00"]
+        }
+        await repo.delete_user(organiser.id)
+        assert await db.query("select * from poll_availability") == []
+
+        assert await repo.record_payment("c1", -500, 1, 250, 30) is True
+        assert await repo.record_payment("c1", -500, 1, 250, 30) is False
+        first = await repo.extend_group_pro(-500, 30, NOW)
+        second = await repo.extend_group_pro(-500, 30, NOW)
+        assert first == NOW + timedelta(days=30) and second == first + timedelta(days=30)
+        assert await repo.group_tier(-500, NOW) == "PRO"
+        assert await repo.group_tier(-500, second + timedelta(seconds=1)) == "FREE"

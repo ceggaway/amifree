@@ -53,3 +53,16 @@ export type Heatmap = {
   max_free: number;
   days: HeatmapDay[];
 };
+
+export type CellState = "busy" | "free" | "off";
+
+export type MyGrid = {
+  poll_id: string;
+  title: string;
+  duration_minutes: number;
+  closed: boolean;
+  deadline_at: string | null;
+  known: boolean;
+  submitted: boolean;
+  days: { date: string; cells: { start_at: string; state: CellState }[] }[];
+};

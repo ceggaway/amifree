@@ -4,6 +4,7 @@ import { mockMode } from "./api";
 import { Blocks } from "./pages/Blocks";
 import { Calendar } from "./pages/Calendar";
 import { Heatmap } from "./pages/Heatmap";
+import { MyTimes } from "./pages/MyTimes";
 import { Home } from "./pages/Home";
 import { Plans } from "./pages/Plans";
 import { startParam } from "./telegram";
@@ -12,8 +13,8 @@ import { startParam } from "./telegram";
 function StartRoute() {
   const navigate = useNavigate();
   useEffect(() => {
-    const match = /^poll_([0-9a-f-]{36})$/i.exec(startParam());
-    if (match) navigate(`/poll/${match[1]}`, { replace: true });
+    const match = /^(poll|mine)_([0-9a-f-]{36})$/i.exec(startParam());
+    if (match) navigate(`/poll/${match[2]}${match[1] === "mine" ? "/mine" : ""}`, { replace: true });
   }, [navigate]);
   return null;
 }
@@ -31,6 +32,7 @@ export function App() {
           <Route path="/plans" element={<Plans />} />
           <Route path="/busy" element={<Blocks />} />
           <Route path="/poll/:id" element={<Heatmap />} />
+          <Route path="/poll/:id/mine" element={<MyTimes />} />
         </Routes>
       </main>
       <nav>

@@ -65,12 +65,19 @@ def nudge_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(group_keyboard(event).inline_keyboard[:1])
 
 
-def poll_keyboard(poll: Poll, heatmap_url: str | None = None) -> InlineKeyboardMarkup:
+def poll_keyboard(
+    poll: Poll, heatmap_url: str | None = None, mine_url: str | None = None
+) -> InlineKeyboardMarkup:
     def button(label, action, extra=""):
         data = f"p:{action}:{poll.id}" + (f":{extra}" if extra else "")
         return InlineKeyboardButton(label, callback_data=data)
 
-    heatmap = [[InlineKeyboardButton("📊 Who's free when", url=heatmap_url)]] if heatmap_url else []
+    heatmap = []
+    if heatmap_url:
+        heatmap.append(InlineKeyboardButton("📊 Who's free when", url=heatmap_url))
+    if mine_url:
+        heatmap.append(InlineKeyboardButton("✍️ Set my times", url=mine_url))
+    heatmap = [heatmap] if heatmap else []
     if poll.status == "COLLECTING":
         return InlineKeyboardMarkup(
             [
@@ -225,3 +232,31 @@ def calendar_keyboard(event: Event, google_url: str) -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def attendance_panel_keyboard(
+    hex_id: str, labels: list[tuple[str, bool]], digest: str, page: int, pages: int
+) -> InlineKeyboardMarkup:
+    """One toggle per person, two to a row, with paging and a mark-all-Going shortcut."""
+    size = 16
+    start = page * size
+    buttons = [
+        InlineKeyboardButton(
+            ("✅ " if present else "⬜ ") + name[:22],
+            callback_data=f"at:{hex_id}:{start + offset}:{digest}",
+        )
+        for offset, (name, present) in enumerate(labels[start : start + size])
+    ]
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    if pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("‹ Back", callback_data=f"ap:{hex_id}:{page - 1}"))
+        nav.append(InlineKeyboardButton(f"{page + 1}/{pages}", callback_data=f"ap:{hex_id}:{page}"))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton("More ›", callback_data=f"ap:{hex_id}:{page + 1}"))
+        rows.append(nav)
+    rows.append(
+        [InlineKeyboardButton("Everyone who said Going came", callback_data=f"aa:{hex_id}")]
+    )
+    return InlineKeyboardMarkup(rows)

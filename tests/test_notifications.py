@@ -363,4 +363,5 @@ async def test_job_stats_endpoint_needs_the_secret_and_returns_counts_only(servi
         "sending",
         "failed",
         "oldest_undelivered_seconds",
+        "step_failures",  # counts of failing background steps; no user data
     }

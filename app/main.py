@@ -137,6 +137,7 @@ def create_app(
                     BotCommand("blocks", "Your busy blocks"),
                     BotCommand("reminders", "Night-before summary on or off"),
                     BotCommand("free", "Am I free? e.g. /free fri 7-9pm"),
+                    BotCommand("usual", "Your usual free times: /usual tue evenings"),
                     BotCommand("calendar", "Calendar sync and your calendar's busy times"),
                     BotCommand("events", "Recent cards, including previews"),
                     BotCommand("cancel", "Clear pending action"),

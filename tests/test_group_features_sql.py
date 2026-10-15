@@ -239,3 +239,42 @@ async def test_availability_and_payments_in_postgresql():
         assert first == NOW + timedelta(days=30) and second == first + timedelta(days=30)
         assert await repo.group_tier(-500, NOW) == "PRO"
         assert await repo.group_tier(-500, second + timedelta(seconds=1)) == "FREE"
+
+
+async def test_usual_times_and_refunds_in_postgresql():
+    async with database() as (db, repo):
+        user = await repo.ensure_user(1)
+        assert await repo.get_usual(user.id) == []
+        await repo.replace_usual(user.id, [(1, 1080, 1320), (3, 1080, 1320), (1, 1080, 1320)])
+        assert await repo.get_usual(user.id) == [(1, 1080, 1320), (3, 1080, 1320)]
+        # Replacing swaps the whole pattern; an invalid one is refused and changes nothing.
+        await repo.replace_usual(user.id, [(5, 480, 1320)])
+        assert await repo.get_usual(user.id) == [(5, 480, 1320)]
+        with pytest.raises(RuntimeError, match="check constraint"):
+            await repo.replace_usual(user.id, [(9, 480, 1320)])
+        assert await repo.get_usual(user.id) == [(5, 480, 1320)]
+        await repo.replace_usual(user.id, [])
+        assert await repo.get_usual(user.id) == []
+        await repo.replace_usual(user.id, [(0, 600, 720)])
+        await repo.delete_user(user.id)
+        assert await db.query("select * from weekly_availability") == []
+
+        await repo.record_payment("c1", -500, 77, 250, 30)
+        await repo.record_payment("c2", -500, 77, 250, 30)
+        await repo.record_payment("c3", -600, 88, 250, 30)
+        # The buyer's own newest payment inside the window; others' are not theirs to refund.
+        found = await repo.refundable_payment(77, datetime.now(SG) - timedelta(days=3))
+        assert found["charge_id"] == "c2" and found["telegram_id"] == 77
+        assert await repo.refundable_payment(77, datetime.now(SG) + timedelta(days=1)) is None
+        assert await repo.mark_refunded("c2", NOW) is True
+        assert await repo.mark_refunded("c2", NOW) is False  # only one caller wins
+        assert (await repo.refundable_payment(77, datetime.now(SG) - timedelta(days=3)))[
+            "charge_id"
+        ] == "c1"
+
+        await repo.set_group_tier(-500, "PRO", NOW + timedelta(days=45))
+        await repo.shorten_group_pro(-500, 30, NOW)
+        assert await repo.group_tier(-500, NOW) == "PRO"
+        await repo.shorten_group_pro(-500, 30, NOW)  # nothing left once it falls below now
+        assert await repo.group_tier(-500, NOW) == "FREE"
+        await repo.shorten_group_pro(-999, 30, NOW)  # an unknown group is not an error

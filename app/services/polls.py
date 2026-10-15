@@ -14,6 +14,7 @@ from app.bot.messages import Reply, clock
 from app.schemas.event import SG, EventDraft, Poll, Status
 from app.services.date_resolution import Clarification, resolve_date
 from app.services.group_events import GroupResult, parse_id
+from app.services.usual_times import covers
 
 MIN_PARTICIPANTS = 3
 DAY_START, DAY_END, STEP = time(8), time(22), timedelta(minutes=30)
@@ -283,10 +284,23 @@ class PollService:
         spans = await self.schedule_spans(poll, user_id)
         submitted = await self.repo.get_availability(poll.id, user_id)
         if submitted is None:
-            return spans
+            usual = await self.repo.get_usual(user_id)
+            if not usual:
+                return spans
+            # "Only free on Tuesday evenings": everything outside those windows is busy.
+            outside = [
+                (cell, cell + STEP) for cell in self.cells(poll) if not self.in_usual(usual, cell)
+            ]
+            return (spans or []) + outside
         ticked = set(submitted)
         extra = [(cell, cell + STEP) for cell in self.cells(poll) if cell.isoformat() not in ticked]
         return (spans or []) + extra
+
+    @staticmethod
+    def in_usual(usual, cell: datetime) -> bool:
+        local = cell.astimezone(SG)
+        start = local.hour * 60 + local.minute
+        return covers(usual, local.weekday(), start, start + 30)
 
     @staticmethod
     def cells(poll: Poll) -> list[datetime]:
@@ -375,6 +389,7 @@ class PollService:
             return None
         spans = await self.schedule_spans(poll, user_id)
         submitted = await self.repo.get_availability(poll.id, user_id)
+        usual = await self.repo.get_usual(user_id) if submitted is None else []
         ticked = set(submitted or [])
         now = self.scheduling.clock()
         days = heatmap_cells(poll.window_start, poll.window_end, {}, max(poll.window_start, now))
@@ -388,6 +403,9 @@ class PollService:
                     state = "busy"
                 elif submitted is not None:
                     state = "free" if cell["start_at"] in ticked else "off"
+                elif usual:
+                    # Pre-filled from "every Tuesday evening" style usual times.
+                    state = "free" if self.in_usual(usual, start) else "off"
                 else:
                     # Nothing ticked yet: pre-select what the schedule leaves open, but never
                     # assume free for someone whose schedule we do not hold.
@@ -400,8 +418,9 @@ class PollService:
             "duration_minutes": poll.duration_minutes,
             "closed": poll.status == "CLOSED",
             "deadline_at": poll.deadline_at.isoformat() if poll.deadline_at else None,
-            "known": spans is not None,
+            "known": spans is not None or bool(usual),
             "submitted": submitted is not None,
+            "from_usual": bool(usual),
             "days": days,
         }
 

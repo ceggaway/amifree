@@ -31,3 +31,20 @@ export function setDay(grid: MyGrid, date: string, state: "free" | "off"): MyGri
     ),
   };
 }
+
+/** Paint specific cells free or off: how a drag across the grid applies. Busy cells never change. */
+export function paint(grid: MyGrid, starts: Set<string>, state: "free" | "off"): MyGrid {
+  return {
+    ...grid,
+    days: grid.days.map((day) => ({
+      ...day,
+      cells: day.cells.map((c) => (starts.has(c.start_at) && c.state !== "busy" ? { ...c, state } : c)),
+    })),
+  };
+}
+
+/** What a drag starting on this cell paints: the opposite of what the cell is now. */
+export function dragState(state: CellState): "free" | "off" | null {
+  if (state === "busy") return null;
+  return state === "free" ? "off" : "free";
+}

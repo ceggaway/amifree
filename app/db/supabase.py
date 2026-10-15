@@ -23,7 +23,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -67,7 +67,8 @@ class SupabaseRepository:
             "group_settings": "chat_id",
             "event_suggestions": "id",
             "poll_availability": "poll_id",
-            "pro_payments": "charge_id",
+            "pro_payments": "charge_id,refunded_at",
+            "weekly_availability": "user_id,weekday,start_min,end_min",
             "personal_calendars": "id,user_id,url_hash,label,synced_at,checked_at,error",
             "calendar_busy_blocks": "id,user_id,calendar_id,start_at,end_at",
             "schema_migrations": "version,name",
@@ -1277,3 +1278,67 @@ class SupabaseRepository:
         until = base + timedelta(days=days)
         await self.set_group_tier(chat_id, "PRO", until)
         return until
+
+    # ---- usual weekly times, refunds ----
+
+    async def replace_usual(self, user_id: str, windows: list[tuple[int, int, int]]):
+        await self.client.rpc(
+            "amifree_replace_usual",
+            {
+                "p_user_id": user_id,
+                "p_windows": [{"weekday": d, "start_min": a, "end_min": b} for d, a, b in windows],
+            },
+        ).execute()
+
+    async def get_usual(self, user_id: str) -> list[tuple[int, int, int]]:
+        rows = (
+            await self.client.table("weekly_availability")
+            .select("weekday,start_min,end_min")
+            .eq("user_id", user_id)
+            .order("weekday")
+            .order("start_min")
+            .limit(100)
+            .execute()
+        ).data
+        return [(r["weekday"], r["start_min"], r["end_min"]) for r in rows]
+
+    async def refundable_payment(self, telegram_id: int, since: datetime) -> dict | None:
+        """The buyer's newest payment inside the refund window that is not refunded yet."""
+        rows = (
+            await self.client.table("pro_payments")
+            .select("*")
+            .eq("telegram_id", telegram_id)
+            .gte("paid_at", since.isoformat())
+            .order("paid_at", desc=True)
+            .limit(20)
+            .execute()
+        ).data
+        return next((r for r in rows if not r.get("refunded_at")), None)
+
+    async def mark_refunded(self, charge_id: str, when: datetime) -> bool:
+        """True if this call is the one that marked it, so a refund is never applied twice."""
+        rows = (
+            await self.client.table("pro_payments")
+            .update({"refunded_at": when.isoformat()})
+            .eq("charge_id", charge_id)
+            .is_("refunded_at", "null")
+            .execute()
+        ).data
+        return bool(rows)
+
+    async def shorten_group_pro(self, chat_id: int, days: int, now: datetime):
+        rows = (
+            await self.client.table("group_plans")
+            .select("tier,expires_at")
+            .eq("chat_id", chat_id)
+            .limit(1)
+            .execute()
+        ).data
+        if not rows or rows[0]["tier"] != "PRO" or not rows[0].get("expires_at"):
+            return
+        current = datetime.fromisoformat(rows[0]["expires_at"].replace("Z", "+00:00"))
+        left = current - timedelta(days=days)
+        if left <= now:
+            await self.set_group_tier(chat_id, "FREE")
+        else:
+            await self.set_group_tier(chat_id, "PRO", left)

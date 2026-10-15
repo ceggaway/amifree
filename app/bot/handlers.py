@@ -493,6 +493,11 @@ def register_handlers(application: Application, service):
             pass
 
     refresher = CardRefresher(service.settings.card_edit_interval_seconds, edit_card)
+
+    async def refund_stars(telegram_id: int, charge_id: str):
+        await application.bot.refund_star_payment(telegram_id, charge_id)
+
+    service.refund_star_payment = refund_stars
     service.on_group_change = refresher.refresh
     service.on_poll_change = edit_poll
     service.post_group_card = post_card
@@ -508,6 +513,8 @@ def register_handlers(application: Application, service):
                 "blocks",
                 "reminders",
                 "calendar",
+                "usual",
+                "refund",
                 "free",
                 "cancel",
                 "delete",
@@ -525,13 +532,17 @@ def register_handlers(application: Application, service):
     async def paid(update, context):
         payment = update.effective_message.successful_payment
         try:
-            text = await service.pro.complete(
+            text, refund_now = await service.pro.complete(
                 update.effective_user.id,
                 payment.invoice_payload,
                 payment.telegram_payment_charge_id,
                 payment.currency,
                 payment.total_amount,
             )
+            if refund_now and not await service.pro.give_back(
+                update.effective_user.id, payment.telegram_payment_charge_id
+            ):
+                text += "\nI couldn't return it automatically: please contact the AmIFree team."
         except Exception as exc:
             # The money moved: never lose the record to a transient error. Telegram retries.
             delivery = webhook_delivery.get()

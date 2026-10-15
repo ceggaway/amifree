@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     export_requires_pro: bool = False
     pro_price_stars: int = Field(default=250, ge=1, le=100_000)
     pro_days: int = Field(default=30, ge=1, le=366)
+    # A buyer can get their Stars back with /refund within this many days of paying.
+    refund_window_days: int = Field(default=3, ge=0, le=30)
     # Telegram id that gets a private message when background jobs keep failing. 0 disables it.
     alert_telegram_id: int = Field(default=0, ge=0)
     alert_cooldown_minutes: int = Field(default=60, ge=1, le=1440)

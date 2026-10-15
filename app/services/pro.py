@@ -8,7 +8,7 @@ nothing. Refunds are handled by hand through Telegram.
 """
 
 import logging
-from datetime import datetime
+from datetime import timedelta
 
 from app.bot.messages import Reply
 from app.services.group_events import GroupResult
@@ -52,6 +52,7 @@ class ProService:
                 "title": "AmIFree Clubs Pro",
                 "description": (
                     f"Attendance export and turnout stats for this group, {s.pro_days} days."
+                    f" Refundable within {s.refund_window_days} days with /refund."
                 ),
             },
         )
@@ -66,23 +67,69 @@ class ProService:
 
     async def complete(
         self, telegram_id: int, payload: str, charge_id: str, currency: str, amount: int
-    ) -> str:
-        """Record a finished payment and extend the group. Returns the message for the buyer."""
+    ) -> tuple[str, bool]:
+        """Record a finished payment and extend the group.
+
+        Returns (message for the buyer, whether the charge should be refunded at once). A
+        payment that cannot be matched to a group is refunded rather than left unexplained."""
         if self.validate(payload, currency, amount):
             # Telegram only delivers payments that passed pre-checkout; this is for safety.
             log.warning("payment_unexpected currency=%s amount=%s", currency, amount)
-            return "I couldn't match that payment. Please contact the AmIFree team."
+            return "I couldn't match that payment, so I'm refunding it.", True
         chat_id = int(payload[len(PAYLOAD) :])
         fresh = await self.repo.record_payment(
             charge_id, chat_id, telegram_id, amount, self.settings.pro_days
         )
         if not fresh:
-            return "That payment was already applied. Thank you!"
+            return "That payment was already applied. Thank you!", False
         until = await self.repo.extend_group_pro(
             chat_id, self.settings.pro_days, self.scheduling.clock()
         )
-        return f"✅ Clubs Pro is active for your group until {until:%a %-d %b %Y}. Thank you!"
+        return (
+            f"✅ Clubs Pro is active for your group until {until:%a %-d %b %Y}. Thank you!"
+            f"\nChanged your mind? /refund works for {self.settings.refund_window_days} days.",
+            False,
+        )
 
-    @staticmethod
-    def describe(until: datetime) -> str:
-        return f"{until:%-d %b %Y}"
+    async def give_back(self, telegram_id: int, charge_id: str) -> bool:
+        """Ask Telegram to return the Stars. A charge refunded earlier counts as done."""
+        refund = getattr(self.scheduling, "refund_star_payment", None)
+        if refund is None:
+            return False
+        try:
+            await refund(telegram_id, charge_id)
+        except Exception as exc:
+            if "ALREADY_REFUNDED" in str(exc).upper():
+                return True
+            log.error("refund_failed error_type=%s", type(exc).__name__)
+            return False
+        return True
+
+    async def refund(self, user, telegram_id: int) -> list[Reply]:
+        """/refund: return the buyer's latest Clubs Pro payment and end the time it bought."""
+        days = self.settings.refund_window_days
+        now = self.scheduling.clock()
+        payment = await self.repo.refundable_payment(telegram_id, now - timedelta(days=days))
+        if not payment:
+            return [
+                Reply(
+                    f"I can't find a Clubs Pro payment of yours from the last {days} days that is"
+                    " still refundable."
+                )
+            ]
+        if not await self.give_back(telegram_id, payment["charge_id"]):
+            return [
+                Reply(
+                    "Telegram didn't accept the refund just now. Nothing changed; try again in a"
+                    " minute, or contact the AmIFree team."
+                )
+            ]
+        # Only the call that marks it ends the Pro time, so a double tap cannot take it twice.
+        if await self.repo.mark_refunded(payment["charge_id"], now):
+            await self.repo.shorten_group_pro(payment["chat_id"], payment["days"], now)
+        return [
+            Reply(
+                f"✅ Refunded {payment['stars']} ⭐. The {payment['days']} days it bought are"
+                " removed from that group's Clubs Pro."
+            )
+        ]

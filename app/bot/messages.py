@@ -18,6 +18,8 @@ I check your AmIFree Going plans, your busy blocks, any imported NUSMods timetab
 if you connect it with /calendar, your own calendar's busy times. "No clashes found"
 only covers what AmIFree knows about.
 
+/usual tue evenings, sat all day tells group polls when you're usually free.
+
 /calendar puts every Going and Saved plan in your iPhone calendar automatically, and lets
 you connect your own calendar so its busy times count too.
 
@@ -34,6 +36,7 @@ I never read group chats, and your schedule is never shown to a group.
 /plans — upcoming saved plans
 /block — mark yourself busy, e.g. "busy sat 2–6pm" or "work every Wed 6–10pm"
 /blocks — list or remove busy blocks
+/usual — your usual free times for group polls
 /reminders — turn the night-before summary on or off
 /events — every recent card, including unsaved previews
 /cancel — stop a pending clarification or edit

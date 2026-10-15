@@ -17,6 +17,7 @@ the Group features table in the README.
 | Stats, export, attendance list | `GroupEventService.stats`, `export`, `attendance_panel` | `attendance`, `group_members.display_name` |
 | Clubs Pro (Telegram Stars) | `app/services/pro.py`, payment handlers in `app/bot/handlers.py` | `group_plans`, `pro_payments` (migration 010) |
 | Members' own availability | `PollService.my_grid`, `save_grid`, `web/src/pages/MyTimes.tsx` | `poll_availability` (migration 010) |
+| Usual weekly times | `app/services/usual_times.py`, `/usual` | `weekly_availability` (migration 011) |
 | Event detection | `app/services/detection.py` | `group_settings`, `event_suggestions` |
 
 ## What runs on the tick
@@ -77,12 +78,15 @@ List queries read in pages of 1,000 (up to 50 pages), so a group above 1,000 act
 read in full. Per-person nudges and DMs are sent one at a time, so a very large group's first
 chase takes a while but never drops anyone.
 
-## Refunds and disputes
+## Refunds
 
-Stars payments are recorded in `pro_payments` (one row per Telegram charge). To refund, use
-Telegram's `refundStarPayment` for the charge id, then shorten `group_plans.expires_at` by hand.
+Stars payments are recorded in `pro_payments` (one row per Telegram charge). A buyer sends
+`/refund` in private chat: the newest payment inside `REFUND_WINDOW_DAYS` is returned with
+Telegram's `refundStarPayment`, marked refunded once, and the days it bought come off the
+group's Pro time. A payment that cannot be matched to a group is refunded at once. If Telegram
+refuses, nothing changes and the buyer can try again; "already refunded" counts as done.
 
 ## Not built yet
 
-- Nothing from the original list. Possible next steps: drag-to-select in the grid, recurring
-  availability ("every Tuesday evening"), and automatic refund handling.
+- Nothing from the original list. Possible next steps: editing usual times in the Mini App,
+  and one-off exceptions to them ("not this Tuesday").

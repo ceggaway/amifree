@@ -208,7 +208,7 @@ await check('user deletion cascades to all personal data', async () => {
   await q('delete from events');
 });
 await check('migration ledger and durable update claims behave', async () => {
-  assert.equal((await one('select max(version)::int v from schema_migrations')).v,10);
+  assert.equal((await one('select max(version)::int v from schema_migrations')).v,11);
   const claim = async (id, stale = 120) =>
     (await one('select amifree_claim_update($1,$2) claimed',[id,stale])).claimed;
   assert.equal(await claim(5001),true);
@@ -332,6 +332,22 @@ await check('migration 010: availability goes with its owner, payments are recor
   assert.equal((await one("select count(*)::int n from pro_payments where charge_id='c1'")).n, 1);
   await q("delete from pro_payments where charge_id='c1'");
   await q('delete from polls where id=$1', [poll.id]);
+});
+await check('migration 011: usual times replace atomically and go with their owner', async () => {
+  const owner = await one('select * from amifree_ensure_user($1)', [1401]);
+  await q('select amifree_replace_usual($1,$2)', [owner.id, JSON.stringify([{weekday:1,start_min:1080,end_min:1320},{weekday:3,start_min:1080,end_min:1320}])]);
+  assert.equal((await one('select count(*)::int n from weekly_availability where user_id=$1',[owner.id])).n, 2);
+  // A bad window rolls the whole replace back, so the old pattern stays.
+  await assert.rejects(q('select amifree_replace_usual($1,$2)', [owner.id, JSON.stringify([{weekday:9,start_min:0,end_min:60}])]));
+  assert.equal((await one('select count(*)::int n from weekly_availability where user_id=$1',[owner.id])).n, 2);
+  await assert.rejects(q('select amifree_replace_usual($1,$2)', [owner.id, JSON.stringify([{weekday:1,start_min:600,end_min:600}])]));
+  await q('select amifree_replace_usual($1,$2)', [owner.id, '[]']);
+  assert.equal((await one('select count(*)::int n from weekly_availability where user_id=$1',[owner.id])).n, 0);
+  await db.exec('reset role; set role anon;');
+  await assert.rejects(q('select * from weekly_availability'));
+  await assert.rejects(q('select amifree_replace_usual($1,$2)', [owner.id, '[]']));
+  await db.exec('reset role; set role service_role;');
+  await q('delete from users where id=$1', [owner.id]);
 });
 await db.close();
 console.log(`${count} PostgreSQL schema checks passed.`);

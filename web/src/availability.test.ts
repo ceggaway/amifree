@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { setDay, ticked, toggle } from "./availability";
+import { dragState, paint, setDay, ticked, toggle } from "./availability";
 import type { MyGrid } from "./types";
 
 const grid: MyGrid = {
@@ -35,5 +35,17 @@ describe("availability helpers", () => {
     expect(ticked(setDay(grid, "2026-10-13", "free"))).toEqual(["a", "c"]);
     expect(ticked(setDay(grid, "2026-10-13", "off"))).toEqual([]);
     expect(ticked(setDay(grid, "2000-01-01", "free"))).toEqual(["a"]);
+  });
+});
+
+describe("painting", () => {
+  it("paints chosen cells but never a busy one", () => {
+    expect(ticked(paint(grid, new Set(["b", "c"]), "free"))).toEqual(["a", "c"]);
+    expect(ticked(paint(grid, new Set(["a"]), "off"))).toEqual([]);
+  });
+  it("a drag paints the opposite of the cell it starts on", () => {
+    expect(dragState("free")).toBe("off");
+    expect(dragState("off")).toBe("free");
+    expect(dragState("busy")).toBeNull();
   });
 });

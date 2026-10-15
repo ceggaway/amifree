@@ -64,5 +64,6 @@ export type MyGrid = {
   deadline_at: string | null;
   known: boolean;
   submitted: boolean;
+  from_usual?: boolean;
   days: { date: string; cells: { start_at: string; state: CellState }[] }[];
 };

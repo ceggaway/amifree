@@ -43,6 +43,9 @@ class MemoryRepository:
         self.suggestions = {}
         self.availability = {}  # (poll id, user id) -> [ISO cell starts]
         self.payments = {}  # charge id -> (chat id, telegram id, stars, days)
+        self.paid_at = {}  # charge id -> when
+        self.refunded = {}  # charge id -> when
+        self.usual = {}  # user id -> [(weekday, start minute, end minute)]
 
     async def ping(self):
         if not self.available:
@@ -588,7 +591,38 @@ class MemoryRepository:
         if charge_id in self.payments:
             return False
         self.payments[charge_id] = (chat_id, telegram_id, stars, days)
+        self.paid_at[charge_id] = datetime.now(UTC)
         return True
+
+    async def replace_usual(self, user_id, windows):
+        self.usual[user_id] = sorted(set(windows))
+
+    async def get_usual(self, user_id):
+        return list(self.usual.get(user_id, []))
+
+    async def refundable_payment(self, telegram_id, since):
+        found = [
+            (self.paid_at[c], c, p)
+            for c, p in self.payments.items()
+            if p[1] == telegram_id and self.paid_at[c] >= since and c not in self.refunded
+        ]
+        if not found:
+            return None
+        _, charge, (chat_id, _, stars, days) = max(found)
+        return {"charge_id": charge, "chat_id": chat_id, "stars": stars, "days": days}
+
+    async def mark_refunded(self, charge_id, when):
+        if charge_id in self.refunded or charge_id not in self.payments:
+            return False
+        self.refunded[charge_id] = when
+        return True
+
+    async def shorten_group_pro(self, chat_id, days, now):
+        tier, expires = self.tiers.get(chat_id, ("FREE", None))
+        if tier != "PRO" or not expires:
+            return
+        left = expires - timedelta(days=days)
+        self.tiers[chat_id] = ("FREE", None) if left <= now else ("PRO", left)
 
     async def extend_group_pro(self, chat_id, days, now):
         tier, expires = self.tiers.get(chat_id, ("FREE", None))
@@ -714,6 +748,7 @@ class MemoryRepository:
         self.names = {k: v for k, v in self.names.items() if k[1] != user_id}
         self.checks = {k: v for k, v in self.checks.items() if k[1] != user_id}
         self.availability = {k: v for k, v in self.availability.items() if k[1] != user_id}
+        self.usual.pop(user_id, None)
         self.attended = {k: v for k, v in self.attended.items() if k[1] != user_id}
         self.notifications = [n for n in self.notifications if n["user_id"] != user_id]
         for people in self.poll_people.values():

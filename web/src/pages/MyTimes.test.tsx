@@ -3,6 +3,18 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MyGrid } from "../types";
 
+// jsdom has no PointerEvent: give it one that keeps pointerType, so touch can be simulated.
+class TestPointerEvent extends MouseEvent {
+  pointerType: string;
+  pointerId: number;
+  constructor(type: string, init: MouseEventInit & { pointerType?: string; pointerId?: number } = {}) {
+    super(type, init);
+    this.pointerType = init.pointerType ?? "mouse";
+    this.pointerId = init.pointerId ?? 1;
+  }
+}
+(window as unknown as { PointerEvent: unknown }).PointerEvent = TestPointerEvent;
+
 const saved: string[][] = [];
 const grid: MyGrid = {
   poll_id: "p1",
@@ -64,6 +76,50 @@ describe("MyTimes", () => {
     fireEvent.click(screen.getByText("Submit my times"));
     await waitFor(() => expect(saved).toEqual([["2026-10-13T08:00:00"]]));
     expect(await screen.findByText(/Saved 1 half hours/)).toBeTruthy();
+  });
+
+  it("paints many cells with one drag, and never touches a busy cell", async () => {
+    const wide: MyGrid = {
+      ...grid,
+      days: [
+        {
+          date: "2026-10-13",
+          cells: [
+            { start_at: "2026-10-13T08:00:00", state: "free" },
+            { start_at: "2026-10-13T08:30:00", state: "busy" },
+            { start_at: "2026-10-13T09:00:00", state: "free" },
+            { start_at: "2026-10-13T09:30:00", state: "free" },
+          ],
+        },
+      ],
+    };
+    show(wide);
+    await screen.findByText("Project meeting");
+    // Mouse: press on 09:00 (free, so the drag clears), move over 09:30 and the busy 08:30.
+    fireEvent.pointerDown(screen.getByLabelText(/09:00: free/), { pointerType: "mouse" });
+    fireEvent.pointerEnter(screen.getByLabelText(/09:30: free/), { pointerType: "mouse" });
+    fireEvent.pointerEnter(screen.getByLabelText(/08:30: busy/), { pointerType: "mouse" });
+    fireEvent.pointerUp(screen.getByLabelText(/09:30: not free/));
+    expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
+    expect((screen.getByLabelText(/08:30: busy/) as HTMLButtonElement).disabled).toBe(true);
+    // The click that follows the pointer-up must not undo the paint.
+    fireEvent.click(screen.getByLabelText(/09:00: not free/));
+    expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
+    // A later plain tap works again.
+    fireEvent.click(screen.getByLabelText(/09:00: not free/));
+    expect(screen.getByText("2 half hours ticked.")).toBeTruthy();
+  });
+
+  it("needs paint mode before a touch drag paints, but a touch tap always toggles", async () => {
+    show(grid);
+    await screen.findByText("Project meeting");
+    fireEvent.pointerDown(screen.getByLabelText(/09:00: free/), { pointerType: "touch" });
+    expect(screen.getByText("2 half hours ticked.")).toBeTruthy(); // swipe, not paint
+    fireEvent.click(screen.getByLabelText(/09:00: free/));
+    expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/Paint mode/));
+    fireEvent.pointerDown(screen.getByLabelText(/08:00: free/), { pointerType: "touch" });
+    expect(screen.getByText("0 half hours ticked.")).toBeTruthy();
   });
 
   it("asks people with no schedule to tap the times they are free", async () => {

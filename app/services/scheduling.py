@@ -76,6 +76,8 @@ from app.services.quick_blocks import (
     RANGE as BLOCK_RANGE,
 )
 from app.services.ratelimit import RateLimiter
+from app.services.usual_times import describe as describe_usual
+from app.services.usual_times import parse_usual
 
 log = logging.getLogger(__name__)
 
@@ -185,6 +187,11 @@ FREE_PROMPT = (
     " like 15 oct, fri, next week or fri 7-9pm."
 )
 FREE_EXAMPLES = "For example: /free fri 7-9pm, /free 15 oct or /free next week"
+USUAL_HELP = (
+    "Tell me when you're usually free and group polls will start from it.\n"
+    "Examples: /usual tue evenings, thu evenings, sat all day\n"
+    "/usual weekdays after 6pm   ·   /usual mon-fri 6-9pm   ·   /usual clear"
+)
 SLOW_DOWN = "You're sending a lot very quickly. Give me a minute, then try again."
 PREVIEW_BOTS = ("telegrambot", "whatsapp", "facebookexternalhit", "slackbot", "discordbot")
 
@@ -232,6 +239,7 @@ class SchedulingService:
         self.on_poll_change = None
         self.post_group_card = None
         self.delete_group_message = None
+        self.refund_star_payment = None
         self.detection = DetectionService(self)
         self.pro = ProService(self)
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.
@@ -374,6 +382,10 @@ class SchedulingService:
             except Clarification as exc:
                 return [Reply(str(exc))]
             return await self.preview_block(user, rule)
+        if command == "usual":
+            return await self.usual_command(user, args)
+        if command == "refund":
+            return await self.pro.refund(user, telegram_id)
         if command == "calendar":
             return await self.calendar_setup(user)
         if command == "free":
@@ -384,6 +396,37 @@ class SchedulingService:
                 return [Reply("No busy blocks yet. " + USAGE)]
             return [Reply(describe(rule), remove_block_keyboard(rule.id)) for rule in rules[:20]]
         return [Reply("Use /help to see the available commands.")]
+
+    async def usual_command(self, user: User, args: str) -> list[Reply]:
+        """/usual tue evenings, sat all day: standing free times that pre-fill poll grids."""
+        text = args.strip()
+        if text.lower() in ("clear", "off", "none", "reset"):
+            await self.repo.replace_usual(user.id, [])
+            return [Reply("Cleared your usual times. Poll grids start from your schedule again.")]
+        if not text:
+            current = await self.repo.get_usual(user.id)
+            if current:
+                return [
+                    Reply(
+                        "Your usual free times: "
+                        + describe_usual(current)
+                        + "\n\nChange them with /usual tue evenings, sat all day. /usual clear removes them."
+                    )
+                ]
+            return [Reply(USUAL_HELP)]
+        try:
+            windows = parse_usual(text)
+        except Clarification as exc:
+            return [Reply(f"{exc}\n\n{USUAL_HELP}")]
+        await self.repo.replace_usual(user.id, windows)
+        return [
+            Reply(
+                "Saved your usual free times: "
+                + describe_usual(windows)
+                + "\n\nIn group polls you'll be counted as free only in these times, unless you"
+                " change a poll's grid before submitting. /usual clear removes them."
+            )
+        ]
 
     async def offer_recurring(
         self, user: User, message_id: int, extracted, source: str, reference: datetime, weekday: int

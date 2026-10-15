@@ -55,11 +55,13 @@ RPC_PARAMS = {
     "amifree_poll_close": ["p_poll_id", "p_user_id"],
     "amifree_poll_vote": ["p_poll_id", "p_user_id", "p_votes"],
     "amifree_poll_tally": ["p_poll_id"],
+    "amifree_replace_usual": ["p_user_id", "p_windows"],
     "amifree_claim_update": ["p_update_id"],
     "amifree_finish_update": ["p_update_id"],
     "amifree_release_update": ["p_update_id"],
 }
 VOID_RPCS = {
+    "amifree_replace_usual",
     "amifree_cleanup",
     "amifree_replace_calendar_blocks",
     "amifree_replace_calendar",
@@ -101,6 +103,7 @@ TABLES = {
     "event_suggestions",
     "poll_availability",
     "pro_payments",
+    "weekly_availability",
 }
 COLUMNS = {
     "version",
@@ -179,6 +182,9 @@ COLUMNS = {
     "paid_at",
     "marked_at",
     "telegram_id",
+    "refunded_at",
+    "start_min",
+    "end_min",
 }
 
 
@@ -254,6 +260,10 @@ class SQLGateway:
                     values.append(item)
                     marks.append(f"${len(values)}")
                 conditions.append(f"{key} in ({','.join(marks)})")
+                continue
+            if op == "is":
+                assert operand == "null"
+                conditions.append(f"{key} is null")
                 continue
             operator = {"eq": "=", "neq": "<>", "lt": "<", "gt": ">", "gte": ">=", "lte": "<="}[op]
             values.append(operand)

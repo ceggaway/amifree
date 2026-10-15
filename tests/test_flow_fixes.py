@@ -154,3 +154,13 @@ async def test_date_answer_needs_no_ai(service_factory, reference):
     card = (await service.message(1, 3, "2026-10-22", reference))[0]
     assert "Thu, 22 Oct 2026" in card.text
     assert len(service.extractor.calls) == 1
+
+
+async def test_a_bare_end_hour_means_the_next_one(service_factory, reference):
+    for answer, shown in (("8", "20:00"), ("9.30", "21:30"), ("10", "22:00")):
+        service, _ = service_factory(extraction(start_time_text="7pm", end_time_text=None))
+        await onboard(service, reference)
+        await service.message(1, 2, "CCA dinner Friday 7pm at Vivo", reference)
+        card = (await service.message(1, 3, answer, reference))[0]
+        assert f"→ 09 Oct {shown} SGT" in card.text, answer
+        assert len(service.extractor.calls) == 1

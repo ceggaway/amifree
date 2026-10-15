@@ -244,6 +244,24 @@ _ANSWER_LEAD = re.compile(
 )
 
 
+def infer_meridiem(previous: Extraction, asked: str | None, reply: str) -> str:
+    """A bare "8" after a 7pm start means 8pm: add the am/pm that puts the end after the start."""
+    answer = _ANSWER_LEAD.sub("", reply.strip().strip(".!")).strip()
+    if asked != "end" or not re.fullmatch(r"\d{1,2}(?:\.\d{2})?", answer):
+        return reply
+    try:
+        start = resolve_time(previous.start_time_text or "")
+    except Clarification:
+        return reply
+    for suffix in ("am", "pm"):
+        try:
+            if resolve_time(answer + suffix) > start:
+                return f"{reply.strip()}{suffix}"
+        except Clarification:
+            continue
+    return reply
+
+
 def fill_answer(previous: Extraction, asked: str, reply: str, reference: datetime):
     """Fill the asked-for detail from a short reply ("8PM", "2000", "7-9pm", "15 oct").
 

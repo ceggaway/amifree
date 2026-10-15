@@ -12,7 +12,7 @@ class Extraction(BaseModel):
     """Required nullable fields keep the OpenAI structured-output schema strict."""
 
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["new", "update", "cancel", "unknown"]
+    kind: Literal["new", "update", "cancel", "deadline", "unknown"]
     title: str | None
     date_text: str | None
     start_time_text: str | None
@@ -96,4 +96,27 @@ class GroupEvent(EventDraft):
     creator_user_id: str | None = None
     status: Literal["ACTIVE", "CANCELLED"] = "ACTIVE"
     version: int = 1
+    created_at: datetime | None = None
+
+
+class DeadlineDraft(BaseModel):
+    """Something due: a moment to remember, never time the user is busy."""
+
+    title: str = Field(min_length=1, max_length=200)
+    due_at: datetime
+    notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("due_at")
+    @classmethod
+    def aware(cls, value):
+        if value.tzinfo is None:
+            raise ValueError("Timezone-aware datetime required")
+        return value.astimezone(SG)
+
+
+class Deadline(DeadlineDraft):
+    id: str
+    user_id: str
+    done: bool = False
+    source_message_id: int | None = None
     created_at: datetime | None = None

@@ -130,6 +130,8 @@ def predict(
         return Prediction(outcome=extraction.kind, title=extraction.title, extraction=raw)
     if extraction.kind == "unknown":
         return Prediction(outcome="not_event", extraction=raw)
+    if extraction.kind == "deadline":
+        return Prediction(outcome="deadline", title=extraction.title, extraction=raw)
     try:
         draft = validate_extraction(extraction, text, reference, default_minutes=0)
     except Clarification as exc:

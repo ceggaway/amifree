@@ -6,7 +6,16 @@ from supabase import AsyncClient
 
 from app.models.timetable import BlockRule, BusyBlock
 from app.models.user import PersonalCalendar, User
-from app.schemas.event import SG, Event, EventDraft, GroupEvent, Poll, Status
+from app.schemas.event import (
+    SG,
+    Deadline,
+    DeadlineDraft,
+    Event,
+    EventDraft,
+    GroupEvent,
+    Poll,
+    Status,
+)
 from app.services.nusmods import ImportResult
 from app.services.quick_blocks import expand_blocks
 
@@ -186,6 +195,77 @@ class SupabaseRepository:
             .delete()
             .eq("user_id", user_id)
             .eq("id", block_id)
+            .execute()
+        )
+        return bool(result.data)
+
+    # ---- deadlines ----
+
+    async def create_deadline(
+        self, user_id: str, message_id: int | None, draft: DeadlineDraft
+    ) -> Deadline:
+        if message_id is not None:
+            # The same forwarded message twice is one deadline.
+            found = (
+                await self.client.table("deadlines")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("source_message_id", message_id)
+                .limit(1)
+                .execute()
+            ).data
+            if found:
+                return Deadline.model_validate(found[0])
+        row = draft.model_dump(mode="json") | {
+            "user_id": user_id,
+            "source_message_id": message_id,
+        }
+        result = await self.client.table("deadlines").insert(row).execute()
+        return Deadline.model_validate(result.data[0])
+
+    async def get_deadline(self, user_id: str, deadline_id: str) -> Deadline | None:
+        rows = (
+            await self.client.table("deadlines")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("id", deadline_id)
+            .limit(1)
+            .execute()
+        ).data
+        return Deadline.model_validate(rows[0]) if rows else None
+
+    async def deadlines_between(
+        self, start: datetime, end: datetime, user_id: str | None = None
+    ) -> list[Deadline]:
+        """Open (not done) deadlines due in [start, end), soonest first."""
+        query = (
+            self.client.table("deadlines")
+            .select("*")
+            .eq("done", False)
+            .gte("due_at", start.isoformat())
+            .lt("due_at", end.isoformat())
+        )
+        if user_id is not None:
+            query = query.eq("user_id", user_id)
+        rows = (await query.order("due_at").limit(500).execute()).data
+        return [Deadline.model_validate(row) for row in rows]
+
+    async def finish_deadline(self, user_id: str, deadline_id: str) -> bool:
+        result = (
+            await self.client.table("deadlines")
+            .update({"done": True})
+            .eq("user_id", user_id)
+            .eq("id", deadline_id)
+            .execute()
+        )
+        return bool(result.data)
+
+    async def delete_deadline(self, user_id: str, deadline_id: str) -> bool:
+        result = (
+            await self.client.table("deadlines")
+            .delete()
+            .eq("user_id", user_id)
+            .eq("id", deadline_id)
             .execute()
         )
         return bool(result.data)

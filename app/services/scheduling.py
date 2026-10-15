@@ -44,6 +44,7 @@ from app.services.date_resolution import (
     Clarification,
     asked_field,
     fill_answer,
+    infer_meridiem,
     single_event_guard,
     validate_extraction,
     weekly_weekday,
@@ -496,6 +497,10 @@ class SchedulingService:
             if not pending.get("use_next_message_reference"):
                 reference = datetime.fromisoformat(pending["reference"])
             message_id = pending["message_id"]
+            if previous:
+                text = infer_meridiem(
+                    Extraction.model_validate(previous), pending.get("asked"), text
+                )
             source = (pending.get("source", "") + "\n" + text).strip()
             if len(source) > 8000:
                 return [

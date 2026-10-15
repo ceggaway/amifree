@@ -151,7 +151,9 @@ async def test_free_with_no_time_offers_buttons(service_factory, reference):
     labels = [b.text for row in reply.keyboard.inline_keyboard for b in row]
     assert labels == ["Today", "Tomorrow", "This weekend"]
     today = (await service.callback(1, tap(reply, "Today")))[0]
-    assert today.edit and "🟢 Free on" in today.text and "Checked:" in today.text
+    assert (
+        today.edit and today.text == "🟢 Sun 4 Oct: nothing booked, free for the rest of the day."
+    )
 
 
 async def test_free_lists_gaps_around_plans_and_calendar(service_factory, reference):
@@ -163,7 +165,10 @@ async def test_free_lists_gaps_around_plans_and_calendar(service_factory, refere
     lunch = (datetime(2026, 10, 9, 12, tzinfo=SG), datetime(2026, 10, 9, 14, tzinfo=SG))
     await repo.replace_calendar(calendar.id, [lunch], reference)
     reply = (await service.command(1, "free", "fri"))[0]
-    assert "🟢 Free on Fri 9 Oct:\n• 8am – 12pm\n• 2pm – 7pm\n• 9pm – 11pm" in reply.text
+    assert reply.text == (
+        "📅 Fri 9 Oct\nBusy:\n• 12–2pm CCA calendar\n• 7–9pm CCA dinner (Going)\n"
+        "Free: 8am–12pm, 2–7pm, 9–11pm"
+    )
 
 
 async def test_free_checks_a_time(service_factory, reference):

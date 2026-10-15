@@ -81,9 +81,15 @@ TABLES = {
     "polls",
     "poll_participants",
     "poll_votes",
+    "deadlines",
 }
 COLUMNS = {
     "id",
+    "title",
+    "due_at",
+    "notes",
+    "done",
+    "source_message_id",
     "calendar_feed_token",
     "calendar_feed_seen_at",
     "personal_calendar_url",
@@ -111,7 +117,6 @@ COLUMNS = {
     "raw_text",
     "extracted_json",
     "validation_state",
-    "title",
     "kind",
     "weekday",
     "start_time",
@@ -187,7 +192,7 @@ class SQLGateway:
                 conditions.append(f"{key} in ({','.join(marks)})")
                 continue
             operator = {"eq": "=", "neq": "<>", "lt": "<", "gt": ">", "gte": ">=", "lte": "<="}[op]
-            values.append(operand)
+            values.append({"true": True, "false": False}.get(operand, operand))
             conditions.append(f"{key}{operator}${len(values)}")
         where = " where " + " and ".join(conditions) if conditions else ""
         if request.method == "GET":

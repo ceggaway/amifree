@@ -55,7 +55,9 @@ def parse_block(text: str, reference: datetime, *, explicit: bool = False) -> Bl
         text = text[: match.start()].strip()
     times = RANGE.search(text)
     if not times:
-        raise Clarification("What time is this block? " + USAGE)
+        raise Clarification(
+            "What time is this block? Send the start and end, like 6:30-7pm or 18:30-19:00."
+        )
     head = text[: times.start()].strip(" ,")
     if weekly_day:
         weekly = EVERY.search(head)
@@ -152,10 +154,10 @@ def expand_blocks(rules: Iterable[BlockRule], start: datetime, end: datetime) ->
 def describe(rule: BlockRule) -> str:
     if rule.kind == "ONCE":
         start, end = rule.start_at.astimezone(SG), rule.end_at.astimezone(SG)
-        return f"{rule.title}\n{start:%a, %d %b %Y · %H:%M} → {end:%H:%M} (Singapore)"
+        return f"{rule.title}\n{start:%a, %d %b %Y · %H:%M} → {end:%H:%M} SGT"
     text = (
         f"{rule.title}\nEvery {WEEKDAYS[rule.weekday].capitalize()} "
-        f"{rule.start_time:%H:%M} → {rule.end_time:%H:%M} (Singapore)\n"
+        f"{rule.start_time:%H:%M} → {rule.end_time:%H:%M} SGT\n"
         f"From {rule.start_date:%d %b %Y}"
     )
     if rule.until_date:

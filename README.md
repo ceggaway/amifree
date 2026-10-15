@@ -41,7 +41,7 @@ Create `.env` from `.env.example` if it does not already exist. Preserve an exis
 ### Supabase
 
 1. Create a Supabase project.
-2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `007`). Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
+2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `008`). Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
 3. Copy the project URL and backend `service_role` key into `.env`. Keep the key on the server; use neither the anon key nor a browser session. The SDK also accepts Supabase's newer backend secret key in the same configuration variable. See [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys).
 
 ```dotenv

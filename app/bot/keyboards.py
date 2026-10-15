@@ -103,6 +103,31 @@ def confirm_keyboard(nonce: str, label="Confirm update") -> InlineKeyboardMarkup
     )
 
 
+def change_keyboard(nonce: str) -> InlineKeyboardMarkup:
+    """What to change on a plan: venue and title are typed as-is, without the AI."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("📍 Venue", callback_data=f"chg:venue:{nonce}"),
+                InlineKeyboardButton("🕒 Date/time", callback_data=f"chg:time:{nonce}"),
+                InlineKeyboardButton("✏️ Title", callback_data=f"chg:title:{nonce}"),
+            ],
+            [InlineKeyboardButton("Keep unchanged", callback_data=f"dismiss:{nonce}")],
+        ]
+    )
+
+
+def deadline_keyboard(deadline_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Done", callback_data=f"dl:done:{deadline_id}"),
+                InlineKeyboardButton("🗑 Remove", callback_data=f"dl:rm:{deadline_id}"),
+            ]
+        ]
+    )
+
+
 def remove_block_keyboard(block_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("Remove", callback_data=f"unblock:{block_id}")]]

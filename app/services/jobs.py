@@ -10,11 +10,12 @@ from datetime import date, datetime, time, timedelta
 
 from telegram import InlineKeyboardMarkup
 
-from app.bot.keyboards import nudge_keyboard
+from app.bot.keyboards import deadline_keyboard, nudge_keyboard
 from app.bot.messages import Reply, details, event_card, verdict_line
 from app.schemas.event import SG, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
+from app.services.deadlines import enqueue_deadline_reminders, reminder_text
 from app.services.reminders import enqueue_nightly, summary
 from app.services.scheduling import synced
 
@@ -61,8 +62,16 @@ class Notifier:
             events = await self.repo.events_between(
                 start, start + timedelta(days=1), [Status.GOING, Status.SAVED], user.id
             )
-            text = summary(start, events)
+            due = await self.repo.deadlines_between(start, start + timedelta(days=1), user.id)
+            text = summary(start, events, due)
             return Reply(text) if text else None
+        if row["kind"] == "DEADLINE":
+            # Read at send time: a deadline marked done or removed since is not announced.
+            deadline = await self.repo.get_deadline(user.id, payload["id"])
+            now = self.scheduling.clock()
+            if not deadline or deadline.done or deadline.due_at <= now:
+                return None
+            return Reply(reminder_text(deadline, now), deadline_keyboard(deadline.id))
         if row["kind"] == "NUDGE" and payload["type"] == "event":
             event = await self.repo.get_group_event(payload["id"])
             now = self.scheduling.clock()
@@ -137,6 +146,7 @@ class Notifier:
             self.repo, self.scheduling.clock(), self.scheduling.settings.nightly_hour
         )
         queued += await enqueue_auto(self.repo, self.scheduling.clock())
+        queued += await enqueue_deadline_reminders(self.repo, self.scheduling.clock())
         try:
             calendars = await self.scheduling.refresh_calendars()
         except Exception as exc:  # a calendar problem must never stop reminders going out

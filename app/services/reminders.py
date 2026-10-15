@@ -2,7 +2,8 @@
 
 from datetime import datetime, time, timedelta
 
-from app.schemas.event import SG, Event, Status
+from app.bot.messages import clock
+from app.schemas.event import SG, Deadline, Event, Status
 
 
 def tomorrow_window(now: datetime) -> tuple[datetime, datetime]:
@@ -28,7 +29,7 @@ async def enqueue_nightly(repo, now: datetime, hour: int) -> int:
     return queued
 
 
-def summary(day: datetime, events: list[Event]) -> str | None:
+def summary(day: datetime, events: list[Event], deadlines: list[Deadline] = ()) -> str | None:
     going = sorted((e for e in events if e.status == Status.GOING), key=lambda e: e.start_at)
     if not going:
         return None
@@ -43,4 +44,8 @@ def summary(day: datetime, events: list[Event]) -> str | None:
     undecided = [e for e in events if e.status == Status.SAVED]
     if undecided:
         text += "\n\nStill undecided: " + ", ".join(e.title[:40] for e in undecided[:5])
+    if deadlines:
+        text += "\n\n📌 Due: " + ", ".join(
+            f"{d.title[:40]} ({clock(d.due_at)})" for d in deadlines[:5]
+        )
     return text + "\n\n/plans for details. /reminders off stops these summaries."

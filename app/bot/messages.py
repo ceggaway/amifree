@@ -22,8 +22,9 @@ only covers what AmIFree knows about.
 you connect your own calendar so its busy times count too.
 
 In a group: reply /event to a plan message to post a card with Going / Maybe / Can't,
-a private "Am I free?" check and a headcount. /whosfree <what> suggests times from
-the schedules of members who opt in.
+a private "Am I free?" check and a headcount. Say "every Tue/Thu until week 13" to make a
+recurring event. /whosfree <what> suggests times from the schedules of members who opt in.
+Organisers also get /stats and /export (Clubs Pro). A group admin can switch on /detect.
 
 Privacy: I only act on messages you send or forward to me, commands and button taps. Pictures you forward are read for their text and not kept.
 I never read group chats, and your schedule is never shown to a group.
@@ -157,13 +158,21 @@ def private_verdict(availability: Availability, prefix: str = "") -> str:
     return text[: 200 - len(note)] + note
 
 
-def group_card(event: GroupEvent, counts: dict[str, int]) -> Reply:
-    """The shared card: details and a headcount, never anyone's schedule or name."""
+def group_card(
+    event: GroupEvent, counts: dict[str, int], went: int | None = None, ended: bool = False
+) -> Reply:
+    """The shared card: details and a headcount. Names only ever appear in "Who's going?"."""
     if event.status == "CANCELLED":
         return Reply("❌ Cancelled\n" + details(event))
+    if ended:
+        count = counts.get("GOING", 0) if went is None else went
+        when = f"{event.start_at:%a %-d %b} · {time_range(event.start_at, event.end_at)}"
+        return Reply(f"📣 {event.title} · ended\n{when} · {count} went")
+    series = "\n🔁 Recurring event. Going to all adds every session." if event.series_id else ""
     body = (
         "📅 "
         + details(event)
+        + series
         + f"\n\nGoing {counts.get('GOING', 0)} · Maybe {counts.get('MAYBE', 0)}"
         + f" · Can't {counts.get('DECLINED', 0)}"
         + "\nAm I free? shows a private check that only you can see."

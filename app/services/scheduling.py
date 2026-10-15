@@ -45,6 +45,7 @@ from app.services.date_resolution import (
     validate_extraction,
     weekly_weekday,
 )
+from app.services.detection import DetectionService
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
 from app.services.free_time import free_gaps, parse_free, weekend
@@ -226,6 +227,11 @@ class SchedulingService:
         self.polls = PollService(self)
         # Set by the bot layer: re-renders a group card after its headcount changes.
         self.on_group_change = None
+        # Set by the bot layer: re-renders a poll card, and posts a new card into a group.
+        self.on_poll_change = None
+        self.post_group_card = None
+        self.delete_group_message = None
+        self.detection = DetectionService(self)
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.
         self.notifier = None
         # Bound what one person can spend: LLM extractions and outbound calendar fetches.
@@ -239,6 +245,13 @@ class SchedulingService:
                 await self.notifier.deliver()
             except Exception as exc:
                 log.warning("notification_flush_failed error_type=%s", type(exc).__name__)
+
+    async def poll_changed(self, poll_id: str | None):
+        if poll_id and self.on_poll_change:
+            try:
+                await self.on_poll_change(poll_id)
+            except Exception as exc:
+                log.warning("poll_card_refresh_failed error_type=%s", type(exc).__name__)
 
     async def group_changed(self, group_event_id: str | None):
         if group_event_id and self.on_group_change:
@@ -327,7 +340,7 @@ class SchedulingService:
             return await self.list_events(user)
         if command == "plans":
             return await self.list_events(user, plans=True)
-        if command in ("event", "plan", "whosfree"):
+        if command in ("event", "plan", "whosfree", "stats", "export", "detect"):
             return [Reply(f"/{command} works in group chats. Add me to a group and use it there.")]
         if command == "reminders":
             choice = args.lower()
@@ -1211,6 +1224,10 @@ class SchedulingService:
         user = await self.repo.ensure_user(telegram_id)
         if data.startswith("g:"):
             return await self.groups.from_private(telegram_id, data)
+        if data.startswith("c:"):
+            return await self.groups.confirm_attendance(telegram_id, data)
+        if data.startswith("ser:"):
+            return await self.groups.series_action(user, data)
         if data.startswith(("events:", "plans:")):
             prefix, _, page = data.partition(":")
             if not page.isascii() or not page.isdigit() or len(page) > 8:
@@ -1323,7 +1340,8 @@ class SchedulingService:
                         "Event cancelled for everyone. Members who saved it are being told."
                         if pending["cancel"]
                         else "Event updated. Everyone who saved it gets one message with the change."
-                    )
+                    ),
+                    *self.groups.series_followup(result, pending["cancel"]),
                 ]
             return [
                 Reply("Event cancelled." if pending["cancel"] else "Event updated."),

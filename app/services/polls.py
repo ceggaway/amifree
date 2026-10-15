@@ -10,8 +10,9 @@ import re
 from datetime import datetime, time, timedelta
 
 from app.bot.keyboards import poll_keyboard
-from app.bot.messages import Reply
+from app.bot.messages import Reply, clock
 from app.schemas.event import SG, EventDraft, Poll, Status
+from app.services.date_resolution import Clarification, resolve_date
 from app.services.group_events import GroupResult, parse_id
 
 MIN_PARTICIPANTS = 3
@@ -104,6 +105,65 @@ def suggest_slots(
     ]
 
 
+BY_DAY = re.compile(
+    r"\b(?:(?:reply|respond|answer|rsvp)\s+)?by\s+"
+    r"(tomorrow|tmr|today|tonight|(?:this\s+|next\s+)?(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)"
+    r"[a-z]*|\d{1,2}(?:st|nd|rd|th)?\s+[a-z]{3,9}|[a-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?)\b",
+    re.IGNORECASE,
+)
+DEFAULT_DEADLINE = timedelta(hours=48)
+
+
+def parse_deadline(text: str, now: datetime) -> tuple[str, datetime]:
+    """Split "reply by Sun" off a /whosfree request. Returns (rest of the text, deadline).
+
+    The deadline is 11:59pm that day, or two days from now when none is given or it has passed."""
+    match = BY_DAY.search(text)
+    if match:
+        try:
+            day = resolve_date(match[1], now)
+        except Clarification:
+            day = None
+        if day:
+            deadline = datetime.combine(day, time(23, 59), SG)
+            if deadline > now:
+                return (text[: match.start()] + text[match.end() :]).strip(), deadline
+    return text, now.astimezone(SG) + DEFAULT_DEADLINE
+
+
+def heatmap_cells(
+    start: datetime,
+    end: datetime,
+    busy: dict[str, list[tuple[datetime, datetime]]],
+    now: datetime,
+    max_days: int = 14,
+) -> list[dict]:
+    """Per day, the number of people with no known clash in each 30-minute cell.
+
+    Counts only: nothing here says who is busy. Cells already in the past are left out."""
+    days = []
+    day = start.astimezone(SG).date()
+    shown = 0
+    while datetime.combine(day, time.min, SG) < end and shown < max_days:
+        cells = []
+        slot = datetime.combine(day, DAY_START, SG)
+        stop = datetime.combine(day, DAY_END, SG)
+        while slot < stop:
+            nxt = slot + STEP
+            if slot >= max(start, now) and nxt <= end:
+                free = sum(
+                    not any(slot < b_end and nxt > b_start for b_start, b_end in spans)
+                    for spans in busy.values()
+                )
+                cells.append({"start_at": slot.isoformat(), "free": free})
+            slot = nxt
+        if cells:
+            days.append({"date": day.isoformat(), "cells": cells})
+            shown += 1
+        day += timedelta(days=1)
+    return days
+
+
 def slot_draft(poll: Poll, index: int) -> EventDraft:
     slot = poll.slots[index]
     return EventDraft(
@@ -113,21 +173,30 @@ def slot_draft(poll: Poll, index: int) -> EventDraft:
     )
 
 
-def poll_card(poll: Poll, joined: int, tally: dict[tuple[int, str], int]) -> Reply:
+def poll_card(
+    poll: Poll, joined: int, tally: dict[tuple[int, str], int], heatmap_url: str | None = None
+) -> Reply:
     hours = poll.duration_minutes / 60
     length = f"{hours:g}h" if poll.duration_minutes % 30 == 0 else f"{poll.duration_minutes}min"
     head = f"🗳 Who's free? {poll.title} ({length})"
     if poll.status == "CLOSED":
         return Reply(head + "\nThis poll is closed.")
+    deadline = (
+        f"\nReply by {poll.deadline_at:%a %-d %b}, {clock(poll.deadline_at)}"
+        if poll.deadline_at
+        else ""
+    )
     if poll.status == "COLLECTING":
         last = poll.window_end - timedelta(days=1)
         return Reply(
             head
             + f"\nLooking at {poll.window_start:%a %-d %b} to {last:%a %-d %b}, 08:00–22:00."
+            + deadline
             + "\n\nTap Count me in to let AmIFree use your schedule for this poll. The group only"
             + " sees how many people are free in each slot, never who is busy or why."
-            + f"\n\nJoined: {joined} (the organiser can suggest slots once {MIN_PARTICIPANTS} have joined)",
-            poll_keyboard(poll),
+            + f"\n\nJoined: {joined}. Slots are suggested when the reply time passes,"
+            + f" or when the organiser taps Suggest ({MIN_PARTICIPANTS} must have joined).",
+            poll_keyboard(poll, heatmap_url),
         )
     lines = []
     for index, slot in enumerate(poll.slots):
@@ -154,8 +223,9 @@ def poll_card(poll: Poll, joined: int, tally: dict[tuple[int, str], int]) -> Rep
         + " (no known clashes, not confirmed free):\n\n"
         + "\n".join(lines)
         + coverage
+        + deadline
         + "\n\nTap Fill mine to answer from your schedule (only you see the result), or answer by hand.",
-        poll_keyboard(poll),
+        poll_keyboard(poll, heatmap_url),
     )
 
 
@@ -163,10 +233,13 @@ class PollService:
     def __init__(self, scheduling):
         self.scheduling = scheduling
         self.repo = scheduling.repo
+        # Poll id -> participants at the last automatic attempt; retried only when it changes.
+        self._tried: dict[str, int] = {}
 
     async def render(self, poll: Poll) -> Reply:
         joined = len(await self.repo.poll_participants(poll.id))
-        return poll_card(poll, joined, await self.repo.poll_tally(poll.id))
+        link = self.scheduling.settings.heatmap_link(poll.id)
+        return poll_card(poll, joined, await self.repo.poll_tally(poll.id), link)
 
     async def create(
         self, telegram_id: int, chat_id: int, message_id: int, args: str
@@ -174,8 +247,17 @@ class PollService:
         if not args.strip():
             return GroupResult(post=Reply("What are you scheduling? " + USAGE))
         user = await self.repo.ensure_user(telegram_id)
-        title, minutes, start, end = parse_request(args[:300], self.scheduling.clock())
-        poll = await self.repo.create_poll(user.id, chat_id, message_id, title, minutes, start, end)
+        now = self.scheduling.clock()
+        request = args[:300]
+        rest, deadline = parse_deadline(request, now)
+        title, minutes, start, end = parse_request(rest, now)
+        # Slots must be suggested while there is still time to meet. A chosen reply-by time is
+        # kept unless it leaves no slot; the default is at most halfway through the window.
+        latest = end - timedelta(minutes=minutes) if rest != request else now + (end - now) / 2
+        deadline = max(min(deadline, latest), now + timedelta(minutes=30))
+        poll = await self.repo.create_poll(
+            user.id, chat_id, message_id, title, minutes, start, end, deadline
+        )
         if poll.message_id:
             return GroupResult()
         return GroupResult(post=await self.render(poll), poll_id=poll.id)
@@ -201,7 +283,88 @@ class PollService:
         definite = blocks + [e for e in events if e.status == Status.GOING]
         return [(b.start_at, b.end_at) for b in definite]
 
-    async def callback(self, telegram_id: int, chat_id: int, data: str) -> GroupResult:
+    async def suggest(self, poll: Poll) -> tuple[Poll | None, str]:
+        """Open a collecting poll with the three best slots. (poll or None, message)."""
+        people = await self.repo.poll_participants(poll.id)
+        if len(people) < MIN_PARTICIPANTS:
+            return None, (
+                f"{len(people)} joined so far. At least {MIN_PARTICIPANTS} are needed, so"
+                " nobody's schedule can be worked out from the result."
+            )
+        spans = {person: await self.busy_spans(poll, person) for person in people}
+        busy = {person: found for person, found in spans.items() if found is not None}
+        if len(busy) < MIN_PARTICIPANTS:
+            return None, (
+                f"{len(people)} joined, but only {len(busy)} have a schedule AmIFree can"
+                f" read. At least {MIN_PARTICIPANTS} are needed, so nobody's schedule can be"
+                " worked out from the result. Members can send their NUSMods or calendar link"
+                " to the bot."
+            )
+        slots = suggest_slots(
+            poll.window_start,
+            poll.window_end,
+            poll.duration_minutes,
+            busy,
+            self.scheduling.clock(),
+            unknown=len(people) - len(busy),
+        )
+        if not slots:
+            return None, "There is no time left in that window. Start a new poll."
+        opened = await self.repo.poll_open(poll.id, poll.creator_user_id, slots)
+        if not opened:
+            return None, "Slots are already suggested."
+        return opened, "Slots suggested."
+
+    async def sweep_deadlines(self, now: datetime) -> int:
+        """Suggest slots for polls whose reply time has passed. Returns how many opened."""
+        opened = 0
+        for poll in await self.repo.polls_past_deadline(now):
+            if not poll.creator_user_id or not poll.message_id:
+                continue
+            joined = len(await self.repo.poll_participants(poll.id))
+            if self._tried.get(poll.id) == joined:
+                continue
+            if len(self._tried) > 5000:
+                self._tried.clear()
+            self._tried[poll.id] = joined
+            found, _ = await self.suggest(poll)
+            if found:
+                opened += 1
+                await self.scheduling.poll_changed(poll.id)
+        return opened
+
+    async def heatmap(self, user_id: str, poll_id: str) -> dict | None:
+        """Free counts per half hour for a poll's participants; None when it isn't theirs to see.
+
+        Only people who joined may look, and only once enough schedules are known that a cell
+        cannot be traced back to one person."""
+        poll = await self.repo.get_poll(poll_id)
+        if not poll or user_id not in await self.repo.poll_participants(poll.id):
+            return None
+        people = await self.repo.poll_participants(poll.id)
+        spans = {person: await self.busy_spans(poll, person) for person in people}
+        busy = {person: found for person, found in spans.items() if found is not None}
+        base = {
+            "poll_id": poll.id,
+            "title": poll.title,
+            "duration_minutes": poll.duration_minutes,
+            "joined": len(people),
+            "known": len(busy),
+            "min_known": MIN_PARTICIPANTS,
+        }
+        if len(busy) < MIN_PARTICIPANTS:
+            return base | {"ready": False, "days": [], "max_free": 0}
+        days = heatmap_cells(poll.window_start, poll.window_end, busy, self.scheduling.clock())
+        return base | {"ready": True, "days": days, "max_free": len(busy)}
+
+    async def callback(
+        self,
+        telegram_id: int,
+        chat_id: int,
+        data: str,
+        name: str | None = None,
+        username: str | None = None,
+    ) -> GroupResult:
         parts = data.split(":")
         poll_id = parse_id(parts[2]) if len(parts) in (3, 4) else None
         poll = await self.repo.get_poll(poll_id) if poll_id else None
@@ -210,6 +373,7 @@ class PollService:
         if poll.status == "CLOSED":
             return GroupResult(alert="This poll is closed.", card=await self.render(poll))
         user = await self.repo.ensure_user(telegram_id)
+        await self.scheduling.groups.remember(chat_id, user.id, name, username)
         action, extra = parts[1], parts[3] if len(parts) == 4 else ""
         organiser = poll.creator_user_id == user.id
         if action == "join":
@@ -229,35 +393,8 @@ class PollService:
                 return GroupResult(alert="Only the organiser can suggest slots.")
             if poll.status != "COLLECTING":
                 return GroupResult(alert="Slots are already suggested.")
-            people = await self.repo.poll_participants(poll.id)
-            if len(people) < MIN_PARTICIPANTS:
-                return GroupResult(
-                    alert=f"{len(people)} joined so far. At least {MIN_PARTICIPANTS} are needed, so"
-                    " nobody's schedule can be worked out from the result."
-                )
-            spans = {person: await self.busy_spans(poll, person) for person in people}
-            busy = {person: found for person, found in spans.items() if found is not None}
-            if len(busy) < MIN_PARTICIPANTS:
-                return GroupResult(
-                    alert=f"{len(people)} joined, but only {len(busy)} have a schedule AmIFree can"
-                    f" read. At least {MIN_PARTICIPANTS} are needed, so nobody's schedule can be"
-                    " worked out from the result. Members can send their NUSMods or calendar link"
-                    " to the bot."
-                )
-            slots = suggest_slots(
-                poll.window_start,
-                poll.window_end,
-                poll.duration_minutes,
-                busy,
-                self.scheduling.clock(),
-                unknown=len(people) - len(busy),
-            )
-            if not slots:
-                return GroupResult(alert="There is no time left in that window. Start a new poll.")
-            opened = await self.repo.poll_open(poll.id, user.id, slots)
-            if not opened:
-                return GroupResult(alert="Slots are already suggested.")
-            return GroupResult(alert="Slots suggested.", card=await self.render(opened))
+            opened, note = await self.suggest(poll)
+            return GroupResult(alert=note, card=await self.render(opened) if opened else None)
         if poll.status != "OPEN":
             return GroupResult(alert="The organiser hasn't suggested slots yet.")
         if action == "fill":

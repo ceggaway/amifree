@@ -56,6 +56,34 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
   let result: unknown;
   if (path === "/api/me") {
     result = { telegram_user_id: 1, reminders_enabled: true, nusmods: { connected: false }, calendars: [], outside_calendars_connected: false };
+  } else if (path.startsWith("/api/polls/")) {
+    const day = (offset: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+    result = {
+      poll_id: "mock",
+      title: "Project meeting",
+      duration_minutes: 120,
+      joined: 6,
+      known: 6,
+      min_known: 3,
+      ready: true,
+      max_free: 6,
+      days: [1, 2, 3, 4].map((offset) => {
+        const d = day(offset);
+        return {
+          date: d.toISOString().slice(0, 10),
+          cells: Array.from({ length: 28 }, (_, i) => {
+            const start = new Date(d);
+            start.setHours(8 + Math.floor(i / 2), (i % 2) * 30);
+            return { start_at: start.toISOString(), free: (i * 3 + offset * 2) % 7 };
+          }),
+        };
+      }),
+    };
   } else if (path.startsWith("/api/plans/")) {
     const id = path.split("/").pop();
     plans = plans.map((p) =>

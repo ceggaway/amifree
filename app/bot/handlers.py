@@ -1,8 +1,10 @@
+import asyncio
 import logging
+import warnings
 
 from telegram import Update
 from telegram.constants import ChatAction, ChatType
-from telegram.error import BadRequest, Forbidden, TelegramError
+from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -20,7 +22,7 @@ from app.services.nusmods import ImportError
 from app.services.scheduling import SLOW_DOWN
 
 log = logging.getLogger(__name__)
-GROUP_COMMANDS = {"event", "plan", "whosfree"}
+GROUP_COMMANDS = {"event", "plan", "whosfree", "stats", "export", "detect"}
 PRIVATE_ONLY = "Please use AmIFree in a private chat. Open the bot and send /start."
 NO_TEXT = (
     "I couldn't find any event details there. Forward the post or picture again, or type"
@@ -140,6 +142,36 @@ def split_command(text: str) -> tuple[str, str]:
     return head.split("@")[0].lstrip("/").lower(), args.strip()
 
 
+async def send_private(bot, telegram_id: int, reply: Reply):
+    """A direct message to one person. Raises Forbidden/BadRequest when they never opened the bot."""
+    if reply.document:
+        from telegram import InputFile
+
+        filename, content = reply.document
+        await bot.send_document(
+            telegram_id, InputFile(content, filename=filename), caption=reply.text
+        )
+    else:
+        await bot.send_message(telegram_id, reply.text, reply_markup=reply.keyboard)
+
+
+def addressed_to_me(text: str, username: str | None) -> bool:
+    head = (text or "").split(maxsplit=1)[0] if (text or "").strip() else ""
+    _, at, target = head.partition("@")
+    return not at or not username or target.lower() == username.lower()
+
+
+async def is_admin(bot, message) -> bool:
+    # An anonymous admin posts as the group itself.
+    if message.sender_chat and message.sender_chat.id == message.chat.id:
+        return True
+    try:
+        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+    except TelegramError:
+        return False
+    return member.status in ("creator", "administrator")
+
+
 async def deliver_group(update: Update, service, result):
     query = update.callback_query
     if query:
@@ -152,11 +184,24 @@ async def deliver_group(update: Update, service, result):
             await query.answer(result.alert, show_alert=bool(result.alert), url=url)
         except TelegramError:
             pass
+        if result.adopt_event_id:
+            # A detection suggestion becomes the card: edits now go to this message.
+            await service.groups.posted(result.adopt_event_id, query.message.message_id)
         if result.card:
             try:
                 await query.edit_message_text(result.card.text, reply_markup=result.card.keyboard)
-            except BadRequest:
-                # Telegram rejects an edit that leaves the card unchanged.
+            except RetryAfter:
+                # Telegram's edit limit for this group: the answer is saved, so redraw later.
+                parts = (query.data or "").split(":")
+                if parts[0] == "g" and len(parts) == 3:
+                    await service.group_changed(parts[2])
+            except TelegramError:
+                # Telegram rejects an edit that leaves the card unchanged, or one too old.
+                pass
+        if result.delete_message:
+            try:
+                await query.message.delete()
+            except TelegramError:
                 pass
     if result.post:
         sent = await update.effective_message.reply_text(
@@ -166,6 +211,16 @@ async def deliver_group(update: Update, service, result):
             await service.groups.posted(result.group_event_id, sent.message_id)
         if result.poll_id:
             await service.polls.posted(result.poll_id, sent.message_id)
+        if result.suggestion_id:
+            await service.detection.posted(result.suggestion_id, sent.message_id)
+    if result.dm:
+        bot = update.get_bot()
+        try:
+            await send_private(bot, update.effective_user.id, result.dm)
+        except (Forbidden, BadRequest):
+            await update.effective_message.reply_text(
+                "I can't message you yet. Open a private chat with me, tap Start, then try again."
+            )
 
 
 async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation: str):
@@ -176,26 +231,37 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
     """
     service = context.application.bot_data["service"]
     query, message = update.callback_query, update.effective_message
+    user = update.effective_user
+    who = {"name": user.first_name, "username": user.username}
     try:
         if operation == "callback":
             data = query.data or ""
-            if not data.startswith(("g:", "p:")):
+            handlers = {"g:": service.groups, "p:": service.polls, "d:": service.detection}
+            handler = next((h for prefix, h in handlers.items() if data.startswith(prefix)), None)
+            if handler is None:
                 await query.answer(
                     "Open a private chat with AmIFree to check availability.", show_alert=True
                 )
                 return
-            handler = service.groups if data.startswith("g:") else service.polls
-            result = await handler.callback(
-                update.effective_user.id, update.effective_chat.id, data
-            )
+            result = await handler.callback(user.id, update.effective_chat.id, data, **who)
         elif operation == "command":
             name, args = split_command(message.text)
+            if not addressed_to_me(message.text, context.bot.username):
+                return  # /stats@OtherBot belongs to another bot in this group
             if name not in GROUP_COMMANDS:
                 await send(update, [Reply(PRIVATE_ONLY)])
                 return
             if name == "whosfree":
                 result = await service.polls.create(
-                    update.effective_user.id, update.effective_chat.id, message.message_id, args
+                    user.id, update.effective_chat.id, message.message_id, args
+                )
+            elif name == "stats":
+                result = await service.groups.stats(user.id, update.effective_chat.id)
+            elif name == "export":
+                result = await service.groups.export(user.id, update.effective_chat.id, args)
+            elif name == "detect":
+                result = await service.detection.command(
+                    user.id, update.effective_chat.id, args, await is_admin(context.bot, message)
                 )
             else:
                 source = message.reply_to_message if not args else None
@@ -203,12 +269,31 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
                 origin = source.forward_origin if source else None
                 reference = origin.date if origin else (source.date if source else message.date)
                 result = await service.groups.create(
-                    update.effective_user.id,
+                    user.id,
                     update.effective_chat.id,
                     message.message_id,
                     text,
                     reference,
+                    **who,
                 )
+        elif operation == "message":
+            # Ordinary group messages are dropped unless an admin switched detection on.
+            if message.from_user and message.from_user.is_bot:
+                return
+            try:
+                result = await service.detection.on_message(
+                    user.id,
+                    update.effective_chat.id,
+                    message.message_id,
+                    message.text or message.caption or "",
+                    message.date,
+                )
+                if result is not None:
+                    await deliver_group(update, service, result)
+            except Exception as exc:
+                # Never answer ordinary chatter with an error, and never ask Telegram to retry it.
+                log.warning("detection_message_failed error_type=%s", type(exc).__name__)
+            return
         else:
             return
         await deliver_group(update, service, result)
@@ -283,11 +368,66 @@ def attach_notifier(application: Application, service) -> Notifier:
     return service.notifier
 
 
+class CardRefresher:
+    """Edits a group's card at most once per interval; changes in between are combined.
+
+    Telegram limits how often a bot may edit messages in one group. The first change shows at
+    once, and a burst of RSVPs afterwards becomes a single edit carrying the latest headcount.
+    When Telegram still says "retry after N seconds", the edit is tried again then."""
+
+    MAX_KEYS = 5000
+
+    def __init__(self, interval: float, edit):
+        self.interval, self.edit = interval, edit
+        self.last: dict[str, float] = {}
+        self.waiting: dict[str, asyncio.Task] = {}
+
+    async def refresh(self, key: str):
+        loop = asyncio.get_running_loop()
+        wait = self.last.get(key, float("-inf")) + self.interval - loop.time()
+        if wait > 0:
+            self.later(key, wait)
+            return
+        await self.run(key)
+
+    async def run(self, key: str):
+        loop = asyncio.get_running_loop()
+        if len(self.last) > self.MAX_KEYS:
+            cutoff = loop.time() - max(self.interval, 60)
+            self.last = {k: t for k, t in self.last.items() if t > cutoff}
+        self.last[key] = loop.time()
+        try:
+            await self.edit(key)
+        except RetryAfter as exc:
+            with warnings.catch_warnings():
+                # PTB is moving retry_after from seconds to a timedelta; accept either.
+                warnings.simplefilter("ignore")
+                seconds = exc.retry_after
+            seconds = seconds.total_seconds() if hasattr(seconds, "total_seconds") else seconds
+            self.later(key, float(seconds) + 0.5)
+
+    def later(self, key: str, wait: float):
+        if key in self.waiting:
+            return  # the pending edit renders the latest state when it runs
+
+        async def delayed():
+            try:
+                await asyncio.sleep(wait)
+            finally:
+                self.waiting.pop(key, None)
+            try:
+                await self.run(key)
+            except Exception as exc:
+                log.warning("card_refresh_failed error_type=%s", type(exc).__name__)
+
+        self.waiting[key] = asyncio.create_task(delayed())
+
+
 def register_handlers(application: Application, service):
     application.bot_data["service"] = service
     attach_notifier(application, service)
 
-    async def refresh_card(group_event_id: str):
+    async def edit_card(group_event_id: str):
         event = await service.repo.get_group_event(group_event_id)
         if not event or not event.message_id:
             return
@@ -299,10 +439,41 @@ def register_handlers(application: Application, service):
                 message_id=event.message_id,
                 reply_markup=card.keyboard,
             )
+        except RetryAfter:
+            raise  # CardRefresher tries again when Telegram allows
         except TelegramError:
             pass
 
-    service.on_group_change = refresh_card
+    async def edit_poll(poll_id: str):
+        poll = await service.repo.get_poll(poll_id)
+        if not poll or not poll.message_id:
+            return
+        card = await service.polls.render(poll)
+        try:
+            await application.bot.edit_message_text(
+                card.text,
+                chat_id=poll.chat_id,
+                message_id=poll.message_id,
+                reply_markup=card.keyboard,
+            )
+        except TelegramError:
+            pass
+
+    async def post_card(chat_id: int, card: Reply) -> int | None:
+        sent = await application.bot.send_message(chat_id, card.text, reply_markup=card.keyboard)
+        return sent.message_id
+
+    async def delete_message(chat_id: int, message_id: int):
+        try:
+            await application.bot.delete_message(chat_id, message_id)
+        except TelegramError:
+            pass
+
+    refresher = CardRefresher(service.settings.card_edit_interval_seconds, edit_card)
+    service.on_group_change = refresher.refresh
+    service.on_poll_change = edit_poll
+    service.post_group_card = post_card
+    service.delete_group_message = delete_message
     application.add_handler(
         CommandHandler(
             [

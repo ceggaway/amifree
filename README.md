@@ -9,9 +9,11 @@ One FastAPI backend serves the Telegram bot, a JSON API and a React Telegram Min
 | Forward to save, `/plans` | `/event` cards with Going / Maybe / Can't and a live headcount |
 | Instant clash check: No clashes found, Clashes with X, or Busy day | Edit once: everyone who kept the plan gets one change alert |
 | Private "Am I free?" on every group card, and `/free fri 7-9pm` or `/free tomorrow` | `/whosfree` self-filling poll |
-| Night-before summary, change alerts | Auto-chase and a Nudge button for non-responders |
-| Quick blocks: `busy sat 2-6pm`, `work every Wed 6-10pm` | |
-| Add to Google or Apple Calendar after Save or Going | |
+| Night-before summary, change alerts | Auto-chase (two private nudges) and a Nudge button for non-responders |
+| Quick blocks: `busy sat 2-6pm`, `work every Wed 6-10pm` | "Still coming?" check the day before, with a confirmed / unsure / dropped summary |
+| Add to Google or Apple Calendar after Save or Going | Recurring events: `Training every Tue/Thu until week 13`, with single-session changes |
+| "Still coming?" answered with one tap | Availability heatmap in the Mini App, attendance export and turnout stats (Clubs Pro) |
+| | Optional event detection, switched on by a group admin |
 
 NUSMods is optional. After Save or Going, the bot offers 📅 Google Calendar (a pre-filled link) and 🍎 Apple Calendar (an .ics file, also works in Outlook). No calendar sign-in is needed; AmIFree does not read outside calendars, and cards say so. Change alerts offer the same buttons: the .ics replaces the old entry, a Google link adds a new one. OCR of posters is not supported.
 
@@ -19,11 +21,12 @@ NUSMods is optional. After Save or Going, the bot offers 📅 Google Calendar (a
 
 ## Privacy by design
 
-- The bot acts only on messages sent or forwarded to it in private, on commands, and on button taps. Telegram privacy mode stays on, so ordinary group messages are never delivered to it. `/event` reads only the one message it replies to.
-- Anything derived from a person's schedule in a group is returned as a callback alert that only the person who tapped can see. Group cards show counts, never names or reasons.
+- The bot acts only on messages sent or forwarded to it in private, on commands, and on button taps. Telegram privacy mode stays on, so ordinary group messages are never delivered to it, unless a group admin makes the bot an admin and switches on `/detect on` (see below). `/event` reads only the one message it replies to.
+- Anything derived from a person's schedule in a group is returned as a callback alert that only the person who tapped can see. Group cards show counts, never names or reasons. The one exception is **Who's going?**, which lists the names of people who tapped Going (never Maybe or Can't).
+- Names (`first_name`, `@username`) are kept per group, only for people who tapped something there, so Who's going? and the organiser's attendance export can show them. They are deleted with `/deletemydata` and with the person's record.
 - `/whosfree` reads a schedule only after that member taps Count me in, and suggests slots only once three people have joined.
 - Nudges and reminders go only to people who have used AmIFree; `/reminders off` stops summaries and nudges.
-- `/deletemydata` (alias `/delete`) removes the user's timetable, plans, busy blocks, poll answers, notification records and analytics. Group cards they organised stay for the other members, with no organiser attached.
+- `/deletemydata` (alias `/delete`) removes the user's timetable, plans, busy blocks, poll answers, "still coming?" answers, check-ins, names, notification records and analytics. Group cards they organised stay for the other members, with no organiser attached.
 
 ## Local setup
 
@@ -97,7 +100,20 @@ Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `
 3. With two accounts, tap **Am I free?** on the same card. Each sees a private popup; nothing appears in the group.
 4. Tap Going / Maybe / Can't and watch the headcount. The plan appears in each member's `/plans`.
 5. As the organiser tap **Edit**. Telegram opens the private chat; send the correction and confirm. Members who kept the plan each receive one message stating what changed.
-6. Send `/whosfree project meeting 2h next week`. Have three accounts tap **Count me in**, then tap **Suggest slots** as the organiser.
+6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **Count me in**. Slots are suggested when the reply-by time passes; the organiser can also tap **Suggest slots** earlier.
+7. Tap **Who's going?** for the Going names, and **I'm here** from 30 minutes before the start to check in.
+8. A card is redrawn as "ended · N went" once the event is over.
+
+#### Group features
+
+| Feature | How it works |
+| --- | --- |
+| **"Still coming?"** | 4–30 hours before an event starts, each member marked Going gets one private message: Still coming / Not sure / Can't anymore. Can't anymore also sets their RSVP to Can't. The organiser taps **Status** on the card for "18 confirmed · 4 unsure · 3 dropped · 2 no reply". Members with `/reminders off` are not asked. |
+| **Recurring events** | `/event Training every Tue/Thu 7-9pm at UTSRC until week 13` (also `until 30 Nov`, `for 8 weeks`). Every session is its own card, posted four days before it. Week numbers use the NUS calendar (recess between weeks 6 and 7). Editing a card changes that session only; the organiser is then offered **Apply to all future sessions** or **Cancel all future sessions**. **Going to all** RSVPs to every remaining session. A series is capped at 26 weeks / 60 sessions. |
+| **Auto-chase** | Up to two private nudges per card: a day after posting (or halfway to the deadline, if sooner) and three hours before the deadline. A person is nudged at most once per stage. A poll's deadline is its reply-by time; a card's is its start. |
+| **Heatmap** | The poll card's **📊 Who's free when** opens the Mini App grid of how many participants are free in each half hour. Counts only; shown to poll participants, and only once three schedules are known. Needs `BOT_USERNAME` and `MINI_APP_SHORT_NAME` (create the short name with `/newapp` in BotFather). |
+| **Turnout and export** | `/stats` (anyone who organised events here) sends overall turnout privately. `/export [days]` sends a CSV (name, RSVP, still coming?, attended) privately and is part of Clubs Pro. Turnout counts people who tapped **I'm here**. Mark a group Pro with a `group_plans` row (`tier='PRO'`) or `PRO_CHAT_IDS`. |
+| **Event detection** | Off by default. A group admin runs `/detect on` after making the bot a group admin (Telegram only delivers ordinary messages to admin bots). The bot then checks messages that contain a day and a time, reads them once, and offers **Make event card / Ignore**. Nothing is saved without a tap, message text is not stored, and unanswered suggestions delete themselves after 10 minutes. `/detect off` turns it off. |
 
 Members must have opened a private chat with the bot at least once before it can DM them reminders, alerts or nudges. This is a Telegram rule.
 
@@ -201,13 +217,13 @@ Use one replica and one worker for this MVP. Within that worker, different peopl
 
 - All event times use Asia/Singapore. Numeric dates are day/month. Dates without a year use the next occurrence. A bare weekday means its next occurrence including today; `next Friday` means Friday in the next calendar week. Cards display the resolved date before RSVP.
 - Forwarded invitations use the original Telegram message timestamp when available, otherwise the received message timestamp. Clarification retains that reference. Edits use the first correction message's timestamp and retain it for further clarification.
-- Date/time evidence must appear in the source text or the existing edit baseline. Missing/ambiguous critical fields prompt clarification. Non-Singapore timezones, recurring events and multiple-event messages are flagged by the extractor; the live pilot must validate its handling of these cases.
+- Date/time evidence must appear in the source text or the existing edit baseline. Missing/ambiguous critical fields prompt clarification. Non-Singapore timezones and multiple-event messages are flagged by the extractor; weekly patterns in groups become a series (see Group features), and in private chat ask once between the next date and a weekly block; the live pilot must validate its handling of these cases.
 - Missing end times prompt clarification by default. Setting `DEFAULT_EVENT_DURATION_MINUTES` to a positive value permits a visibly labelled assumption. Overnight events need an explicit end date. Existing updates preserve duration when no replacement end time is supplied.
 - Overlap uses half-open intervals: an event ending at 19:00 does not clash with one starting at 19:00. Definite clashes are Going plans, NUSMods classes and exams, and busy blocks. A Saved plan is undecided: it is reported as a possible overlap with a choice of which to attend, and never blocks. "Busy day" is a warning, not a clash, shown when `BUSY_DAY_THRESHOLD` (default 3) other Going plans fall on the same day. Conflicts are private.
 - "No clashes found" covers only what AmIFree knows: every card lists what was checked and says when no NUSMods timetable covers the date.
 - Quick blocks are parsed without the LLM. Weekly blocks repeat for 90 days unless `until <date>` is given, cannot cross midnight, and are stored separately from NUSMods blocks so a reimport never removes them.
 - A member's answer on a group card is their own plan linked to the shared card. Only the organiser can edit or cancel a shared plan. Change alerts are sent only for edits made through AmIFree: Telegram does not tell a bot when someone edits a message elsewhere.
-- Bots cannot list group members. Headcounts, nudges and `/whosfree` only involve people who have interacted with AmIFree in that group. Each person is nudged at most once per card.
+- Bots cannot list group members. Headcounts, nudges and `/whosfree` only involve people who have interacted with AmIFree in that group. Each person is nudged at most once per chase stage (see Group features).
 - NUSMods links normally omit academic year. It is inferred from the message's Singapore timestamp, switching in August. Set `NUSMODS_ACADEMIC_YEAR=2026-2027` to override it for a specific pilot. The imported year is shown in the setup response.
 - Student share-link formats v1/v2/v3 are supported. Missing/stale selections are rejected; the importer does not choose a class. Hidden courses are still imported. TA-specific links are rejected with an explanation.
 - The importer expands listed teaching weeks into dated blocks and accounts for recess after teaching week 6. Special terms and explicit week ranges are supported. Exams require a published duration. Holiday exceptions, ad hoc cancellations and unscheduled classes are only as accurate as NUSMods' published lesson data. Resend a fresh link after timetable changes; reimport replaces old blocks atomically.

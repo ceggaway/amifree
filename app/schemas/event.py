@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, time
 from enum import StrEnum
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -79,11 +79,14 @@ class Poll(BaseModel):
     window_end: datetime
     status: Literal["COLLECTING", "OPEN", "CLOSED"] = "COLLECTING"
     slots: list[dict] = []
+    # Members are asked to answer by then; slots are suggested automatically when it passes.
+    deadline_at: datetime | None = None
+    created_at: datetime | None = None
 
-    @field_validator("window_start", "window_end")
+    @field_validator("window_start", "window_end", "deadline_at")
     @classmethod
     def local(cls, value):
-        return value.astimezone(SG)
+        return value.astimezone(SG) if value else value
 
 
 class GroupEvent(EventDraft):
@@ -96,4 +99,39 @@ class GroupEvent(EventDraft):
     creator_user_id: str | None = None
     status: Literal["ACTIVE", "CANCELLED"] = "ACTIVE"
     version: int = 1
+    created_at: datetime | None = None
+    # Set for one session of a recurring event.
+    series_id: str | None = None
+    occurrence_date: date | None = None
+    edited_alone: bool = False
+    # Set once the card was redrawn in its "ended" state.
+    ended_at: datetime | None = None
+
+
+class EventSeries(BaseModel):
+    """A recurring group event: every listed weekday from first_date until until_date."""
+
+    id: str
+    chat_id: int
+    source_message_id: int | None = None
+    creator_user_id: str | None = None
+    title: str
+    weekdays: list[int]
+    start_time: time
+    end_time: time
+    location: str | None = None
+    notes: str | None = None
+    first_date: date
+    until_date: date
+    status: Literal["ACTIVE", "STOPPED"] = "ACTIVE"
+
+
+class Suggestion(BaseModel):
+    """An event spotted in a group where detection is on: the proposed card, not the message."""
+
+    id: str
+    chat_id: int
+    source_message_id: int
+    message_id: int | None = None
+    draft: dict
     created_at: datetime | None = None

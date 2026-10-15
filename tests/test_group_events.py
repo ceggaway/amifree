@@ -88,10 +88,13 @@ async def test_event_card_from_a_replied_message(service_factory):
         "Maybe",
         "Can't",
         "Am I free?",
+        "Who's going?",
+        "I'm here",
         "Save",
         "Edit",
         "Cancel event",
         "Nudge",
+        "Status",
     ]
     assert all(len(data.encode()) <= 64 for data in taps.values())
     # The bot records its own card message so later edits can re-render it.

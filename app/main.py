@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from supabase import acreate_client
 from supabase.lib.client_options import AsyncClientOptions
-from telegram import BotCommand, MenuButtonWebApp, Update, WebAppInfo
+from telegram import BotCommand, BotCommandScopeAllGroupChats, MenuButtonWebApp, Update, WebAppInfo
 from telegram.ext import Application
 
 from app.api.routes import build_router
@@ -142,6 +142,16 @@ def create_app(
                     BotCommand("cancel", "Clear pending action"),
                     BotCommand("deletemydata", "Delete everything about me"),
                 ]
+            )
+            await bot_app.bot.set_my_commands(
+                [
+                    BotCommand("event", "Post an event card (reply to a plan, or add details)"),
+                    BotCommand("whosfree", "Find a time: /whosfree project meeting 2h next week"),
+                    BotCommand("stats", "Turnout for your events (sent privately)"),
+                    BotCommand("export", "Attendance CSV, Clubs Pro (sent privately)"),
+                    BotCommand("detect", "Admins: suggest cards for plans (on or off)"),
+                ],
+                scope=BotCommandScopeAllGroupChats(),
             )
             if settings.mini_app_url:
                 await bot_app.bot.set_chat_menu_button(

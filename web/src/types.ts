@@ -39,3 +39,17 @@ export type Me = {
   calendars: { label: string; synced_at: string | null; status: "CONNECTED" | "PENDING" | "ERROR" }[];
   outside_calendars_connected: boolean;
 };
+
+export type HeatmapDay = { date: string; cells: { start_at: string; free: number }[] };
+
+export type Heatmap = {
+  poll_id: string;
+  title: string;
+  duration_minutes: number;
+  joined: number;
+  known: number;
+  min_known: number;
+  ready: boolean;
+  max_free: number;
+  days: HeatmapDay[];
+};

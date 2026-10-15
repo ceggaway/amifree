@@ -372,6 +372,9 @@ async def test_polls_in_postgresql(reference):
         )
         await repo.group_rsvp(member.id, card, Status.MAYBE)
         assert await repo.group_responder_ids(card.id) == [member.id]
+        # A card that never reached the group (an unposted series session) is not chased.
+        assert (await repo.cards_to_chase(now - timedelta(days=1), now))[0] == []
+        await repo.set_group_message(card.id, 56)
         assert [e.id for e in (await repo.cards_to_chase(now - timedelta(days=1), now))[0]] == [
             card.id
         ]

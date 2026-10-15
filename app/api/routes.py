@@ -275,4 +275,19 @@ def build_router(settings: Settings) -> APIRouter:
             "availability": availability_json(found),
         }
 
+    # Each heatmap reads every participant's schedule: bound how often one person can ask.
+    heatmap_limit = RateLimiter(20, 60)
+
+    @router.get("/polls/{poll_id}/heatmap")
+    async def poll_heatmap(poll_id: str, request: Request, user: CurrentUser):
+        """How many poll participants are free in each half hour. Counts only, never names."""
+        service = service_of(request)
+        if not heatmap_limit.allow(user.id):
+            raise HTTPException(429, "Too many refreshes. Wait a minute and try again.")
+        found = await service.polls.heatmap(user.id, valid_id(poll_id))
+        # Not a participant and no such poll look the same.
+        if found is None:
+            raise HTTPException(404, "Not found")
+        return found
+
     return router

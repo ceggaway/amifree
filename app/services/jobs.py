@@ -4,14 +4,15 @@ Rows are claimed, sent, and only then marked sent. The uniqueness key on each ro
 stops a repeated job run, or a retried edit, from messaging anyone twice.
 """
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta
 
 from telegram import InlineKeyboardMarkup
 
-from app.bot.keyboards import nudge_keyboard
-from app.bot.messages import Reply, details, event_card, verdict_line
+from app.bot.keyboards import attendance_keyboard, nudge_keyboard
+from app.bot.messages import Reply, details, event_card, time_range, verdict_line
 from app.schemas.event import SG, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
@@ -31,9 +32,14 @@ class Notifier:
         self.scheduling = scheduling
         self.repo = scheduling.repo
         self.send = send
+        # The in-process timer and POST /internal/jobs/run may overlap; posting a session
+        # card twice is the one step the database cannot de-duplicate, so runs take turns.
+        self.running = asyncio.Lock()
 
     async def render(self, user, row: dict) -> Reply | None:
         payload = row["payload"]
+        if row["kind"] == "CHANGE" and payload.get("series_text"):
+            return Reply(payload["series_text"])
         if row["kind"] == "CHANGE":
             text = describe_change(payload["before"], payload["after"], payload.get("cancelled"))
             event = await self.repo.get_event(user.id, payload["event_id"])
@@ -64,6 +70,23 @@ class Notifier:
             )
             text = summary(start, events)
             return Reply(text) if text else None
+        if row["kind"] == "CONFIRM":
+            event = await self.repo.get_group_event(payload["id"])
+            now = self.scheduling.clock()
+            if not event or event.status != "ACTIVE" or event.end_at <= now:
+                return None
+            linked = await self.repo.linked_event(user.id, event.id)
+            # Only people still marked Going are asked; someone who changed their mind is not.
+            if not linked or linked.status != Status.GOING:
+                return None
+            when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+            where = f" at {event.location[:80]}" if event.location else ""
+            return Reply(
+                f"⏰ Still coming to {event.title[:80]}?\n{when}{where}"
+                + card_link(event)
+                + "\n\nThe organiser sees only how many are confirmed. /reminders off stops these.",
+                attendance_keyboard(event),
+            )
         if row["kind"] == "NUDGE" and payload["type"] == "event":
             event = await self.repo.get_group_event(payload["id"])
             now = self.scheduling.clock()
@@ -134,19 +157,47 @@ class Notifier:
 
     async def run(self) -> dict[str, int]:
         """One idempotent tick: safe to call from a scheduler as often as wanted."""
+        async with self.running:
+            return await self._run()
+
+    async def _run(self) -> dict[str, int]:
         queued = await enqueue_nightly(
             self.repo, self.scheduling.clock(), self.scheduling.settings.nightly_hour
         )
         queued += await enqueue_auto(self.repo, self.scheduling.clock())
+        extra = await self.group_tick()
+        queued += extra.pop("confirmations", 0)
         try:
             calendars = await self.scheduling.refresh_calendars()
         except Exception as exc:  # a calendar problem must never stop reminders going out
             log.warning("calendar_refresh_tick_failed error_type=%s", type(exc).__name__)
             calendars = 0
-        extra = {"calendars": calendars} if calendars else {}
+        if calendars:
+            extra["calendars"] = calendars
         result = {"queued": queued} | extra | await self.deliver()
         await self.report_backlog()
         return result
+
+    async def group_tick(self) -> dict[str, int]:
+        """Group housekeeping. Each step is isolated: one failing must not stop the rest."""
+        now = self.scheduling.clock()
+        steps = (
+            ("confirmations", self.scheduling.groups.enqueue_confirmations),
+            ("ended", self.scheduling.groups.sweep_ended),
+            ("posted", self.scheduling.groups.post_due_sessions),
+            ("suggested", self.scheduling.polls.sweep_deadlines),
+            ("cleaned", self.scheduling.detection.sweep),
+        )
+        found: dict[str, int] = {}
+        for name, step in steps:
+            try:
+                count = await step(now)
+            except Exception as exc:
+                log.warning("group_tick_failed step=%s error_type=%s", name, type(exc).__name__)
+                continue
+            if count:
+                found[name] = count
+        return found
 
     async def stats(self) -> dict:
         return await self.repo.notification_stats(self.scheduling.clock())

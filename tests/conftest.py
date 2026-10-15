@@ -52,7 +52,10 @@ def service_factory(reference):
             Settings(
                 _env_file=None,
                 bot_mode="disabled",
-                **({"default_event_duration_minutes": 0} | settings),
+                **(
+                    {"default_event_duration_minutes": 0, "card_edit_interval_seconds": 0}
+                    | settings
+                ),
             ),
             clock=lambda: reference,
         )

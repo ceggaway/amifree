@@ -1,8 +1,16 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from app.models.user import User
-from app.schemas.event import Event, EventDraft, GroupEvent, Poll, Status
+from app.schemas.event import (
+    Event,
+    EventDraft,
+    EventSeries,
+    GroupEvent,
+    Poll,
+    Status,
+    Suggestion,
+)
 from app.services.quick_blocks import expand_blocks
 
 
@@ -26,6 +34,13 @@ class MemoryRepository:
         self.available = True
         self.calendar_blocks = {}  # calendar id -> [(start, end)]
         self.calendars = {}
+        self.names = {}  # (chat id, user id) -> (display name, username)
+        self.series = {}
+        self.checks = {}  # (group event id, user id) -> answer
+        self.attended = {}  # (group event id, user id) -> marked_by
+        self.tiers = {}  # chat id -> (tier, expires_at)
+        self.detection = {}  # chat id -> bool
+        self.suggestions = {}
 
     async def ping(self):
         if not self.available:
@@ -152,15 +167,19 @@ class MemoryRepository:
         self.members.add((chat_id, user_id))
         return g.model_copy(deep=True)
 
-    async def set_group_message(self, group_event_id, message_id):
+    async def set_group_message(self, group_event_id, message_id, posted_at=None):
         self.group_events[group_event_id].message_id = message_id
+        if posted_at:
+            self.group_events[group_event_id].created_at = posted_at
 
     async def get_group_event(self, group_event_id):
         g = self.group_events.get(group_event_id)
         return g.model_copy(deep=True) if g else None
 
-    async def touch_member(self, chat_id, user_id):
+    async def touch_member(self, chat_id, user_id, name=None, username=None):
         self.members.add((chat_id, user_id))
+        if name or username:
+            self.names[(chat_id, user_id)] = (name, username)
 
     def linked(self, user_id, group_event_id):
         return next(
@@ -217,6 +236,9 @@ class MemoryRepository:
         else:
             for k, v in draft.model_dump().items():
                 setattr(g, k, v)
+            # Mirrors the SQL function: a changed session is edited on its own.
+            g.edited_alone = g.edited_alone or g.series_id is not None
+            g.ended_at = None
         g.version += 1
         after = g.model_dump(mode="json")
         for e in self.events.values():
@@ -366,6 +388,15 @@ class MemoryRepository:
             n["status"], n["attempts"] = "sending", n["attempts"] + 1
         return [dict(n) for n in due]
 
+    async def drop_pending_notifications(self, kind, keys):
+        dropped = [
+            n
+            for n in self.notifications
+            if n["kind"] == kind and n["status"] == "pending" and n["dedupe_key"] in keys
+        ]
+        self.notifications = [n for n in self.notifications if n not in dropped]
+        return [n["user_id"] for n in dropped]
+
     async def finish_notification(self, notification_id, ok, permanent):
         n = next(n for n in self.notifications if n["id"] == notification_id)
         if ok:
@@ -373,7 +404,9 @@ class MemoryRepository:
         else:
             n["status"] = "failed" if permanent or n["attempts"] >= 5 else "pending"
 
-    async def create_poll(self, user_id, chat_id, message_id, title, minutes, start, end):
+    async def create_poll(
+        self, user_id, chat_id, message_id, title, minutes, start, end, deadline=None
+    ):
         for p in self.polls.values():
             if (p.chat_id, p.source_message_id) == (chat_id, message_id):
                 return p.model_copy(deep=True)
@@ -386,6 +419,8 @@ class MemoryRepository:
             duration_minutes=minutes,
             window_start=start,
             window_end=end,
+            deadline_at=deadline,
+            created_at=datetime.now(UTC),
         )
         self.polls[p.id] = p
         self.poll_people[p.id] = [user_id]
@@ -455,7 +490,10 @@ class MemoryRepository:
         events = [
             g.model_copy(deep=True)
             for g in self.group_events.values()
-            if g.status == "ACTIVE" and g.created_at <= created_before and g.start_at > now
+            if g.status == "ACTIVE"
+            and (g.message_id or 0) > 0
+            and g.created_at <= created_before
+            and g.start_at > now
         ]
         polls = [
             p.model_copy(deep=True)
@@ -469,6 +507,167 @@ class MemoryRepository:
     async def action(self, user_id, kind, event_id=None, metadata=None):
         self.actions.append((user_id, kind, event_id, metadata))
 
+    # ---- group features ----
+
+    async def polls_past_deadline(self, now):
+        return [
+            p.model_copy(deep=True)
+            for p in self.polls.values()
+            if p.status == "COLLECTING"
+            and p.deadline_at
+            and p.deadline_at <= now
+            and p.window_end > now
+        ]
+
+    async def member_names(self, chat_id):
+        return {
+            user_id: self.names.get((chat, user_id), (None, None))
+            for chat, user_id in self.members
+            if chat == chat_id
+        }
+
+    async def group_answers(self, group_event_id):
+        return {
+            e.user_id: e.status.value
+            for e in self.events.values()
+            if e.group_event_id == group_event_id
+        }
+
+    async def group_events_starting(self, start, end):
+        found = [
+            g.model_copy(deep=True)
+            for g in self.group_events.values()
+            if g.status == "ACTIVE" and start <= g.start_at < end
+        ]
+        return sorted(found, key=lambda g: g.start_at)
+
+    async def ended_group_events(self, now):
+        return [
+            g.model_copy(deep=True)
+            for g in self.group_events.values()
+            if g.status == "ACTIVE"
+            and now - timedelta(days=7) <= g.end_at <= now
+            and g.ended_at is None
+            and (g.message_id or 0) > 0
+        ]
+
+    async def mark_ended(self, group_event_id, when):
+        self.group_events[group_event_id].ended_at = when
+
+    async def set_attendance_check(self, group_event_id, user_id, answer):
+        self.checks[(group_event_id, user_id)] = answer
+
+    async def attendance_checks(self, group_event_id):
+        return {u: a for (g, u), a in self.checks.items() if g == group_event_id}
+
+    async def check_in(self, group_event_id, user_id, marked_by):
+        self.attended[(group_event_id, user_id)] = marked_by
+
+    async def attendees(self, group_event_id):
+        return {u for (g, u) in self.attended if g == group_event_id}
+
+    async def create_series(self, user_id, chat_id, message_id, fields):
+        for s in self.series.values():
+            if (s.chat_id, s.source_message_id) == (chat_id, message_id):
+                return s.model_copy(deep=True)
+        s = EventSeries(
+            id=str(uuid4()),
+            chat_id=chat_id,
+            source_message_id=message_id,
+            creator_user_id=user_id,
+            **fields,
+        )
+        self.series[s.id] = s
+        self.members.add((chat_id, user_id))
+        return s.model_copy(deep=True)
+
+    async def get_series(self, series_id):
+        s = self.series.get(series_id)
+        return s.model_copy(deep=True) if s else None
+
+    async def update_series(self, series_id, **fields):
+        current = self.series[series_id].model_dump()
+        self.series[series_id] = EventSeries.model_validate(current | fields)
+
+    async def series_sessions(self, series_id):
+        found = [g for g in self.group_events.values() if g.series_id == series_id]
+        return [g.model_copy(deep=True) for g in sorted(found, key=lambda g: g.occurrence_date)]
+
+    async def create_session(self, series, day, draft, source_message_id=None):
+        for g in self.group_events.values():
+            if g.series_id == series.id and g.occurrence_date == day:
+                return g.model_copy(deep=True)
+        g = GroupEvent(
+            **draft.model_dump(include=set(EventDraft.model_fields)),
+            id=str(uuid4()),
+            chat_id=series.chat_id,
+            source_message_id=source_message_id,
+            creator_user_id=series.creator_user_id,
+            created_at=datetime.now(UTC),
+            series_id=series.id,
+            occurrence_date=day,
+        )
+        self.group_events[g.id] = g
+        return g.model_copy(deep=True)
+
+    async def clear_edited(self, group_event_ids):
+        for group_event_id in group_event_ids:
+            self.group_events[group_event_id].edited_alone = False
+
+    async def unposted_sessions(self, start, end):
+        found = await self.group_events_starting(start, end)
+        return [g for g in found if g.series_id and not g.message_id]
+
+    async def chat_events_by(self, chat_id, creator_user_id, since):
+        found = [
+            g.model_copy(deep=True)
+            for g in self.group_events.values()
+            if g.chat_id == chat_id and g.creator_user_id == creator_user_id and g.start_at >= since
+        ]
+        return sorted(found, key=lambda g: g.start_at)
+
+    async def group_tier(self, chat_id, now):
+        tier, expires = self.tiers.get(chat_id, ("FREE", None))
+        return "PRO" if tier == "PRO" and (expires is None or expires > now) else "FREE"
+
+    async def set_group_tier(self, chat_id, tier, expires_at=None):
+        self.tiers[chat_id] = (tier, expires_at)
+
+    async def detection_enabled(self, chat_id):
+        return self.detection.get(chat_id, False)
+
+    async def set_detection(self, chat_id, enabled, telegram_id):
+        self.detection[chat_id] = enabled
+
+    async def create_suggestion(self, chat_id, source_message_id, draft):
+        for s in self.suggestions.values():
+            if (s.chat_id, s.source_message_id) == (chat_id, source_message_id):
+                return None
+        s = Suggestion(
+            id=str(uuid4()),
+            chat_id=chat_id,
+            source_message_id=source_message_id,
+            draft=draft.model_dump(mode="json"),
+            created_at=datetime.now(UTC),
+        )
+        self.suggestions[s.id] = s
+        return s.model_copy(deep=True)
+
+    async def get_suggestion(self, suggestion_id):
+        s = self.suggestions.get(suggestion_id)
+        return s.model_copy(deep=True) if s else None
+
+    async def set_suggestion_message(self, suggestion_id, message_id):
+        self.suggestions[suggestion_id].message_id = message_id
+
+    async def delete_suggestion(self, suggestion_id):
+        self.suggestions.pop(suggestion_id, None)
+
+    async def expired_suggestions(self, before):
+        return [
+            s.model_copy(deep=True) for s in self.suggestions.values() if s.created_at <= before
+        ]
+
     async def extraction(self, *args):
         pass
 
@@ -481,6 +680,9 @@ class MemoryRepository:
             self.calendars.pop(cid)
             self.calendar_blocks.pop(cid, None)
         self.members = {m for m in self.members if m[1] != user_id}
+        self.names = {k: v for k, v in self.names.items() if k[1] != user_id}
+        self.checks = {k: v for k, v in self.checks.items() if k[1] != user_id}
+        self.attended = {k: v for k, v in self.attended.items() if k[1] != user_id}
         self.notifications = [n for n in self.notifications if n["user_id"] != user_id]
         for people in self.poll_people.values():
             if user_id in people:

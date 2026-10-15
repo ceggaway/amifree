@@ -49,14 +49,15 @@ def group_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
     def button(label, action):
         return InlineKeyboardButton(label, callback_data=f"g:{action}:{event.id}")
 
-    return InlineKeyboardMarkup(
-        [
-            [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")],
-            [button("Am I free?", "free"), button("Save", "save")],
-            # Organiser only; everyone else gets a private refusal.
-            [button("Edit", "edit"), button("Cancel event", "cancel"), button("Nudge", "nudge")],
-        ]
-    )
+    rows = [
+        [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")],
+        [button("Am I free?", "free"), button("Who's going?", "who"), button("I'm here", "here")],
+        [button("Save", "save")] + ([button("Going to all", "goall")] if event.series_id else []),
+        # Organiser only; everyone else gets a private refusal.
+        [button("Edit", "edit"), button("Cancel event", "cancel"), button("Nudge", "nudge")],
+        [button("Status", "status")],
+    ]
+    return InlineKeyboardMarkup(rows)
 
 
 def nudge_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
@@ -64,19 +65,21 @@ def nudge_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(group_keyboard(event).inline_keyboard[:1])
 
 
-def poll_keyboard(poll: Poll) -> InlineKeyboardMarkup:
+def poll_keyboard(poll: Poll, heatmap_url: str | None = None) -> InlineKeyboardMarkup:
     def button(label, action, extra=""):
         data = f"p:{action}:{poll.id}" + (f":{extra}" if extra else "")
         return InlineKeyboardButton(label, callback_data=data)
 
+    heatmap = [[InlineKeyboardButton("📊 Who's free when", url=heatmap_url)]] if heatmap_url else []
     if poll.status == "COLLECTING":
         return InlineKeyboardMarkup(
             [
                 [button("Count me in", "join")],
                 [button("Suggest slots (organiser)", "suggest"), button("Nudge", "nudge")],
+                *heatmap,
             ]
         )
-    rows = [[button("Fill mine", "fill"), button("Count me in", "join")]]
+    rows = [[button("Fill mine", "fill"), button("Count me in", "join")], *heatmap]
     for index in range(len(poll.slots)):
         rows.append(
             [
@@ -90,6 +93,39 @@ def poll_keyboard(poll: Poll) -> InlineKeyboardMarkup:
         + [button("Nudge", "nudge")]
     )
     return InlineKeyboardMarkup(rows)
+
+
+def attendance_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
+    """The "still coming?" answers, sent privately the day before."""
+
+    def button(label, action):
+        return InlineKeyboardButton(label, callback_data=f"c:{action}:{event.id}")
+
+    return InlineKeyboardMarkup(
+        [[button("Still coming", "y"), button("Not sure", "u"), button("Can't anymore", "n")]]
+    )
+
+
+def suggestion_keyboard(suggestion_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Make event card", callback_data=f"d:ok:{suggestion_id}"),
+                InlineKeyboardButton("Ignore", callback_data=f"d:no:{suggestion_id}"),
+            ]
+        ]
+    )
+
+
+def series_keyboard(event: GroupEvent, cancelled: bool) -> InlineKeyboardMarkup:
+    """After the organiser changes one session: apply it to the rest, or stop the series."""
+
+    def button(label, action):
+        return InlineKeyboardButton(label, callback_data=f"ser:{action}:{event.id}")
+
+    if cancelled:
+        return InlineKeyboardMarkup([[button("Cancel all future sessions", "stop")]])
+    return InlineKeyboardMarkup([[button("Apply to all future sessions", "all")]])
 
 
 def confirm_keyboard(nonce: str, label="Confirm update") -> InlineKeyboardMarkup:

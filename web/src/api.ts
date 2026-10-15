@@ -1,5 +1,5 @@
 import { initData } from "./telegram";
-import type { Availability, Block, Me, Plan, Rule } from "./types";
+import type { Availability, Block, Heatmap, Me, Plan, Rule } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -63,6 +63,7 @@ export const api = {
   block: (text: string, confirm: boolean) =>
     request<{ saved: boolean; block: Rule }>("POST", "/api/blocks", { text, confirm }),
   removeBlock: (id: string) => request<void>("DELETE", `/api/blocks/${id}`),
+  pollHeatmap: (id: string) => request<Heatmap>("GET", `/api/polls/${id}/heatmap`),
   patchPlan: (id: string, body: Record<string, unknown>) =>
     request<Plan>("PATCH", `/api/plans/${id}`, body),
 };

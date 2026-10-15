@@ -208,7 +208,7 @@ await check('user deletion cascades to all personal data', async () => {
   await q('delete from events');
 });
 await check('migration ledger and durable update claims behave', async () => {
-  assert.equal((await one('select max(version)::int v from schema_migrations')).v,8);
+  assert.equal((await one('select max(version)::int v from schema_migrations')).v,9);
   const claim = async (id, stale = 120) =>
     (await one('select amifree_claim_update($1,$2) claimed',[id,stale])).claimed;
   assert.equal(await claim(5001),true);
@@ -273,6 +273,45 @@ await check('migration 007 moves a single calendar link and its busy times acros
   assert.deepEqual(left.map(r => r.calendar_id), [second.id]);
   await q('delete from users where id=$1', [legacy.id]);
   assert.equal((await one('select count(*)::int n from personal_calendars where user_id=$1', [legacy.id])).n, 0);
+});
+await check('migration 009: series, attendance, plans and detection are private and consistent', async () => {
+  const organiser = await one('select * from amifree_ensure_user($1)', [1201]);
+  const member = await one('select * from amifree_ensure_user($1)', [1202]);
+  const series = await one("insert into event_series(chat_id,creator_user_id,title,weekdays,start_time,end_time,first_date,until_date) values(-910,$1,'Training','{1,3}','19:00','21:00','2026-10-06','2026-10-15') returning *", [organiser.id]);
+  const session = async (day) => (await one("insert into group_events(chat_id,creator_user_id,title,start_at,end_at,series_id,occurrence_date) values(-910,$1,'Training',$2,$3,$4,$5) returning *", [organiser.id, `${day}T19:00:00+08:00`, `${day}T21:00:00+08:00`, series.id, day]));
+  const first = await session('2026-10-06');
+  await session('2026-10-08');
+  // One session per date per series, and sessions need no source message.
+  await assert.rejects(session('2026-10-06'));
+  assert.equal(first.source_message_id, null);
+  // Editing one session marks only that one, and keeps the "ended" check fresh.
+  await q("update group_events set ended_at=now() where id=$1", [first.id]);
+  const edited = (await q('select * from amifree_update_group_event($1,$2,$3,$4,false)', [organiser.id, first.id, JSON.stringify({title:'Training', start_at:'2026-10-06T20:00:00+08:00', end_at:'2026-10-06T22:00:00+08:00', location:null, notes:null}), first.version])).rows[0];
+  assert.equal(edited.edited_alone, true);
+  assert.equal(edited.ended_at, null);
+  assert.equal((await one("select count(*)::int n from group_events where series_id=$1 and edited_alone", [series.id])).n, 1);
+  // "Still coming?" is a notification kind; unknown kinds are still refused.
+  await q("insert into notification_logs(user_id,kind,dedupe_key) values($1,'CONFIRM','a')", [member.id]);
+  await assert.rejects(q("insert into notification_logs(user_id,kind,dedupe_key) values($1,'OTHER','a')", [member.id]));
+  // One answer and one check-in per person per event.
+  await q("insert into attendance_checks(group_event_id,user_id,answer) values($1,$2,'CONFIRMED')", [first.id, member.id]);
+  await assert.rejects(q("insert into attendance_checks(group_event_id,user_id,answer) values($1,$2,'UNSURE')", [first.id, member.id]));
+  await assert.rejects(q("insert into attendance_checks(group_event_id,user_id,answer) values($1,$2,'MAYBE')", [first.id, organiser.id]));
+  await q("insert into attendance(group_event_id,user_id,marked_by) values($1,$2,$2)", [first.id, member.id]);
+  // The new tables are reachable only with the service key.
+  await db.exec('reset role; set role anon;');
+  for (const table of ['event_series','attendance','attendance_checks','group_plans','group_settings','event_suggestions']) {
+    await assert.rejects(q(`select * from ${table}`), table);
+  }
+  await db.exec('reset role; set role service_role;');
+  // Removing the organiser keeps the series; removing a member removes their attendance.
+  await q('delete from users where id=$1', [member.id]);
+  assert.equal((await one('select count(*)::int n from attendance where group_event_id=$1', [first.id])).n, 0);
+  await q('delete from users where id=$1', [organiser.id]);
+  assert.equal((await one('select count(*)::int n from event_series where id=$1', [series.id])).n, 1);
+  assert.equal((await one('select creator_user_id from event_series where id=$1', [series.id])).creator_user_id, null);
+  await q('delete from group_events where series_id=$1', [series.id]);
+  await q('delete from event_series where id=$1', [series.id]);
 });
 await db.close();
 console.log(`${count} PostgreSQL schema checks passed.`);

@@ -10,6 +10,9 @@ class TelegramTransport(BaseRequest):
     def __init__(self):
         self.calls = []
         self.sent = []
+        self.documents = []
+        self.admins = set()  # telegram ids reported as group admins by getChatMember
+        self.blocked = set()  # telegram ids the bot cannot message
 
     @property
     def read_timeout(self):
@@ -35,7 +38,43 @@ class TelegramTransport(BaseRequest):
                 "first_name": "AmIFree",
                 "username": "AmIFreeTestBot",
             }
+        elif endpoint == "getChatMember":
+            uid = int(params["user_id"])
+            result = {
+                "status": "administrator" if uid in self.admins else "member",
+                "user": {"id": uid, "is_bot": False, "first_name": "Member"},
+            }
+            if uid in self.admins:
+                result["can_be_edited"] = False
+                for flag in (
+                    "is_anonymous can_manage_chat can_delete_messages can_manage_video_chats"
+                    " can_restrict_members can_promote_members can_change_info"
+                    " can_invite_users can_post_stories can_edit_stories can_delete_stories"
+                ).split():
+                    result[flag] = False
+        elif endpoint == "sendDocument":
+            if int(params["chat_id"]) in self.blocked:
+                return 403, json.dumps(
+                    {"ok": False, "error_code": 403, "description": "Forbidden: bot was blocked"}
+                ).encode()
+            files = [f for param in request_data._parameters for f in (param.input_files or [])]
+            self.documents.append(
+                params
+                | {
+                    "filename": files[0].filename if files else None,
+                    "content": files[0].input_file_content if files else b"",
+                }
+            )
+            result = {
+                "message_id": 500 + len(self.documents),
+                "date": 1791100800,
+                "chat": {"id": int(params["chat_id"]), "type": "private"},
+            }
         elif endpoint == "sendMessage":
+            if int(params["chat_id"]) in self.blocked:
+                return 403, json.dumps(
+                    {"ok": False, "error_code": 403, "description": "Forbidden: bot was blocked"}
+                ).encode()
             self.sent.append(params)
             result = {
                 "message_id": 100 + len(self.sent),

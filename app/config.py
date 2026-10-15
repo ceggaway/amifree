@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     session_ttl: int = Field(default=3600, ge=300, le=86400)
     init_data_max_age: int = Field(default=3600, ge=60, le=86400)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    # With both set, poll cards get a button that opens the Mini App heatmap straight from a
+    # group: https://t.me/<bot username>/<short name>?startapp=poll_<id>. Create the short
+    # name with /newapp in BotFather.
+    bot_username: str = ""
+    mini_app_short_name: str = ""
+    # Comma-separated group chat ids with Clubs Pro (CSV export, per-event stats), until payments
+    # exist. Rows in group_plans work too.
+    pro_chat_ids: str = ""
+    # A group card is edited at most this often; changes inside the window are combined.
+    card_edit_interval_seconds: float = Field(default=3.0, ge=0, le=60)
+    # Event detection: language-model checks allowed per group per hour.
+    detection_per_hour: int = Field(default=20, ge=1, le=200)
 
     @model_validator(mode="after")
     def webhook_settings(self):
@@ -67,6 +79,22 @@ class Settings(BaseSettings):
         if secret and len(secret) < 32:
             raise ValueError("SESSION_SECRET must be at least 32 characters")
         return self
+
+    def pro_chats(self) -> set[int]:
+        found = set()
+        for item in self.pro_chat_ids.split(","):
+            item = item.strip()
+            if item.lstrip("-").isdigit():
+                found.add(int(item))
+        return found
+
+    def heatmap_link(self, poll_id: str) -> str | None:
+        if not (self.bot_username and self.mini_app_short_name):
+            return None
+        return (
+            f"https://t.me/{self.bot_username.lstrip('@')}/{self.mini_app_short_name}"
+            f"?startapp=poll_{poll_id}"
+        )
 
     def require_credentials(self):
         missing = [

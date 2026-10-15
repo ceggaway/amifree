@@ -70,6 +70,7 @@ async def test_every_route_rejects_missing_forged_and_expired_sessions(api):
         ("DELETE", "/api/blocks/5f0c1c0e-0000-4000-8000-000000000000"),
         ("PATCH", "/api/plans/5f0c1c0e-0000-4000-8000-000000000000"),
         ("GET", "/api/group-events/5f0c1c0e-0000-4000-8000-000000000000"),
+        ("GET", "/api/polls/5f0c1c0e-0000-4000-8000-000000000000/heatmap"),
     ]
     forged = {"Authorization": "Bearer " + issue_token(1, session_key("1:other-bot"), 3600)}
     for headers in (
@@ -343,3 +344,41 @@ async def test_sign_in_is_rate_limited_per_caller(api):
         "/api/auth/telegram", json=forged, headers={"x-forwarded-for": "9.9.9.9, 10.0.0.1"}
     )
     assert same.status_code == 429
+
+
+async def test_poll_heatmap_is_for_participants_and_shows_counts_only(api, reference):
+    client, service, repo = api
+    from datetime import datetime
+
+    from app.schemas.event import SG
+
+    for telegram_id in (1, 2, 3, 4):
+        await repo.ensure_user(telegram_id)
+        repo.users[telegram_id].coverage_start = datetime(2026, 8, 1, tzinfo=SG)
+    await service.polls.create(1, -500, 10, "sync 1h tomorrow")
+    poll = next(iter(repo.polls.values()))
+    path = f"/api/polls/{poll.id}/heatmap"
+    # Signed in, but not in the poll: indistinguishable from a poll that doesn't exist.
+    assert (await client.get(path, headers=bearer(4))).status_code == 404
+    assert (await client.get(path)).status_code == 401
+    assert (await client.get("/api/polls/not-an-id/heatmap", headers=bearer(1))).status_code == 404
+    # One person's schedule is too few to show without exposing it.
+    thin = (await client.get(path, headers=bearer(1))).json()
+    assert thin["ready"] is False and thin["days"] == [] and thin["joined"] == 1
+    for telegram_id in (2, 3):
+        await repo.poll_join(poll.id, (await repo.ensure_user(telegram_id)).id)
+    found = (await client.get(path, headers=bearer(2))).json()
+    assert found["ready"] is True and found["max_free"] == 3 and found["days"]
+    assert set(found["days"][0]["cells"][0]) == {"start_at", "free"}
+    assert found["title"] == "sync" and found["duration_minutes"] == 60
+
+
+async def test_heatmap_refreshes_are_rate_limited(api):
+    client, service, repo = api
+    await service.polls.create(1, -500, 11, "sync 1h tomorrow")
+    poll = next(iter(repo.polls.values()))
+    codes = [
+        (await client.get(f"/api/polls/{poll.id}/heatmap", headers=bearer(1))).status_code
+        for _ in range(21)
+    ]
+    assert codes[:20] == [200] * 20 and codes[20] == 429

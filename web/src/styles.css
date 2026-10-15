@@ -36,3 +36,10 @@ input { width: 100%; padding: 10px; border: 1px solid var(--hint); border-radius
 .banner.ok { border-left: 4px solid #2e9d5b; }
 .banner.info { border-left: 4px solid var(--accent); }
 .slot { display: grid; grid-template-columns: 96px 1fr auto; gap: 8px; padding: 6px 0; border-top: 1px solid var(--bg); }
+
+.heat-scroll { overflow-x: auto; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+.heat-grid { display: grid; gap: 2px; min-width: 100%; }
+.heat-head { position: sticky; top: 0; text-align: center; font-size: 12px; padding: 4px 0; background: var(--bg); scroll-snap-align: start; }
+.heat-time { font-size: 11px; color: var(--hint); align-self: center; }
+.heat-cell { min-height: 28px; padding: 0; border-radius: 4px; background: var(--accent); color: var(--accent-text); font-size: 12px; }
+.heat-cell.gone { background: transparent; }

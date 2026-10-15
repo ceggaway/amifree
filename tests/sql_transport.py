@@ -93,6 +93,12 @@ TABLES = {
     "poll_votes",
     "schema_migrations",
     "processed_updates",
+    "event_series",
+    "attendance",
+    "attendance_checks",
+    "group_plans",
+    "group_settings",
+    "event_suggestions",
 }
 COLUMNS = {
     "version",
@@ -141,6 +147,29 @@ COLUMNS = {
     "dm_blocked",
     "poll_id",
     "window_end",
+    "deadline_at",
+    "display_name",
+    "username",
+    "series_id",
+    "occurrence_date",
+    "edited_alone",
+    "ended_at",
+    "answer",
+    "present",
+    "marked_by",
+    "tier",
+    "expires_at",
+    "detection_enabled",
+    "enabled_by_telegram_id",
+    "enabled_at",
+    "draft",
+    "source_message_id",
+    "weekdays",
+    "first_date",
+    "creator_user_id",
+    "location",
+    "notes",
+    "assumed_duration",
 }
 
 
@@ -190,7 +219,7 @@ class SQLGateway:
         assert endpoint in TABLES
         values, conditions = [], []
         for key, value in request.url.params.multi_items():
-            if key in ("select", "order", "limit", "offset"):
+            if key in ("select", "order", "limit", "offset", "on_conflict"):
                 continue
             if key == "or":
                 # e.g. (checked_at.is.null,checked_at.lt.2026-10-13T00:00:00Z)
@@ -207,7 +236,7 @@ class SQLGateway:
                         parts.append(f"{column}{operator}${len(values)}")
                 conditions.append("(" + " or ".join(parts) + ")")
                 continue
-            assert key in COLUMNS
+            assert key in COLUMNS, key
             op, operand = value.split(".", 1)
             if op == "in":
                 items = [item.strip('"') for item in operand.strip("()").split(",")]
@@ -244,8 +273,20 @@ class SQLGateway:
             sql = f"update {endpoint} set {','.join(assignments)}{where} returning *"
         elif request.method == "POST":
             assert all(key in COLUMNS for key in body)
-            values = list(body.values())
-            sql = f"insert into {endpoint}({','.join(body)}) values({','.join(f'${i + 1}' for i in range(len(values)))}) returning *"
+            # PostgreSQL array columns take {1,3}, not the JSON the client library sends.
+            values = [
+                "{" + ",".join(map(str, v)) + "}" if k == "weekdays" else v for k, v in body.items()
+            ]
+            sql = f"insert into {endpoint}({','.join(body)}) values({','.join(f'${i + 1}' for i in range(len(values)))})"
+            conflict = request.url.params.get("on_conflict")
+            if conflict:
+                # PostgREST upsert: Prefer: resolution=merge-duplicates
+                assert all(c in COLUMNS for c in conflict.split(","))
+                updates = [k for k in body if k not in conflict.split(",")]
+                sql += f" on conflict({conflict}) do update set " + ",".join(
+                    f"{k}=excluded.{k}" for k in updates
+                )
+            sql += " returning *"
         elif request.method == "DELETE":
             sql = f"delete from {endpoint}{where} returning *"
         else:

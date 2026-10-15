@@ -8,13 +8,22 @@ from supabase import AsyncClient
 
 from app.models.timetable import BlockRule, BusyBlock
 from app.models.user import PersonalCalendar, User
-from app.schemas.event import SG, Event, EventDraft, GroupEvent, Poll, Status
+from app.schemas.event import (
+    SG,
+    Event,
+    EventDraft,
+    EventSeries,
+    GroupEvent,
+    Poll,
+    Status,
+    Suggestion,
+)
 from app.services.nusmods import ImportResult
 from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -45,9 +54,16 @@ class SupabaseRepository:
             "event_extractions": "id",
             "user_actions": "id",
             "manual_busy_blocks": "id",
-            "group_events": "id",
             "notification_logs": "id",
-            "polls": "id",
+            "polls": "id,deadline_at",
+            "group_members": "chat_id,user_id,display_name,username",
+            "group_events": "id,series_id,occurrence_date,edited_alone,ended_at",
+            "event_series": "id",
+            "attendance": "group_event_id",
+            "attendance_checks": "group_event_id",
+            "group_plans": "chat_id",
+            "group_settings": "chat_id",
+            "event_suggestions": "id",
             "personal_calendars": "id,user_id,url_hash,label,synced_at,checked_at,error",
             "calendar_busy_blocks": "id,user_id,calendar_id,start_at,end_at",
             "schema_migrations": "version,name",
@@ -371,13 +387,14 @@ class SupabaseRepository:
         ).execute()
         return GroupEvent.model_validate(result.data[0])
 
-    async def set_group_message(self, group_event_id: str, message_id: int):
-        await (
-            self.client.table("group_events")
-            .update({"message_id": message_id})
-            .eq("id", group_event_id)
-            .execute()
-        )
+    async def set_group_message(
+        self, group_event_id: str, message_id: int, posted_at: datetime | None = None
+    ):
+        changes = {"message_id": message_id}
+        if posted_at:
+            # A series session counts as new when its card appears, for the chase timing.
+            changes["created_at"] = posted_at.isoformat()
+        await self.client.table("group_events").update(changes).eq("id", group_event_id).execute()
 
     async def get_group_event(self, group_event_id: str) -> GroupEvent | None:
         result = (
@@ -389,10 +406,20 @@ class SupabaseRepository:
         )
         return GroupEvent.model_validate(result.data[0]) if result.data else None
 
-    async def touch_member(self, chat_id: int, user_id: str):
+    async def touch_member(
+        self, chat_id: int, user_id: str, name: str | None = None, username: str | None = None
+    ):
         await self.client.rpc(
             "amifree_touch_member", {"p_chat_id": chat_id, "p_user_id": user_id}
         ).execute()
+        if name or username:
+            await (
+                self.client.table("group_members")
+                .update({"display_name": name, "username": username})
+                .eq("chat_id", chat_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
 
     async def linked_event(self, user_id: str, group_event_id: str) -> Event | None:
         result = (
@@ -593,6 +620,21 @@ class SupabaseRepository:
         age = max(0, int((now - oldest).total_seconds())) if oldest else None
         return counts | {"oldest_undelivered_seconds": age}
 
+    async def drop_pending_notifications(self, kind: str, keys: list[str]) -> list[str]:
+        """Remove queued, unsent messages; returns whose they were."""
+        dropped = []
+        for start in range(0, len(keys), 50):
+            rows = (
+                await self.client.table("notification_logs")
+                .delete()
+                .eq("kind", kind)
+                .eq("status", "pending")
+                .in_("dedupe_key", keys[start : start + 50])
+                .execute()
+            ).data
+            dropped += [r["user_id"] for r in rows]
+        return dropped
+
     async def finish_notification(self, notification_id: str, ok: bool, permanent: bool):
         await self.client.rpc(
             "amifree_finish_notification",
@@ -608,6 +650,7 @@ class SupabaseRepository:
         minutes: int,
         start: datetime,
         end: datetime,
+        deadline: datetime | None = None,
     ) -> Poll:
         result = await self.client.rpc(
             "amifree_create_poll",
@@ -621,7 +664,28 @@ class SupabaseRepository:
                 "p_window_end": end.isoformat(),
             },
         ).execute()
-        return Poll.model_validate(result.data[0])
+        poll = Poll.model_validate(result.data[0])
+        if deadline and poll.deadline_at is None:
+            await (
+                self.client.table("polls")
+                .update({"deadline_at": deadline.isoformat()})
+                .eq("id", poll.id)
+                .execute()
+            )
+            poll.deadline_at = deadline
+        return poll
+
+    async def polls_past_deadline(self, now: datetime) -> list[Poll]:
+        rows = (
+            await self.client.table("polls")
+            .select("*")
+            .eq("status", "COLLECTING")
+            .lte("deadline_at", now.isoformat())
+            .gt("window_end", now.isoformat())
+            .limit(200)
+            .execute()
+        ).data
+        return [Poll.model_validate(r) for r in rows]
 
     async def set_poll_message(self, poll_id: str, message_id: int):
         await (
@@ -699,6 +763,8 @@ class SupabaseRepository:
             await self.client.table("group_events")
             .select("*")
             .eq("status", "ACTIVE")
+            # Only cards in the group: unposted series sessions must not fill the page.
+            .gt("message_id", 0)
             .lte("created_at", created_before.isoformat())
             .gte("created_at", oldest)
             .gt("start_at", now.isoformat())
@@ -754,3 +820,337 @@ class SupabaseRepository:
 
     async def cleanup(self, days: int):
         await self.client.rpc("amifree_cleanup", {"p_retention_days": days}).execute()
+
+    # ---- group features: names, series, attendance, plans, detection ----
+
+    async def member_names(self, chat_id: int) -> dict[str, tuple[str | None, str | None]]:
+        rows = (
+            await self.client.table("group_members")
+            .select("user_id,display_name,username")
+            .eq("chat_id", chat_id)
+            .limit(1000)
+            .execute()
+        ).data
+        return {r["user_id"]: (r.get("display_name"), r.get("username")) for r in rows}
+
+    async def group_answers(self, group_event_id: str) -> dict[str, str]:
+        """Each responder's answer on a card: user id -> GOING, MAYBE, DECLINED or SAVED."""
+        rows = (
+            await self.client.table("events")
+            .select("user_id,status")
+            .eq("group_event_id", group_event_id)
+            .limit(1000)
+            .execute()
+        ).data
+        return {r["user_id"]: r["status"] for r in rows}
+
+    async def group_events_starting(self, start: datetime, end: datetime) -> list[GroupEvent]:
+        rows = (
+            await self.client.table("group_events")
+            .select("*")
+            .eq("status", "ACTIVE")
+            .gte("start_at", start.isoformat())
+            .lt("start_at", end.isoformat())
+            .order("start_at", desc=False)
+            .limit(500)
+            .execute()
+        ).data
+        return [GroupEvent.model_validate(r) for r in rows]
+
+    async def ended_group_events(self, now: datetime) -> list[GroupEvent]:
+        """Cards that finished in the last week and were not yet redrawn as ended."""
+        rows = (
+            await self.client.table("group_events")
+            .select("*")
+            .eq("status", "ACTIVE")
+            .lte("end_at", now.isoformat())
+            .gte("end_at", (now - timedelta(days=7)).isoformat())
+            .limit(500)
+            .execute()
+        ).data
+        found = [GroupEvent.model_validate(r) for r in rows]
+        return [g for g in found if g.ended_at is None and (g.message_id or 0) > 0]
+
+    async def mark_ended(self, group_event_id: str, when: datetime):
+        await (
+            self.client.table("group_events")
+            .update({"ended_at": when.isoformat()})
+            .eq("id", group_event_id)
+            .execute()
+        )
+
+    async def set_attendance_check(self, group_event_id: str, user_id: str, answer: str):
+        await (
+            self.client.table("attendance_checks")
+            .upsert(
+                {"group_event_id": group_event_id, "user_id": user_id, "answer": answer},
+                on_conflict="group_event_id,user_id",
+            )
+            .execute()
+        )
+
+    async def attendance_checks(self, group_event_id: str) -> dict[str, str]:
+        rows = (
+            await self.client.table("attendance_checks")
+            .select("user_id,answer")
+            .eq("group_event_id", group_event_id)
+            .limit(1000)
+            .execute()
+        ).data
+        return {r["user_id"]: r["answer"] for r in rows}
+
+    async def check_in(self, group_event_id: str, user_id: str, marked_by: str):
+        await (
+            self.client.table("attendance")
+            .upsert(
+                {
+                    "group_event_id": group_event_id,
+                    "user_id": user_id,
+                    "present": True,
+                    "marked_by": marked_by,
+                },
+                on_conflict="group_event_id,user_id",
+            )
+            .execute()
+        )
+
+    async def attendees(self, group_event_id: str) -> set[str]:
+        rows = (
+            await self.client.table("attendance")
+            .select("user_id,present")
+            .eq("group_event_id", group_event_id)
+            .limit(1000)
+            .execute()
+        ).data
+        return {r["user_id"] for r in rows if r["present"]}
+
+    async def create_series(
+        self,
+        user_id: str,
+        chat_id: int,
+        message_id: int,
+        fields: dict,
+    ) -> EventSeries:
+        existing = (
+            await self.client.table("event_series")
+            .select("*")
+            .eq("chat_id", chat_id)
+            .eq("source_message_id", message_id)
+            .limit(1)
+            .execute()
+        ).data
+        if existing:
+            return EventSeries.model_validate(existing[0])
+        row = (
+            await self.client.table("event_series")
+            .insert(
+                {
+                    "chat_id": chat_id,
+                    "source_message_id": message_id,
+                    "creator_user_id": user_id,
+                    **fields,
+                }
+            )
+            .execute()
+        ).data[0]
+        await self.touch_member(chat_id, user_id)
+        return EventSeries.model_validate(row)
+
+    async def get_series(self, series_id: str) -> EventSeries | None:
+        rows = (
+            await self.client.table("event_series")
+            .select("*")
+            .eq("id", series_id)
+            .limit(1)
+            .execute()
+        ).data
+        return EventSeries.model_validate(rows[0]) if rows else None
+
+    async def update_series(self, series_id: str, **fields):
+        await self.client.table("event_series").update(fields).eq("id", series_id).execute()
+
+    async def series_sessions(self, series_id: str) -> list[GroupEvent]:
+        rows = (
+            await self.client.table("group_events")
+            .select("*")
+            .eq("series_id", series_id)
+            .order("occurrence_date", desc=False)
+            .limit(200)
+            .execute()
+        ).data
+        return [GroupEvent.model_validate(r) for r in rows]
+
+    async def create_session(
+        self,
+        series: EventSeries,
+        day,
+        draft: EventDraft,
+        source_message_id: int | None = None,
+    ) -> GroupEvent:
+        """One dated session of a series; repeating the call returns the same row."""
+        existing = (
+            await self.client.table("group_events")
+            .select("*")
+            .eq("series_id", series.id)
+            .eq("occurrence_date", day.isoformat())
+            .limit(1)
+            .execute()
+        ).data
+        if existing:
+            return GroupEvent.model_validate(existing[0])
+        row = {
+            "chat_id": series.chat_id,
+            "source_message_id": source_message_id,
+            "creator_user_id": series.creator_user_id,
+            "title": draft.title,
+            "start_at": draft.start_at.isoformat(),
+            "end_at": draft.end_at.isoformat(),
+            "location": draft.location,
+            "notes": draft.notes,
+            "assumed_duration": draft.assumed_duration,
+            "series_id": series.id,
+            "occurrence_date": day.isoformat(),
+        }
+        created = (await self.client.table("group_events").insert(row).execute()).data[0]
+        return GroupEvent.model_validate(created)
+
+    async def clear_edited(self, group_event_ids: list[str]):
+        for group_event_id in group_event_ids:
+            await (
+                self.client.table("group_events")
+                .update({"edited_alone": False})
+                .eq("id", group_event_id)
+                .execute()
+            )
+
+    async def unposted_sessions(self, start: datetime, end: datetime) -> list[GroupEvent]:
+        found = await self.group_events_starting(start, end)
+        return [g for g in found if g.series_id and not g.message_id]
+
+    async def chat_events_by(
+        self, chat_id: int, creator_user_id: str, since: datetime
+    ) -> list[GroupEvent]:
+        rows = (
+            await self.client.table("group_events")
+            .select("*")
+            .eq("chat_id", chat_id)
+            .eq("creator_user_id", creator_user_id)
+            .gte("start_at", since.isoformat())
+            .order("start_at", desc=False)
+            .limit(500)
+            .execute()
+        ).data
+        return [GroupEvent.model_validate(r) for r in rows]
+
+    async def group_tier(self, chat_id: int, now: datetime) -> str:
+        rows = (
+            await self.client.table("group_plans")
+            .select("*")
+            .eq("chat_id", chat_id)
+            .limit(1)
+            .execute()
+        ).data
+        if not rows or rows[0]["tier"] != "PRO":
+            return "FREE"
+        expires = rows[0].get("expires_at")
+        if expires and datetime.fromisoformat(expires.replace("Z", "+00:00")) <= now:
+            return "FREE"
+        return "PRO"
+
+    async def set_group_tier(self, chat_id: int, tier: str, expires_at: datetime | None = None):
+        await (
+            self.client.table("group_plans")
+            .upsert(
+                {
+                    "chat_id": chat_id,
+                    "tier": tier,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+                on_conflict="chat_id",
+            )
+            .execute()
+        )
+
+    async def detection_enabled(self, chat_id: int) -> bool:
+        rows = (
+            await self.client.table("group_settings")
+            .select("detection_enabled")
+            .eq("chat_id", chat_id)
+            .limit(1)
+            .execute()
+        ).data
+        return bool(rows and rows[0]["detection_enabled"])
+
+    async def set_detection(self, chat_id: int, enabled: bool, telegram_id: int):
+        await (
+            self.client.table("group_settings")
+            .upsert(
+                {
+                    "chat_id": chat_id,
+                    "detection_enabled": enabled,
+                    "enabled_by_telegram_id": telegram_id if enabled else None,
+                    "enabled_at": datetime.now(UTC).isoformat() if enabled else None,
+                },
+                on_conflict="chat_id",
+            )
+            .execute()
+        )
+
+    async def create_suggestion(
+        self, chat_id: int, source_message_id: int, draft: EventDraft
+    ) -> Suggestion | None:
+        """None when this message already has a suggestion (a retried delivery)."""
+        found = (
+            await self.client.table("event_suggestions")
+            .select("id")
+            .eq("chat_id", chat_id)
+            .eq("source_message_id", source_message_id)
+            .limit(1)
+            .execute()
+        ).data
+        if found:
+            return None
+        row = (
+            await self.client.table("event_suggestions")
+            .insert(
+                {
+                    "chat_id": chat_id,
+                    "source_message_id": source_message_id,
+                    "draft": draft.model_dump(mode="json"),
+                }
+            )
+            .execute()
+        ).data[0]
+        return Suggestion.model_validate(row)
+
+    async def get_suggestion(self, suggestion_id: str) -> Suggestion | None:
+        rows = (
+            await self.client.table("event_suggestions")
+            .select("*")
+            .eq("id", suggestion_id)
+            .limit(1)
+            .execute()
+        ).data
+        return Suggestion.model_validate(rows[0]) if rows else None
+
+    async def set_suggestion_message(self, suggestion_id: str, message_id: int):
+        await (
+            self.client.table("event_suggestions")
+            .update({"message_id": message_id})
+            .eq("id", suggestion_id)
+            .execute()
+        )
+
+    async def delete_suggestion(self, suggestion_id: str):
+        await self.client.table("event_suggestions").delete().eq("id", suggestion_id).execute()
+
+    async def expired_suggestions(self, before: datetime) -> list[Suggestion]:
+        rows = (
+            await self.client.table("event_suggestions")
+            .select("*")
+            .lte("created_at", before.isoformat())
+            .limit(200)
+            .execute()
+        ).data
+        return [Suggestion.model_validate(r) for r in rows]

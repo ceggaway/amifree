@@ -69,13 +69,20 @@ def resolve_date(raw: str, reference: datetime) -> date:
     raw = re.sub(r"^(?:on\s+)?(?:the\s+)?", "", raw).strip(" ,.")
     if raw in RELATIVE:
         return today + timedelta(days=RELATIVE[raw])
-    # A weekday written alongside a full date ("Tue 13 Oct", "Saturday, 17 October") must agree.
-    combo = re.fullmatch(r"([a-z]+),?\s+(\d.*|[a-z]{3,9}\s+\d.*)", raw)
-    if combo and combo[1] in _WEEKDAY_ABBR:
-        resolved = resolve_date(combo[2], reference)
-        if resolved.weekday() != _WEEKDAY_ABBR[combo[1]]:
+    # A weekday next to a full date must agree, in either order: "Tue 13 Oct", "22nd October, Thursday".
+    before = re.fullmatch(r"([a-z]+),?\s+(\d.*|[a-z]{3,9}\s+\d.*)", raw)
+    after = re.fullmatch(r"(\d.*?|[a-z]{3,9}\s+\d.*?)[,\s]+([a-z]+)", raw)
+    combo = None
+    if before and before[1] in _WEEKDAY_ABBR:
+        combo = (before[1], before[2])
+    elif after and after[2] in _WEEKDAY_ABBR:
+        combo = (after[2], after[1])
+    if combo:
+        weekday, rest = combo
+        resolved = resolve_date(rest, reference)
+        if resolved.weekday() != _WEEKDAY_ABBR[weekday]:
             raise Clarification(
-                f"{resolved:%d %b} is a {resolved:%A}, not a {WEEKDAYS[_WEEKDAY_ABBR[combo[1]]].title()}. Which date is it?"
+                f"{resolved:%d %b} is a {resolved:%A}, not a {WEEKDAYS[_WEEKDAY_ABBR[weekday]].title()}. Which date is it?"
             )
         return resolved
     # A bare day of the month ("17th"): the next time that day comes round.
@@ -231,6 +238,79 @@ def time_ranges(text: str) -> set[str]:
     return found
 
 
+def asked_field(question: str) -> str | None:
+    """Which detail a clarifying question asked for, so the reply can fill it directly."""
+    if question.startswith("What time does this event end"):
+        return "end"
+    if question.startswith("What time does this event start"):
+        return "start"
+    if question.startswith(("What date is this event", "What is the event date")):
+        return "date"
+    if "What's the due date?" in question:
+        return "date"
+    return None
+
+
+_ANSWER_LEAD = re.compile(
+    r"^(?:it\s+)?(?:(?:ends?|starts?)(?:\s+at)?|till|until|to|at|from|on)\s+", re.I
+)
+
+
+def infer_meridiem(previous: Extraction, asked: str | None, reply: str) -> str:
+    """A bare "8" after a 7pm start means 8pm: add the am/pm that puts the end after the start."""
+    answer = _ANSWER_LEAD.sub("", reply.strip().strip(".!")).strip()
+    if asked != "end" or not re.fullmatch(r"\d{1,2}(?:\.\d{2})?", answer):
+        return reply
+    try:
+        start = resolve_time(previous.start_time_text or "")
+    except Clarification:
+        return reply
+    for suffix in ("am", "pm"):
+        try:
+            if resolve_time(answer + suffix) > start:
+                return f"{reply.strip()}{suffix}"
+        except Clarification:
+            continue
+    return reply
+
+
+def fill_answer(previous: Extraction, asked: str, reply: str, reference: datetime):
+    """Fill the asked-for detail from a short reply ("8PM", "2000", "7-9pm", "15 oct").
+
+    Returns the completed extraction, or None when the reply doesn't simply answer the
+    question; the caller then lets the language model read it as before.
+    """
+    answer = _ANSWER_LEAD.sub("", reply.strip().strip(".!")).strip()
+    if not answer or len(answer) > 40:
+        return None
+    if asked in ("start", "end"):
+        both = re.fullmatch(rf"(.+?){_SEP}(.+)", answer)
+        try:
+            if both:
+                resolve_time(both[2])  # the end must be a real time; the start may borrow its am/pm
+                if not re.fullmatch(rf"{_NUM}\s*(?:[ap]\.?m\.?|hrs?)?|noon", both[1].strip(), re.I):
+                    return None
+                return previous.model_copy(
+                    update={
+                        "start_time_text": both[1].strip(),
+                        "end_time_text": both[2].strip(),
+                        "ambiguity": None,
+                    }
+                )
+            resolve_time(answer)
+        except Clarification:
+            return None
+        field = "end_time_text" if asked == "end" else "start_time_text"
+        return previous.model_copy(update={field: answer, "ambiguity": None})
+    if asked == "date":
+        try:
+            resolve_date(answer, reference)
+        except Clarification:
+            return None
+        return previous.model_copy(update={"date_text": answer, "ambiguity": None})
+    return None
+
+
 def single_event_guard(text: str) -> None:
     """A fresh message with two different time ranges is almost always two events."""
     if len(time_ranges(text)) >= 2:
@@ -384,9 +464,7 @@ def validate_extraction(
     if not extraction.date_text and existing is None:
         raise Clarification("What date is this event?")
     if not extraction.start_time_text and existing is None:
-        raise Clarification(
-            "What time does this event start? Please type in 24-hour time (eg. 07:00, 18:00)."
-        )
+        raise Clarification("What time does this event start? For example 7pm or 19:00.")
     d = (
         resolve_date(extraction.date_text, reference)
         if extraction.date_text
@@ -431,9 +509,7 @@ def validate_extraction(
         end = start + timedelta(minutes=default_minutes)
         assumed = True
     else:
-        raise Clarification(
-            "What time does this event end? Please type in 24-hour time (eg. 07:00, 18:00)."
-        )
+        raise Clarification("What time does this event end? For example 9pm or 21:00.")
     if end <= start:
         raise Clarification(
             "The end time must follow the start. For an overnight event, include the end date."

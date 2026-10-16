@@ -12,6 +12,7 @@ HELP = """Forward me a plan and I'll save it and tell you if it clashes.
 1. Forward a text invitation with a date and time.
    Or ask: /free fri 7-9pm, /free tomorrow.
 2. Check the card, then tap Save, Going, Maybe, or Can't make it.
+   Forward a deadline ("report due Fri 11:59pm") and I'll remind you the day before.
 3. Optional: send your NUSMods Share/Sync link so classes and exams are checked too.
 
 I check your AmIFree Going plans, your busy blocks, any imported NUSMods timetable and,
@@ -37,6 +38,8 @@ I never read group chats, and your schedule is never shown to a group.
 /block — mark yourself busy, e.g. "busy sat 2–6pm" or "work every Wed 6–10pm"
 /blocks — list or remove busy blocks
 /usual — your usual free times for group polls
+/deadline — save something due, e.g. "/deadline CS3244 report fri 11:59pm"
+/deadlines — upcoming deadlines; tap Done when handed in
 /reminders — turn the night-before summary on or off
 /events — every recent card, including unsaved previews
 /cancel — stop a pending clarification or edit

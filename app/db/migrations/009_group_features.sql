@@ -41,7 +41,8 @@ alter table public.group_members add column if not exists username text;
 
 alter table public.notification_logs drop constraint if exists notification_logs_kind_check;
 alter table public.notification_logs add constraint notification_logs_kind_check
-  check (kind in ('NIGHTLY','CHANGE','NUDGE','CONFIRM'));
+  -- DEADLINE comes from 012_deadlines.sql; keep it so either order leaves both valid.
+  check (kind in ('NIGHTLY','CHANGE','NUDGE','CONFIRM','DEADLINE'));
 
 -- "Still coming?" answers. No row means the member has not answered.
 create table if not exists public.attendance_checks (

@@ -59,8 +59,7 @@ async def test_clarification_survives_service_restart(service_factory, reference
     card = (await restarted.message(1, 3, "7–9pm", reference + timedelta(days=10)))[0]
     assert "09 Oct 2026" in card.text
     assert "No clashes found" in card.text
-    assert service.extractor.calls[-1][1] == reference
-    assert service.extractor.calls[-1][2] is not None
+    assert len(service.extractor.calls) == 1  # "7–9pm" answers the question without the AI
 
 
 async def test_repeat_callback_and_duplicate_message(service_factory, reference):

@@ -104,6 +104,7 @@ TABLES = {
     "poll_availability",
     "pro_payments",
     "weekly_availability",
+    "deadlines",
 }
 COLUMNS = {
     "version",
@@ -111,6 +112,11 @@ COLUMNS = {
     "update_id",
     "claimed_at",
     "id",
+    "title",
+    "due_at",
+    "notes",
+    "done",
+    "source_message_id",
     "calendar_feed_token",
     "calendar_feed_seen_at",
     "personal_calendar_url",
@@ -138,7 +144,6 @@ COLUMNS = {
     "raw_text",
     "extracted_json",
     "validation_state",
-    "title",
     "kind",
     "weekday",
     "start_time",
@@ -168,12 +173,10 @@ COLUMNS = {
     "enabled_by_telegram_id",
     "enabled_at",
     "draft",
-    "source_message_id",
     "weekdays",
     "first_date",
     "creator_user_id",
     "location",
-    "notes",
     "assumed_duration",
     "free",
     "charge_id",
@@ -266,7 +269,7 @@ class SQLGateway:
                 conditions.append(f"{key} is null")
                 continue
             operator = {"eq": "=", "neq": "<>", "lt": "<", "gt": ">", "gte": ">=", "lte": "<="}[op]
-            values.append(operand)
+            values.append({"true": True, "false": False}.get(operand, operand))
             conditions.append(f"{key}{operator}${len(values)}")
         where = " where " + " and ".join(conditions) if conditions else ""
         if request.method == "GET":

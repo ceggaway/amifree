@@ -55,7 +55,9 @@ def parse_block(text: str, reference: datetime, *, explicit: bool = False) -> Bl
         text = text[: match.start()].strip()
     times = RANGE.search(text)
     if not times:
-        raise Clarification("What time is this block? " + USAGE)
+        raise Clarification(
+            "What time is this block? Send the start and end, like 6:30-7pm or 18:30-19:00."
+        )
     head = text[: times.start()].strip(" ,")
     if weekly_day:
         weekly = EVERY.search(head)

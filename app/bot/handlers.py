@@ -511,6 +511,8 @@ def register_handlers(application: Application, service):
                 "events",
                 "block",
                 "blocks",
+                "deadline",
+                "deadlines",
                 "reminders",
                 "calendar",
                 "usual",

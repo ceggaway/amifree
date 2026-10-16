@@ -13,8 +13,10 @@ from uuid import UUID
 from app.bot import onboarding
 from app.bot.keyboards import (
     calendar_settings_keyboard,
+    change_keyboard,
     choose_keyboard,
     confirm_keyboard,
+    deadline_keyboard,
     free_keyboard,
     page_keyboard,
     personal_calendars_keyboard,
@@ -40,11 +42,15 @@ from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
     WEEKDAYS,
     Clarification,
-    resolve_time,
+    asked_field,
+    fill_answer,
+    infer_meridiem,
     single_event_guard,
     validate_extraction,
     weekly_weekday,
 )
+from app.services.deadlines import EXAMPLE as DEADLINE_EXAMPLE
+from app.services.deadlines import card_text, due_line, validate_deadline
 from app.services.detection import DetectionService
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
@@ -86,16 +92,6 @@ FEED_PAST, FEED_AHEAD = timedelta(days=30), timedelta(days=400)
 FEED_SEEN_EVERY = timedelta(minutes=10)
 CALENDAR_REFRESH = timedelta(hours=1)
 # Link previews fetch the feed too; they must not count as the user's calendar subscribing.
-ASKED_TIME = {
-    "end_time": "What time does this event end?",
-    "start_time": "What time does this event start?",
-}
-BARE_TIME = re.compile(
-    r"(?:at\s+)?(?:\d{1,2}(?:[:.]\d{2})?\s*(?:[ap]\.?m\.?)?|\d{3,4}\s*(?:hrs?|h)?|noon|midnight)",
-    re.IGNORECASE,
-)
-
-
 TIMEISH = re.compile(r"\d{1,2}[:.]\d{2}|\d\s*[ap]\.?m\b|\b\d{4}\b|\bnoon\b|\bmidnight\b", re.I)
 # Words that make a reply small talk rather than a place ("ok thanks", "never mind").
 NOT_A_VENUE = frozenset(
@@ -136,56 +132,6 @@ def bare_venue(extracted: Extraction, previous: dict | None, text: str) -> Extra
     return extracted.model_copy(update={"location": answer})
 
 
-def answer_asked_time(
-    asked: str, previous: dict | None, text: str
-) -> tuple[Extraction, str] | None:
-    """The previous draft with the time just asked for filled in, when the reply is only a time.
-
-    Returns (draft, the time as understood), or None for anything else so wordier answers
-    still go through the extractor. Raises Clarification for a time that needs more.
-    An end time given as a bare hour takes the first am/pm after the start: "9" after a
-    7pm start is 9pm."""
-    answer = text.strip()
-    if not previous or not BARE_TIME.fullmatch(answer):
-        return None
-    answer = re.sub(r"^at\s+", "", answer, flags=re.I).strip()
-    try:
-        resolve_time(answer)
-    except Clarification:
-        inferred = (
-            _after_start(answer, previous.get("start_time_text")) if asked == "end_time" else None
-        )
-        if inferred is None:
-            raise
-        answer = inferred
-    field = {"end_time": "end_time_text", "start_time": "start_time_text"}[asked]
-    update = {field: answer, "ambiguity": None}
-    if asked == "end_time":
-        update["end_date_text"] = None
-    return Extraction.model_validate(previous).model_copy(update=update), answer
-
-
-def _after_start(answer: str, start_text: str | None) -> str | None:
-    """ "9" or "9.30" as am or pm, whichever comes first after the start time; None if unclear."""
-    if not start_text or not re.fullmatch(r"\d{1,2}(?:[:.]\d{2})?", answer):
-        return None
-    try:
-        start = resolve_time(start_text)
-        options = [(resolve_time(answer + suffix), suffix) for suffix in ("am", "pm")]
-    except Clarification:
-        return None
-    later = sorted((t, suffix) for t, suffix in options if t > start)
-    return answer + later[0][1] if later else None
-
-
-# How long the bot waits for a typed answer to "When do you want to check?" or
-# "What time is this block?" before treating the next message as a new one.
-PROMPT_TTL = timedelta(minutes=15)
-MAX_FREE_LINES = 8  # busy items listed per day by /free
-FREE_PROMPT = (
-    "When do you want to check? Tap a button, or type a date or time,"
-    " like 15 oct, fri, next week or fri 7-9pm."
-)
 FREE_EXAMPLES = "For example: /free fri 7-9pm, /free 15 oct or /free next week"
 USUAL_HELP = (
     "Tell me when you're usually free and group polls will start from it.\n"
@@ -194,6 +140,11 @@ USUAL_HELP = (
 )
 SLOW_DOWN = "You're sending a lot very quickly. Give me a minute, then try again."
 PREVIEW_BOTS = ("telegrambot", "whatsapp", "facebookexternalhit", "slackbot", "discordbot")
+# A lone time in a block with no range ("busy 14 oct 18:30"); never a date such as "14 oct".
+BLOCK_TIME = re.compile(
+    r"(?<![\w/])(?:at\s+)?(?:\d{1,2}[:.]\d{2}\s*(?:[ap]m)?|\d{1,2}\s*[ap]m|\d{4}\s*hrs?)(?![\w/])",
+    re.I,
+)
 
 
 def synced(user: User) -> bool:
@@ -376,16 +327,36 @@ class SchedulingService:
             return [Reply(f"Reminders are {state}. Send /reminders on or /reminders off.")]
         if command == "block":
             if not args:
-                return [Reply("Tell me when you're busy. " + USAGE)]
+                await self.repo.set_pending(user.id, {"stage": "block_time", "text": ""})
+                return [Reply("When are you busy? " + USAGE + "\n/cancel to stop.")]
             try:
                 rule = parse_block(args, self.clock(), explicit=True)
             except Clarification as exc:
-                return [Reply(str(exc))]
+                return await self.ask_block_time(user, args, exc)
             return await self.preview_block(user, rule)
         if command == "usual":
             return await self.usual_command(user, args)
         if command == "refund":
             return await self.pro.refund(user, telegram_id)
+        if command == "deadline":
+            # The next message (or the rest of this command) is a deadline, whatever the AI says.
+            await self.repo.set_pending(
+                user.id,
+                {
+                    "stage": "clarify",
+                    "deadline": True,
+                    "source": "",
+                    "reference": self.clock().astimezone(SG).isoformat(),
+                    "use_next_message_reference": True,
+                    "message_id": None,
+                    "extraction": None,
+                },
+            )
+            if not args.strip():
+                return [Reply(f"What's due, and when? {DEADLINE_EXAMPLE}\n/cancel to stop.")]
+            return await self.message(telegram_id, 0, args, self.clock())
+        if command == "deadlines":
+            return await self.list_deadlines(user)
         if command == "calendar":
             return await self.calendar_setup(user)
         if command == "free":
@@ -495,52 +466,79 @@ class SchedulingService:
             if rule.kind == "WEEKLY" and typed
             else ""
         )
-        overlap = await self.block_overlaps(user, rule)
-        warning = (
-            "\n\n⚠️ This overlaps your plans:\n"
-            + overlap
-            + "\nSaving the block marks them as clashes."
-            if overlap
-            else ""
-        )
         return [
             Reply(
-                "Block this time?\n\n" + describe(rule) + note + warning,
+                "Block this time?\n\n"
+                + describe(rule)
+                + note
+                + await self.block_clashes(user, rule),
                 confirm_keyboard(nonce, "Save block"),
             )
         ]
 
-    async def block_overlaps(self, user: User, rule: BlockRule) -> str:
-        """Bullet list of the user's upcoming plans a busy block would sit on top of."""
+    async def ask_block_time(self, user: User, text: str, exc: Clarification) -> list[Reply]:
+        """'busy 14 oct 18:30' has no end: keep the day and wait for the time."""
+        if not str(exc).startswith("What time is this block"):
+            return [Reply(str(exc))]
+        await self.repo.set_pending(user.id, {"stage": "block_time", "text": text})
+        return [Reply(str(exc) + "\n/cancel to stop.")]
+
+    async def answer_block_time(
+        self, user: User, text: str, reference: datetime
+    ) -> list[Reply] | None:
+        """A reply to "What time is this block?". None when it isn't a time, so the message is
+        read as an ordinary one (a plan sent meanwhile must not become part of the block)."""
+        original = user.pending.get("text", "")
+        reply = text.strip()
+        lone = BLOCK_TIME.search(original)
+        if re.match(r"\s*busy\b", reply, re.I) or not original.strip():
+            combined = reply  # a complete new block, or the answer to a bare /block
+        elif BLOCK_RANGE.fullmatch(reply):
+            # Drop the lone time from 'busy 14 oct 18:30'; the reply holds the full range.
+            combined = (BLOCK_TIME.sub(" ", original) + " " + reply).strip()
+        elif lone and BLOCK_TIME.fullmatch(reply):
+            # 'busy 14 oct 18:30' then '19:30': the reply is the end of the same block.
+            head = BLOCK_TIME.sub(" ", original).strip()
+            combined = f"{head} {lone[0].strip()}-{reply}"
+        else:
+            return None
+        try:
+            rule = parse_block(combined, reference, explicit=True)
+        except Clarification as exc:
+            return [Reply(str(exc) + "\n/cancel to stop.")]
+        return await self.preview_block(user, rule)
+
+    async def block_clashes(self, user: User, rule: BlockRule) -> str:
+        """Going and Saved plans this block overlaps, so the clash shows now, not later."""
         now = self.clock()
-        window_start = datetime.combine(now.astimezone(SG).date(), day_time(0), SG)
-        window_end = window_start + timedelta(days=HORIZON_DAYS)
-        occurrences = expand_blocks([rule], window_start, window_end)
+        if rule.kind == "ONCE":
+            occurrences = [(rule.start_at, rule.end_at)]
+        else:
+            horizon = datetime.combine(rule.until_date, day_time(23, 59), SG) + timedelta(days=1)
+            occurrences = [(b.start_at, b.end_at) for b in expand_blocks([rule], now, horizon)]
+        occurrences = [(a, b) for a, b in occurrences if b > now]
         if not occurrences:
             return ""
         plans = await self.repo.events_between(
-            min(o.start_at for o in occurrences),
-            max(o.end_at for o in occurrences),
-            [Status.GOING, Status.MAYBE, Status.SAVED],
+            occurrences[0][0] - timedelta(days=1),
+            occurrences[-1][1],
+            [Status.GOING, Status.SAVED],
             user.id,
         )
-        hits = sorted(
-            (
-                e
-                for e in plans
-                if any(e.start_at < o.end_at and e.end_at > o.start_at for o in occurrences)
-            ),
-            key=lambda e: (e.start_at, e.id),
-        )
-        labels = {Status.GOING: "Going", Status.MAYBE: "Maybe", Status.SAVED: "Saved"}
+        hits = [
+            e
+            for e in sorted(plans, key=lambda e: e.start_at)
+            if any(e.start_at < b and e.end_at > a for a, b in occurrences)
+        ]
+        if not hits:
+            return ""
         lines = [
-            f"• {e.title[:60]} ({e.start_at.astimezone(SG):%a %-d %b}, "
-            f"{time_range(e.start_at, e.end_at)}, {labels[e.status]})"
+            f"• {e.title[:60]} ({e.status.value.title()}, {e.start_at.astimezone(SG):%a %-d %b} "
+            f"{time_range(e.start_at, e.end_at)})"
             for e in hits[:5]
         ]
-        if len(hits) > 5:
-            lines.append(f"• and {len(hits) - 5} more")
-        return "\n".join(lines)
+        more = f"\n…and {len(hits) - 5} more" if len(hits) > 5 else ""
+        return "\n\n⚠️ This clashes with your plans:\n" + "\n".join(lines) + more
 
     async def list_events(self, user: User, page: int = 0, plans: bool = False) -> list[Reply]:
         events = await self.repo.recent_events(user.id)
@@ -608,20 +606,28 @@ class SchedulingService:
             # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
             return [Reply(onboarding.NOT_A_SCHEDULE_LINK)]
         pending = user.pending
-        free_hint = None
-        if pending and pending["stage"] in ("free", "block_ask"):
-            # A question the bot asked: its answer is short and comes soon. Anything else, or
-            # anything later, is an ordinary message and must not be swallowed by the question.
-            stage = pending["stage"]
+        if pending and pending["stage"] == "free":
+            # /free asked "when?": a day or time answers it; anything else is a new message.
+            try:
+                query = parse_free(text, reference) if len(text) <= 40 else None
+            except Clarification:
+                query = None
+            if query is not None:
+                await self.repo.set_pending(user.id, None)
+                if query.slot is not None:
+                    return [await self.free_slot(user, query)]
+                return [await self.free_days(user, query.days)]
             await self.repo.set_pending(user.id, None)
-            if self.prompt_fresh(pending) and len(text) <= 60 and "\n" not in text.strip():
-                if stage == "free":
-                    answer, free_hint = await self.answer_free(user, text, reference)
-                else:
-                    answer = await self.answer_block(user, pending["text"], text, reference)
-                if answer is not None:
-                    return answer
-            pending = None
+            user.pending = pending = None
+        if pending and pending["stage"] == "block_time":
+            answer = await self.answer_block_time(user, text, reference)
+            if answer is not None:
+                return answer
+            # Not a time: the question is closed and this is an ordinary message.
+            await self.repo.set_pending(user.id, None)
+            user.pending = pending = None
+        if pending and pending["stage"] == "edit_field":
+            return await self.edit_field(user, pending, text)
         if pending and pending["stage"] in ("confirm", "choose", "delete", "block", "recurring"):
             return [
                 Reply(
@@ -633,29 +639,21 @@ class SchedulingService:
             try:
                 rule = parse_block(text, reference)
             except Clarification as exc:
-                # Remember the half-given block so the next message completes it.
-                await self.ask(user, "block_ask", text=text[:200])
-                return [Reply(str(exc))]
+                return await self.ask_block_time(user, text, exc)
             if rule:
                 return await self.preview_block(user, rule)
         started = time.monotonic()
         previous = pending.get("extraction") if pending else None
-        answered = None
-        if pending and pending.get("asked") and not pending.get("event_id"):
-            # A bare time answering "What time does this event end?" needs no LLM.
-            try:
-                found = answer_asked_time(pending["asked"], previous, text)
-            except Clarification as exc:
-                return [Reply(f"{exc}\n/cancel to discard this draft.")]
-            if found:
-                # The time as understood ("9pm" for a bare "9") is what gets verified below.
-                answered, text = found
-        if answered is None and not self.extraction_limit.allow(telegram_id):
+        if not self.extraction_limit.allow(telegram_id):
             return [Reply(SLOW_DOWN)]
         if pending:
             if not pending.get("use_next_message_reference"):
                 reference = datetime.fromisoformat(pending["reference"])
             message_id = pending["message_id"]
+            if previous:
+                text = infer_meridiem(
+                    Extraction.model_validate(previous), pending.get("asked"), text
+                )
             source = (pending.get("source", "") + "\n" + text).strip()
             if len(source) > 8000:
                 return [
@@ -667,9 +665,23 @@ class SchedulingService:
         else:
             source = text
             await self.safe_action(user.id, "forward", metadata={"message_id": message_id})
-        extracted = answered or await self.extractor.extract(text, reference, previous)
+        extracted = None
+        if pending and pending.get("asked") and previous:
+            # A short answer to our own question ("8PM", "2000") needs no AI, which could
+            # rewrite it into text that isn't in the message and ask the same question again.
+            extracted = fill_answer(
+                Extraction.model_validate(previous), pending["asked"], text, reference
+            )
+        if extracted is None:
+            extracted = await self.extractor.extract(text, reference, previous)
         if not (pending and pending.get("event_id")):  # edits of saved events keep their kind
             extracted = settle_kind(extracted, clarifying=bool(pending), text=source)
+        if pending and not pending.get("event_id"):
+            # A clarification keeps what the draft was: a deadline stays a deadline.
+            kind = "deadline" if pending.get("deadline") else extracted.kind
+            if kind == "deadline" and not pending.get("deadline") and previous:
+                kind = "new"
+            extracted = extracted.model_copy(update={"kind": kind})
         if pending:
             extracted = settle_ambiguity(extracted, text)
         elif extracted.kind == "new":
@@ -691,6 +703,8 @@ class SchedulingService:
             "message_id": message_id,
             "extraction": extracted.model_dump(mode="json"),
         }
+        if extracted.kind == "deadline" and not (pending and pending.get("event_id")):
+            return await self.save_deadline(user, extracted, state, reference)
         if pending and pending.get("event_id"):
             # "clb lvl 3" alone, with nothing else changed, is the new venue.
             extracted = bare_venue(extracted, previous, text)
@@ -730,8 +744,6 @@ class SchedulingService:
                     Reply("Which event should this change apply to?", choose_keyboard(candidates))
                 ]
             return await self.prepare(user, extracted, state, candidates[0])
-        if extracted.kind == "unknown" and free_hint:
-            return [Reply(free_hint)]
         if extracted.kind == "unknown":
             return [
                 Reply(
@@ -760,10 +772,7 @@ class SchedulingService:
                 default_minutes=self.settings.default_event_duration_minutes,
             )
         except Clarification as exc:
-            # Remember which question was asked, so a bare "18:00" can answer it directly.
-            for asked, question in ASKED_TIME.items():
-                if str(exc).startswith(question):
-                    state["asked"] = asked
+            state["asked"] = asked_field(str(exc))
             await self.repo.set_pending(user.id, state)
             return [Reply(str(exc) + "\n/cancel to discard this draft.")]
         event = await self.repo.create_preview(user.id, message_id, draft)
@@ -779,6 +788,65 @@ class SchedulingService:
             },
         )
         return [event_card(event, availability)]
+
+    # ---- deadlines ----
+
+    async def save_deadline(
+        self, user: User, extracted: Extraction, state: dict, reference: datetime
+    ) -> list[Reply]:
+        state["deadline"] = True
+        try:
+            draft = validate_deadline(extracted, state["source"], reference)
+        except Clarification as exc:
+            state["asked"] = asked_field(str(exc))
+            await self.repo.set_pending(user.id, state)
+            return [Reply(str(exc) + "\n/cancel to discard this deadline.")]
+        message_id = state.get("message_id") or None
+        deadline = await self.repo.create_deadline(user.id, message_id, draft)
+        await self.repo.set_pending(user.id, None)
+        await self.safe_action(user.id, "deadline")
+        return [
+            Reply(
+                card_text(deadline, self.clock(), user.reminders_enabled),
+                deadline_keyboard(deadline.id),
+            )
+        ]
+
+    async def list_deadlines(self, user: User) -> list[Reply]:
+        now = self.clock()
+        upcoming = await self.repo.deadlines_between(now, now + timedelta(days=400), user.id)
+        if not upcoming:
+            return [
+                Reply(
+                    "No upcoming deadlines. Forward a message with a due date, or send "
+                    "/deadline CS3244 report fri 11:59pm"
+                )
+            ]
+        replies = [
+            Reply(
+                card_text(d, now, user.reminders_enabled).rsplit("\n\n", 1)[0],
+                deadline_keyboard(d.id),
+            )
+            for d in upcoming[:20]
+        ]
+        if len(upcoming) > 20:
+            replies.append(Reply(f"…and {len(upcoming) - 20} more."))
+        return replies
+
+    async def deadline_action(self, user: User, action: str, deadline_id: str) -> list[Reply]:
+        try:
+            UUID(deadline_id)
+        except ValueError:
+            return [Reply("That button isn't valid. Use /deadlines.")]
+        deadline = await self.repo.get_deadline(user.id, deadline_id)
+        if not deadline:
+            return [Reply("That deadline is already gone. /deadlines lists the rest.", edit=True)]
+        if action == "rm":
+            await self.repo.delete_deadline(user.id, deadline_id)
+            return [Reply(f"🗑 Removed: {deadline.title}", edit=True)]
+        await self.repo.finish_deadline(user.id, deadline_id)
+        await self.safe_action(user.id, "deadline_done")
+        return [Reply(f"✅ Done: {deadline.title}. No more reminders for it.", edit=True)]
 
     async def load_target(self, user: User, pending: dict) -> Event | GroupEvent | None:
         """The plan a pending edit applies to: the user's own event, or a card they organise."""
@@ -833,15 +901,61 @@ class SchedulingService:
                 "extraction": base.model_dump(mode="json"),
             }
         )
+        state["nonce"] = secrets.token_hex(8)
         await self.repo.set_pending(user.id, state)
-        scope = " Everyone who saved it will be told what changed." if group else ""
+        scope = "\nEveryone who saved it will be told what changed." if group else ""
         return [
             Reply(
-                "Send the corrected title, date, start/end time or venue. I will show a preview before applying it."
-                + scope
-                + "\n/cancel to keep this event unchanged."
+                "What do you want to change?\n\n"
+                + details(event)
+                + "\n\nTap one, or type the change (like: move to 8pm). I'll show a preview first."
+                + scope,
+                change_keyboard(state["nonce"]),
             )
         ]
+
+    async def choose_field(self, user: User, field: str, nonce: str) -> list[Reply]:
+        pending = user.pending
+        if not pending or pending.get("nonce") != nonce or not pending.get("event_id"):
+            return [Reply("That edit expired. Use /plans and tap Edit again.")]
+        pending = {k: v for k, v in pending.items() if k not in ("field", "asked")}
+        if field == "time":
+            pending["stage"] = "clarify"
+            await self.repo.set_pending(user.id, pending)
+            return [
+                Reply(
+                    "Send the new date or time, like: sat 7-9pm, or 20:00-22:00.\n/cancel to keep it unchanged."
+                )
+            ]
+        pending.update(stage="edit_field", field=field)
+        await self.repo.set_pending(user.id, pending)
+        word = "venue" if field == "venue" else "title"
+        return [Reply(f"Send the new {word}.\n/cancel to keep it unchanged.")]
+
+    async def edit_field(self, user: User, pending: dict, text: str) -> list[Reply]:
+        """A typed venue or title is used exactly as written."""
+        value = " ".join(text.split())
+        if not value or len(value) > 200:
+            return [Reply("Send it in one line (up to 200 characters), or /cancel.")]
+        existing = await self.load_target(user, pending)
+        if not existing or existing.version != pending["base_version"]:
+            await self.repo.set_pending(user.id, None)
+            return [
+                Reply(
+                    "That event changed while you were editing. Use /plans to open its latest card."
+                )
+            ]
+        key = "location" if pending["field"] == "venue" else "title"
+        extraction = Extraction.model_validate(pending["extraction"]).model_copy(
+            update={key: value, "ambiguity": None}
+        )
+        state = {k: v for k, v in pending.items() if k != "field"}
+        state.update(
+            stage="clarify",
+            source=pending["source"] + "\n" + value,
+            extraction=extraction.model_dump(mode="json"),
+        )
+        return await self.prepare(user, extraction, state, existing)
 
     async def prepare(
         self, user: User, extraction: Extraction, state: dict, existing: Event | GroupEvent
@@ -864,9 +978,22 @@ class SchedulingService:
                 existing=existing,
             )
         except Clarification as exc:
-            state["stage"] = "clarify"
+            state.update(stage="clarify", asked=asked_field(str(exc)))
             await self.repo.set_pending(user.id, state)
             return [Reply(str(exc) + "\n/cancel to keep the existing event unchanged.")]
+        unchanged = all(
+            getattr(draft, key) == getattr(existing, key)
+            for key in ("title", "start_at", "end_at", "location", "notes")
+        )
+        if unchanged:
+            state.update(stage="clarify", asked=None, nonce=secrets.token_hex(8))
+            await self.repo.set_pending(user.id, state)
+            return [
+                Reply(
+                    "I couldn't tell what to change. Tap what you want to change, or type it again.",
+                    change_keyboard(state["nonce"]),
+                )
+            ]
         state.update(
             {
                 "stage": "confirm",
@@ -884,7 +1011,7 @@ class SchedulingService:
             if availability.conflicts
             else ""
         )
-        if not availability.covered:
+        if not availability.covered and user.coverage_start:
             clash += "\n⚠️ Outside imported timetable coverage."
         return [
             Reply(
@@ -901,9 +1028,13 @@ class SchedulingService:
 
     async def free_command(self, user: User, args: str) -> list[Reply]:
         if not args.strip():
-            # The next plain message is read as the answer, so a date can simply be typed.
-            await self.ask(user, "free")
-            return [Reply(FREE_PROMPT, free_keyboard())]
+            await self.repo.set_pending(user.id, {"stage": "free"})
+            return [
+                Reply(
+                    "When do you want to check? Tap a day, or type one, like: fri, 20 oct, or sat 2-5pm.",
+                    free_keyboard(),
+                )
+            ]
         try:
             query = parse_free(args, self.clock())
         except Clarification as exc:
@@ -911,61 +1042,6 @@ class SchedulingService:
         if query.slot is not None:
             return [await self.free_slot(user, query)]
         return [await self.free_days(user, query.days)]
-
-    async def ask(self, user: User, stage: str, **state):
-        """Leave a question open; `prompt_fresh` decides how long its answer is expected."""
-        await self.repo.set_pending(
-            user.id, {"stage": stage, "at": self.clock().isoformat(), **state}
-        )
-
-    def prompt_fresh(self, pending: dict) -> bool:
-        try:
-            asked = datetime.fromisoformat(pending.get("at", ""))
-        except ValueError:
-            return False
-        return timedelta(0) <= self.clock() - asked <= PROMPT_TTL
-
-    async def answer_free(
-        self, user: User, text: str, reference: datetime
-    ) -> tuple[list[Reply] | None, str | None]:
-        """A typed reply to "When do you want to check?".
-
-        Returns (replies, None) when it was a date or time. Otherwise (None, a hint): the
-        message is handled normally, and the hint is shown only if it wasn't an event either."""
-        try:
-            if parse_block(text, reference) is not None:
-                return None, None
-        except Clarification:
-            return None, None  # "busy sat" is a block being typed, not a date
-        try:
-            query = parse_free(text, self.clock())
-        except Clarification as exc:
-            return None, f"{exc}\n{FREE_EXAMPLES}"
-        if query.slot is not None:
-            return [await self.free_slot(user, query)], None
-        return [await self.free_days(user, query.days)], None
-
-    async def answer_block(
-        self, user: User, earlier: str, text: str, reference: datetime
-    ) -> list[Reply] | None:
-        """A reply to "What time is this block?": a time range, or the missing end time.
-
-        None when the reply isn't a time, so it is handled as an ordinary message."""
-        reply = text.strip()
-        trailing = re.search(r"\s+(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?)$", earlier, flags=re.I)
-        head = earlier[: trailing.start()] if trailing else earlier
-        if BLOCK_RANGE.fullmatch(reply):
-            combined = f"{head} {reply}"  # "18:30-19:00" replaces a lone "18:30"
-        elif trailing and BARE_TIME.fullmatch(reply):
-            combined = f"{head} {trailing[1].strip()}-{reply}"  # "19:00" completes "18:30"
-        else:
-            return None
-        try:
-            rule = parse_block(combined, reference)
-        except Clarification as exc:
-            await self.ask(user, "block_ask", text=earlier)
-            return [Reply(str(exc))]
-        return await self.preview_block(user, rule) if rule else None
 
     async def free_slot(self, user: User, query) -> Reply:
         slot = query.slot
@@ -988,6 +1064,7 @@ class SchedulingService:
         return Reply(text + "\n\n" + checked_line(result))
 
     async def free_days(self, user: User, days) -> Reply:
+        """What's booked on each day, then the free gaps between 8am and 11pm."""
         now = self.clock()
         today = now.astimezone(SG).date()
         parts = []
@@ -1002,37 +1079,45 @@ class SchedulingService:
             plans = await self.repo.events_between(
                 start - timedelta(days=1), end, [Status.GOING, Status.SAVED], user.id
             )
-            # (start, end, name, decided): Saved plans are listed but never make you busy.
-            items = [(b.start_at, b.end_at, b.title, True) for b in blocks] + [
-                (e.start_at, e.end_at, e.title, e.status == Status.GOING)
+            # (start, end, name, decided): a Saved plan is listed but never makes you busy.
+            busy = [(b.start_at, b.end_at, b.title, True) for b in blocks] + [
+                (
+                    e.start_at,
+                    e.end_at,
+                    f"{e.title} (Going)"
+                    if e.status == Status.GOING
+                    else f"{e.title} (Saved, not decided)",
+                    e.status == Status.GOING,
+                )
                 for e in plans
                 if e.end_at > start
             ]
-            items = sorted(i for i in items if i[0] < end and i[1] > start)
-            gaps = free_gaps(day, [(a, b) for a, b, _, decided in items if decided], now)
-            if not items:
-                if day == today and now.astimezone(SG).time() >= day_time(22, 30):
-                    parts.append("No free time left today. I list free time from 8am to 11pm.")
-                else:
-                    parts.append(f"🟢 Free all day on {label}.")
+            busy = [item for item in busy if item[1] > (now if day == today else start)]
+            gaps = free_gaps(day, [(a, b) for a, b, _, decided in busy if decided], now)
+            # Deadlines never make you busy; they're listed so the day's picture is complete.
+            due = "".join(
+                "\n" + due_line(d)
+                for d in await self.repo.deadlines_between(max(start, now), end, user.id)
+            )
+            if not busy:
+                rest = " for the rest of the day" if day == today else " all day"
+                parts.append(f"🟢 {label}: nothing booked, free{rest}.{due}")
                 continue
+            busy.sort()
             lines = [
-                f"• {clock(max(a, start))} – {clock(min(b, end))} {name[:40]}"
-                + ("" if decided else " (Saved, not decided)")
-                for a, b, name, decided in items[:MAX_FREE_LINES]
+                f"• {time_range(max(a, start), min(b, end))} {title[:60]}"
+                for a, b, title, _ in busy[:8]
             ]
-            if len(items) > MAX_FREE_LINES:
-                lines.append(f"• and {len(items) - MAX_FREE_LINES} more")
-            decided = any(item[3] for item in items)
-            head = f"🔴 Busy on {label}:" if decided else f"🟡 Nothing confirmed on {label}:"
-            text = head + "\n" + "\n".join(lines)
+            if len(busy) > 8:
+                lines.append(f"…and {len(busy) - 8} more")
+            head = "Busy:" if any(item[3] for item in busy) else "Nothing confirmed:"
             if gaps:
-                text += "\n\n🟢 Free: " + ", ".join(f"{clock(a)} – {clock(b)}" for a, b in gaps)
+                free = "Free: " + ", ".join(time_range(a, b) for a, b in gaps)
             elif day == today and now.astimezone(SG).time() >= day_time(22, 30):
-                text += "\n\nNo free time left today."
+                free = "No free time left today."
             else:
-                text += "\n\nNo free time between 8am and 11pm."
-            parts.append(text)
+                free = "🔴 No free time between 8am and 11pm."
+            parts.append(f"📅 {label}\n{head}\n" + "\n".join(lines) + "\n" + free + due)
         text = "\n\n".join(parts)
         if len(text) > 3900:  # Telegram refuses anything over 4096 characters
             text = text[:3900].rsplit("\n", 1)[0] + "\n…\nAsk about fewer days to see the rest."
@@ -1291,6 +1376,10 @@ class SchedulingService:
             return await self.list_events(user, int(page), plans=prefix == "plans")
         parts = data.split(":")
         action = parts[0]
+        if action == "dl" and len(parts) == 3 and parts[1] in ("done", "rm"):
+            return await self.deadline_action(user, parts[1], parts[2])
+        if action == "chg" and len(parts) == 3 and parts[1] in ("venue", "time", "title"):
+            return await self.choose_field(user, parts[1], parts[2])
         if data.startswith("rec:") and len(parts) == 3 and parts[1] in ("once", "weekly"):
             return await self.choose_recurring(user, parts[1], parts[2])
         if data.startswith("setup:"):
@@ -1340,17 +1429,16 @@ class SchedulingService:
                 await self.repo.create_block(user.id, rule)
                 await self.repo.set_pending(user.id, None)
                 await self.safe_action(user.id, "block")
-                overlap = await self.block_overlaps(user, rule)
-                if overlap:
-                    return [
-                        Reply(
-                            "Blocked. ⚠️ It clashes with your plans:\n"
-                            + overlap
-                            + "\n/events shows each card. /blocks lists your busy blocks."
-                        )
-                    ]
+                clashes = await self.block_clashes(user, rule)
                 return [
-                    Reply("Blocked. Plans that overlap it will show a clash. /blocks lists them.")
+                    Reply(
+                        "Blocked: "
+                        + describe(rule)
+                        + clashes
+                        + ("\nOpen /plans to change one of them." if clashes else "")
+                        + "\n/blocks lists your blocks.",
+                        edit=True,
+                    )
                 ]
             if pending["stage"] != "confirm":
                 return [Reply("That action is no longer available.")]

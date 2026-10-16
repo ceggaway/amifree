@@ -245,7 +245,7 @@ async def test_several_calendars_are_all_checked(with_calendar, reference):
     card = (await service.message(1, 3, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     assert card.text.startswith("⚠️ Clashes with CCA calendar from 7:30–8:30pm")
     free = (await service.command(1, "free", "fri"))[0]
-    assert "🟢 Free: 8am – 12pm, 1pm – 7:30pm, 8:30pm – 11pm" in free.text  # both calendars
+    assert "Free: 8am–12pm, 1–7:30pm, 8:30–11pm" in free.text  # both calendars
 
 
 async def test_sending_the_same_link_again_refreshes_instead_of_duplicating(

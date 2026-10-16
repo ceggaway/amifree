@@ -29,7 +29,12 @@ missing year on a Feb 29 date. "730pm" and "7pm" are not ambiguous. Otherwise nu
 
 kind: new for any invitation or plan, including unclear ones; update for an explicit move or
 correction of an existing event ("moved to 8pm", "change of venue"); cancel for an explicit
-cancellation; unknown only when the message contains no event at all. match_title names
+cancellation; deadline when the message is about something due by a date or time, with
+nothing to attend ("submit the report by Fri 11:59pm", "project due 23 Oct", "sign up by 20
+Oct", "pay by tmr"): put the due date in date_text, the due time in start_time_text, leave
+end_time_text null, and use title for what is due. An invitation to attend something that
+also mentions a sign-up date is new, not deadline. unknown only when the message contains no
+event or deadline at all. match_title names
 only an explicitly named event being updated; do not invent it for "moved to 8pm".
 
 Clarification: when original_draft is present, the message answers a question about that
@@ -47,7 +52,7 @@ def settle_kind(extraction: Extraction, clarifying: bool, text: str = "") -> Ext
       really is in the message: an unclear invitation ("Dinner Fri or Sat 7-9pm"), or one
       wrapped in instructions the model refused to touch.
     """
-    if clarifying and extraction.kind != "new":
+    if clarifying and extraction.kind not in ("new", "deadline"):
         return extraction.model_copy(update={"kind": "new"})
     if extraction.kind != "unknown":
         return extraction

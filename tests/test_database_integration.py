@@ -492,3 +492,35 @@ async def test_personal_calendar_in_postgresql():
         await repo.delete_user(user.id)
         assert await db.query("select * from calendar_busy_blocks") == []
         assert await db.query("select * from personal_calendars") == []
+
+
+async def test_deadlines_round_trip():
+    from app.schemas.event import DeadlineDraft
+
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        user, other = await repo.ensure_user(1), await repo.ensure_user(2)
+        now = datetime.now(SG)
+        draft = DeadlineDraft(title="CS3244 report", due_at=now + timedelta(days=2))
+        first = await repo.create_deadline(user.id, 7, draft)
+        assert (await repo.create_deadline(user.id, 7, draft)).id == first.id  # same message
+        typed = await repo.create_deadline(user.id, None, draft)
+        found = await repo.deadlines_between(now, now + timedelta(days=3), user.id)
+        assert {d.id for d in found} == {first.id, typed.id}
+        assert await repo.deadlines_between(now, now + timedelta(days=3), other.id) == []
+        assert await repo.get_deadline(other.id, first.id) is None
+        assert await repo.finish_deadline(user.id, first.id)
+        assert [d.id for d in await repo.deadlines_between(now, now + timedelta(days=3))] == [
+            typed.id
+        ]
+        assert await repo.enqueue_notification(user.id, "DEADLINE", f"{typed.id}:day", {})
+        assert await repo.delete_deadline(user.id, typed.id)
+        assert not await repo.delete_deadline(user.id, typed.id)

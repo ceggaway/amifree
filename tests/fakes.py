@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from app.models.user import User
 from app.schemas.event import (
+    Deadline,
     Event,
     EventDraft,
     EventSeries,
@@ -25,6 +26,7 @@ class MemoryRepository:
         self.members = set()
         self.notifications = []
         self.updates, self.stale_updates = {}, set()
+        self.deadlines = {}
         self.polls = {}
         self.poll_people = {}
         self.poll_votes = {}
@@ -736,7 +738,52 @@ class MemoryRepository:
     async def extraction(self, *args):
         pass
 
+    async def create_deadline(self, user_id, message_id, draft):
+        for d in self.deadlines.values():
+            if message_id is not None and (d.user_id, d.source_message_id) == (user_id, message_id):
+                return d.model_copy(deep=True)
+        d = Deadline(
+            **draft.model_dump(),
+            id=str(uuid4()),
+            user_id=user_id,
+            source_message_id=message_id,
+            created_at=datetime.now(UTC),
+        )
+        self.deadlines[d.id] = d
+        return d.model_copy(deep=True)
+
+    async def get_deadline(self, user_id, deadline_id):
+        d = self.deadlines.get(deadline_id)
+        return d.model_copy(deep=True) if d and d.user_id == user_id else None
+
+    async def deadlines_between(self, start, end, user_id=None):
+        return sorted(
+            (
+                d.model_copy(deep=True)
+                for d in self.deadlines.values()
+                if not d.done
+                and start <= d.due_at < end
+                and (user_id is None or d.user_id == user_id)
+            ),
+            key=lambda d: d.due_at,
+        )
+
+    async def finish_deadline(self, user_id, deadline_id):
+        d = self.deadlines.get(deadline_id)
+        if not d or d.user_id != user_id:
+            return False
+        d.done = True
+        return True
+
+    async def delete_deadline(self, user_id, deadline_id):
+        d = self.deadlines.get(deadline_id)
+        if not d or d.user_id != user_id:
+            return False
+        del self.deadlines[deadline_id]
+        return True
+
     async def delete_user(self, user_id):
+        self.deadlines = {k: d for k, d in self.deadlines.items() if d.user_id != user_id}
         self.users = {t: u for t, u in self.users.items() if u.id != user_id}
         self.events = {k: e for k, e in self.events.items() if e.user_id != user_id}
         self.blocks.pop(user_id, None)

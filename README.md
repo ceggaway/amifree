@@ -196,6 +196,18 @@ Direct Python dependencies are pinned; `constraints.txt` records tested transiti
 
 ## Deploy on Render
 
+**Before every deploy that adds a migration, update the database first.** The app checks the
+schema at startup and refuses to start when it is behind, which Render reports as a failed
+deploy. Run
+
+```bash
+python scripts/migrations_bundle.py > all_migrations.sql
+```
+
+and paste `all_migrations.sql` into the Supabase SQL Editor (Run). Every migration is safe to
+reapply, so the bundle brings any database up to date. `python scripts/check_connections.py`
+confirms it from your machine (read-only).
+
 Publish the source to your own Git repository, then create a Python Web Service in Render. If the repository contains this folder alongside other projects, set Root Directory to `amifree`; if this folder is the repository root, leave Root Directory blank.
 
 | Setting | Value |

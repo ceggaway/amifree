@@ -108,7 +108,11 @@ def create_app(
                 await repo.cleanup(settings.extraction_retention_days)
             except Exception:
                 raise RuntimeError(
-                    "Supabase startup check failed. Apply app/db/schema.sql, then app/db/migrations/*.sql in order, and check your connection credentials."
+                    "Supabase startup check failed: the log line database_schema_incomplete names"
+                    " what is missing. Apply app/db/schema.sql and the migrations: run"
+                    " `python scripts/migrations_bundle.py` and paste the output into the Supabase"
+                    " SQL Editor (all of it is safe to reapply),"
+                    " and check the SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY credentials."
                 ) from None
             app.state.service = SchedulingService(
                 repo,

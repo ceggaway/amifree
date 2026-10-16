@@ -1,6 +1,9 @@
 """Print the schema and every migration, in order, as one script for the Supabase SQL Editor.
 
-    python scripts/migrations_bundle.py > all_migrations.sql
+    python scripts/migrations_bundle.py > app/db/all_migrations.sql
+
+The output is committed as app/db/all_migrations.sql, so whoever runs the database can copy
+it straight from GitHub. A test fails if it falls behind the migrations folder.
 
 The schema and each migration are safe to reapply, so running the whole bundle brings any
 database (a new project included) up to the version this code needs, whatever it had before.

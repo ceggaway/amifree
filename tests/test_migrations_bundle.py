@@ -27,3 +27,11 @@ def test_the_bundle_reaches_the_version_the_app_needs():
         for v in re.findall(r"schema_migrations\(version,\s*name\)\s*values\s*\((\d+)", bundle())
     ]
     assert max(versions) == SCHEMA_VERSION
+
+
+def test_the_committed_copy_is_current():
+    committed = (MIGRATIONS.parent / "all_migrations.sql").read_text()
+    assert committed == bundle(), (
+        "app/db/all_migrations.sql is out of date: run"
+        " python scripts/migrations_bundle.py > app/db/all_migrations.sql"
+    )

@@ -104,8 +104,10 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
     # Member 2 is committed all morning; member 3 has an undecided plan in the afternoon.
     lab = (await service.message(2, 5, "Lab Monday 08:00 14:00", reference))[0]
     await service.callback(2, lab.keyboard.inline_keyboard[0][0].callback_data)
-    brunch = (await service.message(3, 6, "Brunch Monday 14:00 16:00", reference))[0]
-    await service.callback(3, brunch.keyboard.inline_keyboard[2][0].callback_data)
+    await service.message(3, 6, "Brunch Monday 14:00 16:00", reference)
+    # An undecided (Saved) plan doesn't block a poll slot; the card no longer offers Save.
+    brunch = next(e for e in repo.events.values() if e.title == "Brunch")
+    await repo.save(brunch.user_id, brunch)
     await with_schedule(repo, 1, 2, 3)
     bot, transport, _, taps, poll = await run_poll(service, repo)
     async with bot:

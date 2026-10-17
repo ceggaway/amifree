@@ -31,8 +31,11 @@ async def api(service_factory):
 
 
 async def saved_plan(service, reference, telegram_id=1):
-    card = (await service.message(telegram_id, 2, TEXT, reference))[0]
-    await service.callback(telegram_id, card.keyboard.inline_keyboard[2][0].callback_data)
+    # The Mini App still has a Saved state; the card just no longer offers the button.
+    await service.message(telegram_id, 2, TEXT, reference)
+    user = await service.repo.ensure_user(telegram_id)
+    ev = next(e for e in service.repo.events.values() if e.user_id == user.id)
+    await service.repo.save(user.id, ev)
 
 
 async def test_sign_in_requires_a_valid_telegram_signature(api):
@@ -112,7 +115,7 @@ async def test_api_and_bot_share_plans_and_isolate_users(api, reference):
     )
     assert going.status_code == 200 and going.json()["status"] == "GOING"
     # The bot sees the Mini App's change.
-    assert "Status: Going" in (await service.command(1, "plans"))[0].text
+    assert "Status: In your plans" in (await service.command(1, "plans"))[0].text
     edited = await client.patch(
         url,
         headers=bearer(1),

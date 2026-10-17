@@ -55,7 +55,7 @@ async def test_just_the_next_one_makes_a_normal_card(service_factory, reference)
     offer = (await service.message(1, 1, BHID_POST, reference))[0]
     card = (await service.callback(1, tap(offer, "Just the next one (Sat 10 Oct)")))[0]
     assert card.edit and "Sat, 10 Oct 2026 · 09:30 → 10 Oct 11:30" in card.text
-    assert "Going" in [b.text for row in card.keyboard.inline_keyboard for b in row]
+    assert "Add to plans" in [b.text for row in card.keyboard.inline_keyboard for b in row]
     assert not (await repo.ensure_user(1)).pending
 
 

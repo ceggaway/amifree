@@ -215,15 +215,14 @@ async def two_plans_tomorrow(service_factory, reference, **settings):
     service, repo = service_factory(dinner, lunch, maybe, **settings)
     outbox = Outbox()
     service.notifier = Notifier(service, outbox)
-    for n, (text, row, col) in enumerate(
-        (
-            ("Dinner Monday 19:00 21:00", 0, 0),
-            ("Lunch Monday 12:00 13:00", 0, 0),
-            ("Movie Monday 22:00 23:00", 2, 0),
-        )
-    ):
+    for n, text in enumerate(("Dinner Monday 19:00 21:00", "Lunch Monday 12:00 13:00")):
         card = (await service.message(1, n + 2, text, reference))[0]
-        await service.callback(1, card.keyboard.inline_keyboard[row][col].callback_data)
+        await service.callback(1, tap(card, "Add to plans"))
+    # Movie is saved-but-undecided (a group plan can still be Saved); the card no longer
+    # offers Save, so set the status directly to test the "Still undecided" summary line.
+    await service.message(1, 4, "Movie Monday 22:00 23:00", reference)
+    movie = next(e for e in repo.events.values() if e.title == "Movie")
+    await repo.save(movie.user_id, movie)
     return service, repo, outbox
 
 
@@ -273,7 +272,7 @@ async def test_reminder_opt_out_and_cancelled_plans(service_factory, reference):
     from app.services.reminders import enqueue_nightly
 
     assert await enqueue_nightly(repo, service.clock(), 18) == 1
-    await service.callback(2, tap(going[0], "Can't make it"))
+    await service.callback(2, tap(going[0], "Remove"))
     assert (await service.notifier.run())["skipped"] == 1 and outbox.sent == []
 
 

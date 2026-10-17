@@ -7,7 +7,7 @@ DINNER = "CCA dinner Friday 7–9pm at Vivo"
 
 async def saved_dinner(service, reference):
     card = (await service.message(1, 1, DINNER, reference))[0]
-    return (await service.callback(1, tap(card, "Save")))[0]
+    return (await service.callback(1, tap(card, "Add to plans")))[0]
 
 
 # ---------- bug 1: changing the venue ----------
@@ -107,7 +107,7 @@ async def test_block_command_waits_for_the_time(service_factory, reference):
 async def test_block_over_a_plan_shows_the_clash_now(service_factory, reference):
     service, _ = service_factory(extraction())
     card = (await service.message(1, 1, DINNER, reference))[0]
-    await service.callback(1, tap(card, "Going"))
+    await service.callback(1, tap(card, "Add to plans"))
     preview = (await service.message(1, 5, "busy fri 8-10pm", reference))[0]
     assert "⚠️ This clashes with your plans:\n• CCA dinner (Going, Fri 9 Oct 7–9pm)" in preview.text
     done = (await service.callback(1, tap(preview, "Save block")))[0]
@@ -117,9 +117,9 @@ async def test_block_over_a_plan_shows_the_clash_now(service_factory, reference)
 async def test_weekly_block_clash(service_factory, reference):
     service, _ = service_factory(extraction())
     card = (await service.message(1, 1, DINNER, reference))[0]
-    await service.callback(1, tap(card, "Save"))
+    await service.callback(1, tap(card, "Add to plans"))
     preview = (await service.message(1, 5, "work every fri 6-8pm", reference))[0]
-    assert "CCA dinner (Saved, Fri 9 Oct 7–9pm)" in preview.text
+    assert "CCA dinner (Going, Fri 9 Oct 7–9pm)" in preview.text
 
 
 # ---------- a weekday after the date ----------

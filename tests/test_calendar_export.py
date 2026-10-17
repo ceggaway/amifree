@@ -129,7 +129,7 @@ async def test_send_reply_uses_a_document_only_when_there_is_one(document):
     calls = []
 
     class Message:
-        async def reply_text(self, text, reply_markup=None):
+        async def reply_text(self, text, reply_markup=None, parse_mode=None):
             calls.append(("text", text))
 
         async def reply_document(self, file, caption=None, reply_markup=None):
@@ -151,13 +151,13 @@ async def test_tapped_card_is_edited_in_place():
         def __init__(self, error=None):
             self.error = error
 
-        async def edit_message_text(self, text, reply_markup=None):
+        async def edit_message_text(self, text, reply_markup=None, parse_mode=None):
             calls.append(("edit", text))
             if self.error:
                 raise self.error
 
     class Message:
-        async def reply_text(self, text, reply_markup=None):
+        async def reply_text(self, text, reply_markup=None, parse_mode=None):
             calls.append(("new", text))
 
     class Update:

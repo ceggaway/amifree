@@ -8,13 +8,15 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 NUSMODS_URL = "https://nusmods.com/timetable"
 
 WELCOME = (
-    "👋 Hi! I'm AmIFree, your plan assistant.\n\n"
-    "📩 Forward me any plan, and I'll check if you're free and save it\n"
-    "🔔 I'll remind you the night before\n"
-    "👥 Add me to a group to find a time that works for everyone\n\n"
-    "📚 To start, paste your NUSMods or personal calendar link, so I know when you're busy. "
-    "Not sure where to find it? Tap below and I'll show you.\n"
-    "🔒 I never read your group chats."
+    "👋 <b>Hi! I’m AmIFree, your personal planning assistant.</b>\n\n"
+    "📩 <b>Forward a plan.</b> I’ll check if you’re free and flag any clashes with your schedule.\n"
+    "📌 <b>Keep track of your plans.</b> Save plans and see what’s coming up, all in one place.\n"
+    "👥 <b>Find a time together.</b> Add me to a group to find when everyone’s free.\n\n"
+    "📅 <b>Connect your Google or Apple Calendar</b> so I can check your schedule.\n"
+    "📚 <b>Classes missing from your calendar?</b> I’ll show you how to add your NUSMods timetable.\n"
+    "💡 Prefer to skip? You can connect your schedule anytime.\n\n"
+    "🔒 <b>Your privacy matters.</b> I never read your group chats.\n\n"
+    "<b>Choose an option below to get started!</b>"
 )
 
 PICK_CALENDAR = (

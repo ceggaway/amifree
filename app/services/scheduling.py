@@ -284,7 +284,7 @@ class SchedulingService:
                         "\nChecking: " + " and ".join(connected) + "."
                     )
                 ]
-            return [Reply(onboarding.WELCOME, onboarding.welcome_keyboard())]
+            return [Reply(onboarding.WELCOME, onboarding.welcome_keyboard(), parse_mode="HTML")]
         if command == "cancel":
             await self.repo.set_pending(user.id, None)
             return [Reply("Pending action cleared. Forward an event when you're ready.")]
@@ -1387,7 +1387,11 @@ class SchedulingService:
             if found is None:
                 return [Reply("That button isn't valid. Send /start.")]
             text, keyboard = found
-            return [Reply(text, keyboard, edit=True)]
+            return [
+                Reply(
+                    text, keyboard, edit=True, parse_mode="HTML" if data == "setup:home" else None
+                )
+            ]
         if data in ("free:today", "free:tomorrow", "free:weekend"):
             today = self.clock().astimezone(SG).date()
             days = {

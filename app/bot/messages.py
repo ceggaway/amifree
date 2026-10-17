@@ -62,6 +62,7 @@ class Reply:
     document: tuple[str, bytes] | None = None
     # Replace the card whose button was tapped instead of sending a new message.
     edit: bool = False
+    parse_mode: str | None = None
 
 
 def details(draft: EventDraft) -> str:
@@ -221,7 +222,9 @@ async def send_reply(update, reply: Reply):
         from telegram.error import BadRequest
 
         try:
-            await query.edit_message_text(reply.text, reply_markup=reply.keyboard)
+            await query.edit_message_text(
+                reply.text, reply_markup=reply.keyboard, parse_mode=reply.parse_mode
+            )
             return
         except BadRequest as exc:
             if "not modified" in str(exc).lower():
@@ -235,4 +238,6 @@ async def send_reply(update, reply: Reply):
             InputFile(content, filename=filename), caption=reply.text, reply_markup=reply.keyboard
         )
     else:
-        await update.effective_message.reply_text(reply.text, reply_markup=reply.keyboard)
+        await update.effective_message.reply_text(
+            reply.text, reply_markup=reply.keyboard, parse_mode=reply.parse_mode
+        )

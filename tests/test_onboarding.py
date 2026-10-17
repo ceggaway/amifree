@@ -13,6 +13,7 @@ async def test_new_user_gets_the_welcome(service_factory):
     service, _ = service_factory()
     reply = (await service.command(1, "start"))[0]
     assert reply.text == onboarding.WELCOME
+    assert reply.parse_mode == "HTML"
     assert labels(reply) == ["📚 NUSMods link?", "📅 Calendar link?", "Skip"]
 
 
@@ -38,6 +39,8 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
         assert back.text == onboarding.PICK_CALENDAR
     home = (await service.callback(1, tap(picker, "« Back")))[0]
     assert home.text == onboarding.WELCOME
+    assert home.parse_mode == "HTML"
+    assert picker.parse_mode is None
 
 
 async def test_nusmods_guide_links_to_nusmods(service_factory):
@@ -106,3 +109,21 @@ def test_messages_after_a_link_say_what_to_do_next():
     assert "don't see any events" in empty and "/start" in empty
     nusmods = onboarding.nusmods_added("2026-2027", 1)
     assert nusmods.startswith("✅ Schedule added!") and "Coverage" not in nusmods
+
+
+async def test_welcome_formatting_is_sent_to_telegram():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.bot.messages import Reply, send_reply
+
+    message = SimpleNamespace(reply_text=AsyncMock())
+    query = SimpleNamespace(edit_message_text=AsyncMock())
+    update = SimpleNamespace(effective_message=message, callback_query=query)
+    keyboard = onboarding.welcome_keyboard()
+    for edit in (False, True):
+        await send_reply(update, Reply(onboarding.WELCOME, keyboard, edit=edit, parse_mode="HTML"))
+        sender = query.edit_message_text if edit else message.reply_text
+        sender.assert_awaited_once_with(
+            onboarding.WELCOME, reply_markup=keyboard, parse_mode="HTML"
+        )

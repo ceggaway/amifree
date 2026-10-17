@@ -136,16 +136,14 @@ def create_app(
                 [
                     BotCommand("start", "Getting started"),
                     BotCommand("help", "How AmIFree works"),
-                    BotCommand("plans", "Upcoming saved plans"),
+                    BotCommand("plans", "Everything coming up: plans, deadlines, busy time"),
                     BotCommand("block", "Mark yourself busy: busy sat 2-6pm"),
-                    BotCommand("blocks", "Your busy blocks"),
                     BotCommand("deadline", "Save a deadline: CS3244 report fri 11:59pm"),
                     BotCommand("deadlines", "Upcoming deadlines"),
                     BotCommand("reminders", "Night-before summary on or off"),
                     BotCommand("free", "Am I free? e.g. /free fri 7-9pm"),
                     BotCommand("usual", "Your usual free times: /usual tue evenings"),
                     BotCommand("calendar", "Calendar sync and your calendar's busy times"),
-                    BotCommand("events", "Recent cards, including previews"),
                     BotCommand("cancel", "Clear pending action"),
                     BotCommand("deletemydata", "Delete everything about me"),
                 ]

@@ -306,3 +306,17 @@ def attendance_panel_keyboard(
         [InlineKeyboardButton("Everyone who said Going came", callback_data=f"aa:{hex_id}")]
     )
     return InlineKeyboardMarkup(rows)
+
+
+def _menu(label: str, name: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(label, callback_data=f"menu:{name}")
+
+
+def menu_keyboard() -> InlineKeyboardMarkup:
+    """The four things a set-up user does most; each tap runs the matching command."""
+    return InlineKeyboardMarkup(
+        [
+            [_menu("📋 My plans", "plans"), _menu("🕒 Am I free?", "free")],
+            [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
+        ]
+    )

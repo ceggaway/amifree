@@ -19,6 +19,7 @@ from app.bot.keyboards import (
     confirm_keyboard,
     deadline_keyboard,
     free_keyboard,
+    menu_keyboard,
     page_keyboard,
     personal_calendars_keyboard,
     recurring_keyboard,
@@ -160,6 +161,15 @@ def decided_card(event: Event, availability, note: str, user: User) -> Reply:
     return Reply(f"{card.text}\n{note}", card.keyboard, edit=True)
 
 
+# Menu button -> the command it runs. Settings is /reminders until /settings exists.
+MENU_COMMANDS = {
+    "menu:plans": "plans",
+    "menu:free": "free",
+    "menu:deadlines": "deadlines",
+    "menu:settings": "reminders",
+}
+
+
 class SchedulingService:
     def __init__(
         self,
@@ -281,8 +291,9 @@ class SchedulingService:
             if connected:
                 return [
                     Reply(
-                        "You're all set ✅ Forward me a plan, or use /plans · /free · /calendar"
-                        "\nChecking: " + " and ".join(connected) + "."
+                        "You're all set ✅ Forward me a plan, or pick one below."
+                        "\nChecking: " + " and ".join(connected) + ".",
+                        menu_keyboard(),
                     )
                 ]
             return [Reply(onboarding.WELCOME, onboarding.welcome_keyboard(), parse_mode="HTML")]
@@ -1477,6 +1488,8 @@ class SchedulingService:
             return await self.choose_field(user, parts[1], parts[2])
         if data.startswith("rec:") and len(parts) == 3 and parts[1] in ("once", "weekly"):
             return await self.choose_recurring(user, parts[1], parts[2])
+        if data in MENU_COMMANDS:
+            return await self.command(telegram_id, MENU_COMMANDS[data])
         if data.startswith("setup:"):
             found = onboarding.screen(data.removeprefix("setup:"))
             if found is None:

@@ -11,7 +11,7 @@ HELP = """Forward me a plan and I'll save it and tell you if it clashes.
 
 1. Forward a text invitation with a date and time.
    Or ask: /free fri 7-9pm, /free tomorrow.
-2. Check the card, then tap Save, Going, Maybe, or Can't make it.
+2. Check the card, then tap Add to plans or Skip. /plans shows everything coming up.
    Forward a deadline ("report due Fri 11:59pm") and I'll remind you the day before.
 3. Optional: send your NUSMods Share/Sync link so classes and exams are checked too.
 
@@ -21,7 +21,7 @@ only covers what AmIFree knows about.
 
 /usual tue evenings, sat all day tells group polls when you're usually free.
 
-/calendar puts every Going and Saved plan in your iPhone calendar automatically, and lets
+/calendar puts every plan you've added in your iPhone calendar automatically, and lets
 you connect your own calendar so its busy times count too.
 
 In a group: reply /event to a plan message to post a card with Going / Maybe / Can't,

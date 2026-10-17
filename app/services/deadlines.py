@@ -45,7 +45,11 @@ def when(due: datetime, now: datetime) -> str:
     """'Fri 23 Oct, 11:59pm (in 8 days)'."""
     due, today = due.astimezone(SG), now.astimezone(SG).date()
     days = (due.date() - today).days
-    if days == 0:
+    if due < now:
+        relative = (
+            "overdue today" if days == 0 else f"{-days} day{'s' if days < -1 else ''} overdue"
+        )
+    elif days == 0:
         hours = int((due - now).total_seconds() // 3600)
         left = f"in {hours} hr" if hours >= 1 else "very soon"
         relative = f"today, {left}"

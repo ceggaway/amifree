@@ -917,24 +917,35 @@ class SchedulingService:
         ]
 
     async def list_deadlines(self, user: User) -> list[Reply]:
+        """Overdue first (they stay until Done or Remove), then upcoming, each with days left."""
         now = self.clock()
-        upcoming = await self.repo.deadlines_between(now, now + timedelta(days=400), user.id)
-        if not upcoming:
+        found = await self.repo.deadlines_between(
+            now - timedelta(days=365), now + timedelta(days=400), user.id
+        )
+        if not found:
             return [
                 Reply(
                     "No upcoming deadlines. Forward a message with a due date, or send "
                     "/deadline CS3244 report fri 11:59pm"
                 )
             ]
-        replies = [
-            Reply(
-                card_text(d, now, user.reminders_enabled).rsplit("\n\n", 1)[0],
-                deadline_keyboard(d.id),
-            )
-            for d in upcoming[:20]
-        ]
-        if len(upcoming) > 20:
-            replies.append(Reply(f"…and {len(upcoming) - 20} more."))
+        overdue = [d for d in found if d.due_at < now]
+        upcoming = [d for d in found if d.due_at >= now]
+        replies: list[Reply] = []
+        for heading, group in (("⚠️ Overdue", overdue), ("Coming up", upcoming)):
+            if not group:
+                continue
+            if overdue:
+                replies.append(Reply(heading))
+            replies += [
+                Reply(
+                    card_text(d, now, user.reminders_enabled).rsplit("\n\n", 1)[0],
+                    deadline_keyboard(d.id),
+                )
+                for d in group[:20]
+            ]
+            if len(group) > 20:
+                replies.append(Reply(f"…and {len(group) - 20} more."))
         return replies
 
     async def deadline_action(self, user: User, action: str, deadline_id: str) -> list[Reply]:

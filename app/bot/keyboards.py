@@ -183,6 +183,15 @@ def deadline_keyboard(deadline_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def agenda_keyboard(items: list[tuple[str, str, str]]) -> InlineKeyboardMarkup:
+    """One numbered button per agenda item; callback_data is "<kind>:<id>". Rows of six."""
+    btns = [
+        InlineKeyboardButton(label, callback_data=f"{kind}:{item_id}")
+        for label, kind, item_id in items
+    ]
+    return InlineKeyboardMarkup([btns[i : i + 6] for i in range(0, len(btns), 6)])
+
+
 def remove_block_keyboard(block_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("Remove", callback_data=f"unblock:{block_id}")]]

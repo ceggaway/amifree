@@ -201,7 +201,7 @@ async def test_new_user_saves_without_nusmods(service_factory, reference):
     card = (await service.message(1, 2, TEXT, reference))[0]
     assert card.text.startswith("✅ No clashes found")
     assert "No NUSMods timetable covers this date" in card.text
-    assert "No upcoming plans" in (await service.command(1, "plans"))[0].text
+    assert "No upcoming plans" in (await service.command(1, "events"))[0].text
     add = card.keyboard.inline_keyboard[0][0]
     assert add.text == "Add to plans"
     added = await service.callback(1, add.callback_data)
@@ -209,7 +209,7 @@ async def test_new_user_saves_without_nusmods(service_factory, reference):
     assert "In your plans" in added[0].text and "Added to your plans" in added[0].text
     event = next(iter(repo.events.values()))
     assert event.status == Status.GOING
-    assert "CCA dinner" in (await service.command(1, "plans"))[0].text
+    assert "CCA dinner" in (await service.command(1, "events"))[0].text
 
 
 async def test_overlapping_saved_plans_ask_which_to_attend(service_factory, reference):
@@ -250,8 +250,7 @@ async def test_plans_excludes_previews_and_declined(service_factory, reference):
     await service.message(1, 2, TEXT, reference)
     declined = (await service.message(1, 3, "Other Friday 7–9pm", reference))[0]
     await service.callback(1, declined.keyboard.inline_keyboard[1][0].callback_data)
-    assert "No upcoming plans" in (await service.command(1, "plans"))[0].text
-    assert len(await service.command(1, "events")) == 2
+    assert "Nothing coming up" in (await service.command(1, "plans"))[0].text
 
 
 async def test_card_buttons_follow_the_plans_status(service_factory, reference):

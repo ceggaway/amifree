@@ -227,7 +227,7 @@ async def test_free_lists_saved_plans_without_making_you_busy(service_factory, r
         "📅 Fri 9 Oct\nNothing confirmed:\n• 7–9pm CCA dinner (Saved, not decided)\nFree: 8am–11pm"
     )
     # Going makes it definite: the slot is busy and no longer free.
-    await service.callback(1, tap((await service.command(1, "plans"))[0], "Add to plans"))
+    await service.callback(1, tap((await service.command(1, "events"))[0], "Add to plans"))
     reply = (await service.command(1, "free", "fri"))[0]
     assert reply.text == ("📅 Fri 9 Oct\nBusy:\n• 7–9pm CCA dinner (Going)\nFree: 8am–7pm, 9–11pm")
     assert "Checked" not in reply.text

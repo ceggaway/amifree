@@ -83,3 +83,17 @@ async def test_declined_and_past_plans_are_not_listed(service_factory, reference
     card = (await service.message(1, 2, DINNER, reference))[0]
     await service.callback(1, tap(card, "Skip"))  # declined
     assert "Nothing coming up" in (await service.command(1, "plans"))[0].text
+
+
+async def test_start_menu_buttons_run_the_matching_command(service_factory, reference):
+    service, _ = service_factory()
+    await onboard(service, reference)
+    menu = (await service.command(1, "start"))[0]
+    labels = [b.text for row in menu.keyboard.inline_keyboard for b in row]
+    assert labels == ["📋 My plans", "🕒 Am I free?", "📌 Deadlines", "⚙️ Settings"]
+    assert (await service.callback(1, tap(menu, "📋 My plans")))[0].text.startswith(
+        "Nothing coming up"
+    )
+    assert "Reminders are" in (await service.callback(1, tap(menu, "⚙️ Settings")))[0].text
+    assert "No upcoming deadlines" in (await service.callback(1, tap(menu, "📌 Deadlines")))[0].text
+    assert await service.callback(1, tap(menu, "🕒 Am I free?"))

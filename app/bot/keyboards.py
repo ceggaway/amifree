@@ -327,3 +327,15 @@ def settings_keyboard(reminders_on: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(f"🔔 {label} reminders", callback_data=f"set:reminders:{target}")]]
     )
+
+
+def reminder_keyboard(reminder_id: str) -> InlineKeyboardMarkup:
+    def btn(label: str, action: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(label, callback_data=f"rem:{action}:{reminder_id}")
+
+    return InlineKeyboardMarkup(
+        [
+            [btn("✅ Done", "done"), btn("🗑 Remove", "del")],
+            [btn("Snooze 10 min", "10"), btn("1 hr", "60"), btn("Tomorrow", "tmr")],
+        ]
+    )

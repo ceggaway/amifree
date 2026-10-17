@@ -17,6 +17,7 @@ from app.schemas.event import (
     EventSeries,
     GroupEvent,
     Poll,
+    Reminder,
     Status,
     Suggestion,
 )
@@ -25,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -283,6 +284,70 @@ class SupabaseRepository:
             .delete()
             .eq("user_id", user_id)
             .eq("id", block_id)
+            .execute()
+        )
+        return bool(result.data)
+
+    # ---- reminders ----
+
+    async def create_reminder(self, user_id: str, text: str, remind_at: datetime) -> Reminder:
+        row = {"user_id": user_id, "text": text, "remind_at": remind_at.isoformat()}
+        result = await self.client.table("reminders").insert(row).execute()
+        return Reminder.model_validate(result.data[0])
+
+    async def get_reminder(self, user_id: str, reminder_id: str) -> Reminder | None:
+        rows = (
+            await self.client.table("reminders")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("id", reminder_id)
+            .limit(1)
+            .execute()
+        ).data
+        return Reminder.model_validate(rows[0]) if rows else None
+
+    async def reminders_between(
+        self, start: datetime, end: datetime, user_id: str | None = None
+    ) -> list[Reminder]:
+        """Open (not done) reminders ringing in [start, end), soonest first."""
+        query = (
+            self.client.table("reminders")
+            .select("*")
+            .eq("done", False)
+            .gte("remind_at", start.isoformat())
+            .lt("remind_at", end.isoformat())
+        )
+        if user_id is not None:
+            query = query.eq("user_id", user_id)
+        rows = (await query.order("remind_at").limit(500).execute()).data
+        return [Reminder.model_validate(row) for row in rows]
+
+    async def finish_reminder(self, user_id: str, reminder_id: str) -> bool:
+        result = (
+            await self.client.table("reminders")
+            .update({"done": True})
+            .eq("user_id", user_id)
+            .eq("id", reminder_id)
+            .execute()
+        )
+        return bool(result.data)
+
+    async def snooze_reminder(self, user_id: str, reminder_id: str, remind_at: datetime) -> bool:
+        result = (
+            await self.client.table("reminders")
+            .update({"remind_at": remind_at.isoformat(), "done": False})
+            .eq("user_id", user_id)
+            .eq("id", reminder_id)
+            .execute()
+        )
+        return bool(result.data)
+
+    async def delete_reminder(self, user_id: str, reminder_id: str) -> bool:
+        result = (
+            await self.client.table("reminders")
+            .delete()
+            .eq("user_id", user_id)
+            .eq("id", reminder_id)
             .execute()
         )
         return bool(result.data)

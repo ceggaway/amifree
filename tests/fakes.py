@@ -9,6 +9,7 @@ from app.schemas.event import (
     EventSeries,
     GroupEvent,
     Poll,
+    Reminder,
     Status,
     Suggestion,
 )
@@ -27,6 +28,7 @@ class MemoryRepository:
         self.notifications = []
         self.updates, self.stale_updates = {}, set()
         self.deadlines = {}
+        self.reminders = {}
         self.polls = {}
         self.poll_people = {}
         self.poll_votes = {}
@@ -782,7 +784,56 @@ class MemoryRepository:
         del self.deadlines[deadline_id]
         return True
 
+    async def create_reminder(self, user_id, text, remind_at):
+        r = Reminder(
+            id=str(uuid4()),
+            user_id=user_id,
+            text=text,
+            remind_at=remind_at,
+            created_at=datetime.now(UTC),
+        )
+        self.reminders[r.id] = r
+        return r.model_copy(deep=True)
+
+    async def get_reminder(self, user_id, reminder_id):
+        r = self.reminders.get(reminder_id)
+        return r.model_copy(deep=True) if r and r.user_id == user_id else None
+
+    async def reminders_between(self, start, end, user_id=None):
+        return sorted(
+            (
+                r.model_copy(deep=True)
+                for r in self.reminders.values()
+                if not r.done
+                and start <= r.remind_at < end
+                and (user_id is None or r.user_id == user_id)
+            ),
+            key=lambda r: r.remind_at,
+        )
+
+    async def finish_reminder(self, user_id, reminder_id):
+        r = self.reminders.get(reminder_id)
+        if not r or r.user_id != user_id:
+            return False
+        r.done = True
+        return True
+
+    async def snooze_reminder(self, user_id, reminder_id, remind_at):
+        r = self.reminders.get(reminder_id)
+        if not r or r.user_id != user_id:
+            return False
+        r.remind_at, r.done = remind_at, False
+        return True
+
+    async def delete_reminder(self, user_id, reminder_id):
+        r = self.reminders.get(reminder_id)
+        if not r or r.user_id != user_id:
+            return False
+        del self.reminders[reminder_id]
+        return True
+
     async def delete_user(self, user_id):
+        self.reminders = {k: r for k, r in self.reminders.items() if r.user_id != user_id}
         self.deadlines = {k: d for k, d in self.deadlines.items() if d.user_id != user_id}
         self.users = {t: u for t, u in self.users.items() if u.id != user_id}
         self.events = {k: e for k, e in self.events.items() if e.user_id != user_id}

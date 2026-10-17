@@ -189,3 +189,26 @@ async def test_nightly_summary_mentions_tomorrows_deadlines(service_factory, ref
     sent = await reminders_at(service, repo, at(8, hour) + timedelta(minutes=5))
     nightly = [r for r in sent if r.text.startswith("Tomorrow")]
     assert "📌 Due: CS3244 report (11:59pm)" in nightly[0].text
+
+
+async def test_list_shows_overdue_first_and_days_left(service_factory, reference):
+    service, repo = service_factory(due(), due(title="Pay hall fees", date_text="Wed"))
+    await service.command(1, "deadline", REPORT)
+    await service.command(1, "deadline", "Pay hall fees due Wed 11:59pm")
+    user = await repo.ensure_user(1)
+    late = next(d for d in repo.deadlines.values() if d.title == "Pay hall fees")
+    late.due_at = at(2, 23, 59)  # two days before the reference (Sun 4 Oct)
+
+    listed = await service.command(1, "deadlines")
+    assert [r.text.split("\n")[0] for r in listed] == [
+        "⚠️ Overdue",
+        "📌 Pay hall fees",
+        "Coming up",
+        "📌 CS3244 report",
+    ]
+    assert "2 days overdue" in listed[1].text and "in 5 days" in listed[3].text
+    # Overdue items still have Done / Remove, and Done clears them.
+    await service.callback(1, tap(listed[1], "✅ Done"))
+    again = await service.command(1, "deadlines")
+    assert [r.text.split("\n")[0] for r in again] == ["📌 CS3244 report"]
+    assert user

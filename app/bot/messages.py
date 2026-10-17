@@ -40,6 +40,7 @@ I never read group chats, and your schedule is never shown to a group.
 /usual — your usual free times for group polls
 /deadline — save something due, e.g. "/deadline CS3244 report fri 11:59pm"
 /deadlines — upcoming deadlines; tap Done when handed in
+/remind — set a reminder, e.g. "remind me at 5pm to buy milk" (or just type it)
 /settings — turn reminders on or off
 /events — every recent card, including unsaved previews
 /cancel — stop a pending clarification or edit

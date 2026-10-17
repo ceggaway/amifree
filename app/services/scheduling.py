@@ -23,6 +23,7 @@ from app.bot.keyboards import (
     page_keyboard,
     personal_calendars_keyboard,
     recurring_keyboard,
+    reminder_keyboard,
     remove_block_keyboard,
     settings_keyboard,
 )
@@ -40,6 +41,7 @@ from app.config import Settings
 from app.models.timetable import BlockRule
 from app.models.user import User
 from app.schemas.event import SG, Event, EventDraft, Extraction, GroupEvent, Status
+from app.services import quick_reminders
 from app.services.availability import check_availability
 from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
@@ -325,6 +327,12 @@ class SchedulingService:
             "pro",
         ):
             return [Reply(f"/{command} works in group chats. Add me to a group and use it there.")]
+        if command == "remind":
+            if not args.strip():
+                return [
+                    Reply("What should I remind you about, and when? " + quick_reminders.EXAMPLE)
+                ]
+            return await self.add_reminder(user, args, self.clock())
         if command == "settings":
             return [self.settings_panel(user)]
         if command == "reminders":
@@ -383,13 +391,54 @@ class SchedulingService:
             return [Reply(describe(rule), remove_block_keyboard(rule.id)) for rule in rules[:20]]
         return [Reply("Use /help to see the available commands.")]
 
+    async def add_reminder(self, user: User, text: str, reference: datetime) -> list[Reply]:
+        try:
+            draft = quick_reminders.parse_reminder(text, reference)
+        except Clarification as exc:
+            return [Reply(str(exc))]
+        reminder = await self.repo.create_reminder(user.id, draft.text, draft.remind_at)
+        await self.safe_action(user.id, "reminder_created")
+        when = quick_reminders.when_text(reminder.remind_at, reference)
+        return [
+            Reply(
+                f"⏰ Got it. I'll remind you {when}: {reminder.text}",
+                reminder_keyboard(reminder.id),
+            )
+        ]
+
+    async def reminder_action(self, user: User, action: str, reminder_id: str) -> list[Reply]:
+        try:
+            UUID(reminder_id)
+        except ValueError:
+            return [Reply("That button isn't valid. Use /plans.")]
+        reminder = await self.repo.get_reminder(user.id, reminder_id)
+        if not reminder:
+            return [Reply("That reminder is already gone. /plans lists the rest.", edit=True)]
+        if action == "del":
+            await self.repo.delete_reminder(user.id, reminder_id)
+            return [Reply(f"🗑 Removed: {reminder.text}", edit=True)]
+        if action == "done":
+            await self.repo.finish_reminder(user.id, reminder_id)
+            return [Reply(f"✅ Done: {reminder.text}", edit=True)]
+        now = self.clock()
+        target = quick_reminders.snooze_target(action, now)
+        await self.repo.snooze_reminder(user.id, reminder_id, target)
+        when = quick_reminders.when_text(target, now)
+        return [
+            Reply(
+                f"😴 Snoozed until {when}: {reminder.text}",
+                reminder_keyboard(reminder_id),
+                edit=True,
+            )
+        ]
+
     def settings_panel(self, user: User) -> Reply:
         on = user.reminders_enabled
         text = (
             "⚙️ Settings\n\n"
             f"Reminders: {'on' if on else 'off'}\n"
             "The night-before summary, deadline reminders and nudges about plans you "
-            "haven't answered. Change alerts for plans you've added always arrive."
+            "haven't answered. Change alerts for plans you've added, and reminders you set with /remind, always arrive."
         )
         return Reply(text, settings_keyboard(on))
 
@@ -583,6 +632,8 @@ class SchedulingService:
                 )
         for d in await self.repo.deadlines_between(now, now + timedelta(days=120), user.id):
             items.append((d.due_at, "dc", d.id, f"due {clock(d.due_at)}  {d.title[:60]}"))
+        for r in await self.repo.reminders_between(now, now + timedelta(days=60), user.id):
+            items.append((r.remind_at, "rc", r.id, f"{clock(r.remind_at)}  ⏰ {r.text[:60]}"))
         for rule in await self.repo.list_blocks(user.id):
             occ = expand_blocks([rule], now, now + timedelta(days=60))
             upcoming = [b for b in occ if b.end_at > now]
@@ -652,6 +703,12 @@ class SchedulingService:
                     deadline_keyboard(deadline.id),
                 )
             ]
+        if kind == "rc":
+            reminder = await self.repo.get_reminder(user.id, item_id)
+            if not reminder or reminder.done:
+                return [Reply("That reminder is gone. Use /plans.")]
+            when = quick_reminders.when_text(reminder.remind_at, self.clock())
+            return [Reply(f"⏰ {reminder.text}\nRings {when}.", reminder_keyboard(reminder.id))]
         rule = next((r for r in await self.repo.list_blocks(user.id) if r.id == item_id), None)
         if not rule:
             return [Reply("That busy block is gone. Use /plans.")]
@@ -722,6 +779,8 @@ class SchedulingService:
         if CALENDAR_URL.fullmatch(text.strip()):
             # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
             return [Reply(onboarding.NOT_A_SCHEDULE_LINK)]
+        if quick_reminders.is_reminder(text):
+            return await self.add_reminder(user, text, reference)
         pending = user.pending
         if pending and pending["stage"] == "free":
             # /free asked "when?": a day or time answers it; anything else is a new message.
@@ -1504,7 +1563,7 @@ class SchedulingService:
             return await self.list_events(user, int(page), plans=prefix == "plans")
         parts = data.split(":")
         action = parts[0]
-        if action in ("pc", "dc", "bc") and len(parts) == 2:
+        if action in ("pc", "dc", "bc", "rc") and len(parts) == 2:
             return await self.open_item(user, action, parts[1])
         if action == "dl" and len(parts) == 3 and parts[1] in ("done", "rm"):
             return await self.deadline_action(user, parts[1], parts[2])
@@ -1522,6 +1581,8 @@ class SchedulingService:
             user = await self.repo.ensure_user(telegram_id)
             panel = self.settings_panel(user)
             return [Reply(panel.text, panel.keyboard, edit=True)]
+        if action == "rem" and len(parts) == 3 and parts[1] in ("done", "del", "10", "60", "tmr"):
+            return await self.reminder_action(user, parts[1], parts[2])
         if data in MENU_COMMANDS:
             return await self.command(telegram_id, MENU_COMMANDS[data])
         if data.startswith("setup:"):

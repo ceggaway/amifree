@@ -152,6 +152,24 @@ class DeadlineDraft(BaseModel):
         return value.astimezone(SG)
 
 
+class Reminder(BaseModel):
+    """A quick reminder: a message at an exact time, never time the user is busy."""
+
+    id: str
+    user_id: str
+    text: str = Field(min_length=1, max_length=200)
+    remind_at: datetime
+    done: bool = False
+    created_at: datetime | None = None
+
+    @field_validator("remind_at")
+    @classmethod
+    def aware(cls, value):
+        if value.tzinfo is None:
+            raise ValueError("Timezone-aware datetime required")
+        return value.astimezone(SG)
+
+
 class Deadline(DeadlineDraft):
     id: str
     user_id: str

@@ -11,12 +11,18 @@ from datetime import date, datetime, time, timedelta
 
 from telegram import InlineKeyboardMarkup
 
-from app.bot.keyboards import attendance_keyboard, deadline_keyboard, nudge_keyboard
+from app.bot.keyboards import (
+    attendance_keyboard,
+    deadline_keyboard,
+    nudge_keyboard,
+    reminder_keyboard,
+)
 from app.bot.messages import Reply, details, event_card, time_range, verdict_line
 from app.schemas.event import SG, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
 from app.services.deadlines import enqueue_deadline_reminders, reminder_text
+from app.services.quick_reminders import enqueue_reminders, ringing_text
 from app.services.reminders import enqueue_nightly, summary
 from app.services.scheduling import synced
 
@@ -64,6 +70,13 @@ class Notifier:
                 text + "\n\n" + verdict_line(availability),
                 InlineKeyboardMarkup(rows) if rows else None,
             )
+        if row["kind"] == "REMIND":
+            # Asked for by the user, so it rings even with /settings reminders off. Read at
+            # send time: one finished, removed or snoozed since is not announced now.
+            reminder = await self.repo.get_reminder(user.id, payload["id"])
+            if not reminder or reminder.done or reminder.remind_at > self.scheduling.clock():
+                return None
+            return Reply(ringing_text(reminder), reminder_keyboard(reminder.id))
         if not user.reminders_enabled:
             return None
         if row["kind"] == "NIGHTLY":
@@ -180,6 +193,7 @@ class Notifier:
         extra = await self.group_tick()
         queued += extra.pop("confirmations", 0)
         queued += await enqueue_deadline_reminders(self.repo, self.scheduling.clock())
+        queued += await enqueue_reminders(self.repo, self.scheduling.clock())
         try:
             calendars = await self.scheduling.refresh_calendars()
         except Exception as exc:  # a calendar problem must never stop reminders going out

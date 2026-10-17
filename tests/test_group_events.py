@@ -154,10 +154,10 @@ async def test_rsvp_updates_headcount_and_personal_plans(service_factory, refere
     two, six = (await repo.ensure_user(2)).id, (await repo.ensure_user(6)).id
     assert linked[two].status == Status.GOING and linked[six].status == Status.SAVED
     # The linked row is the member's own plan: listed in /plans and blocking when Going.
-    plans = await service.command(2, "plans")
+    plans = await service.command(2, "events")
     assert "CCA dinner" in plans[0].text and "Status: Going" in plans[0].text
     assert "Edit" not in [b.text for row in plans[0].keyboard.inline_keyboard for b in row]
-    assert "No upcoming plans" in (await service.command(7, "plans"))[0].text
+    assert "Nothing coming up" in (await service.command(7, "plans"))[0].text
 
 
 async def test_going_from_a_group_card_blocks_later_checks(service_factory, reference):
@@ -167,7 +167,7 @@ async def test_going_from_a_group_card_blocks_later_checks(service_factory, refe
         _, taps, event = await post_card(bot, transport, repo)
         await bot.process_update(Update.de_json(group_tap(taps["Going"], 2), bot.bot))
         # A private RSVP on the linked plan re-renders the shared card's headcount.
-        mine = (await service.command(2, "plans"))[0]
+        mine = (await service.command(2, "events"))[0]
         await service.callback(2, tap(mine, "Maybe"))
     edits = [p for name, p in transport.calls if name == "editMessageText"]
     assert "Going 0 · Maybe 1" in edits[-1]["text"]

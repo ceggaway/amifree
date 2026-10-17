@@ -166,7 +166,7 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
     assert len(repo.group_events) == 1
     event = next(iter(repo.group_events.values()))
     assert event.start_at == datetime(2026, 10, 5, 16, tzinfo=SG) and event.message_id
-    assert any("project meeting" in r.text for r in await service.command(2, "plans"))
+    assert any("project meeting" in r.text for r in await service.command(2, "events"))
 
 
 async def test_poll_is_bound_to_its_chat_and_needs_a_topic(service_factory):

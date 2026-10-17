@@ -12,6 +12,7 @@ from uuid import UUID
 
 from app.bot import onboarding
 from app.bot.keyboards import (
+    agenda_keyboard,
     calendar_settings_keyboard,
     change_keyboard,
     choose_keyboard,
@@ -300,7 +301,7 @@ class SchedulingService:
         if command == "events":
             return await self.list_events(user)
         if command == "plans":
-            return await self.list_events(user, plans=True)
+            return await self.agenda(user)
         if command in (
             "event",
             "plan",
@@ -539,6 +540,98 @@ class SchedulingService:
         ]
         more = f"\n…and {len(hits) - 5} more" if len(hits) > 5 else ""
         return "\n\n⚠️ This clashes with your plans:\n" + "\n".join(lines) + more
+
+    async def agenda(self, user: User) -> list[Reply]:
+        """One message: plans, deadlines and busy time, grouped by day with a button each."""
+        now = self.clock()
+        today = now.astimezone(SG).date()
+        items: list[tuple[datetime, str, str, str]] = []
+        for e in await self.repo.recent_events(user.id):
+            if e.end_at >= now and e.status in (Status.GOING, Status.SAVED, Status.MAYBE):
+                venue = f", {e.location[:40]}" if e.location else ""
+                items.append(
+                    (
+                        e.start_at,
+                        "pc",
+                        e.id,
+                        f"{time_range(e.start_at, e.end_at)}  {e.title[:60]}{venue}",
+                    )
+                )
+        for d in await self.repo.deadlines_between(now, now + timedelta(days=120), user.id):
+            items.append((d.due_at, "dc", d.id, f"due {clock(d.due_at)}  {d.title[:60]}"))
+        for rule in await self.repo.list_blocks(user.id):
+            occ = expand_blocks([rule], now, now + timedelta(days=60))
+            upcoming = [b for b in occ if b.end_at > now]
+            if upcoming:
+                b = min(upcoming, key=lambda b: b.start_at)
+                weekly = " (weekly)" if rule.kind == "WEEKLY" else ""
+                items.append(
+                    (
+                        b.start_at,
+                        "bc",
+                        rule.id,
+                        f"{time_range(b.start_at, b.end_at)}  {rule.title[:50]} · busy{weekly}",
+                    )
+                )
+        if not items:
+            return [Reply("Nothing coming up. Forward a plan, or add a deadline with /deadline.")]
+        items.sort(key=lambda it: it[0])
+        shown, extra = items[:24], max(0, len(items) - 24)
+
+        def bucket(when: datetime) -> tuple[int, str]:
+            day = when.astimezone(SG).date()
+            if day <= today:
+                return 0, "Today"
+            if day == today + timedelta(days=1):
+                return 1, "Tomorrow"
+            if day <= today + timedelta(days=7):
+                return 2, "This week"
+            return 3, "Later"
+
+        lines: list[str] = []
+        buttons: list = []
+        last = None
+        for n, (when, kind, item_id, text) in enumerate(shown, 1):
+            rank, label = bucket(when)
+            if rank != last:
+                lines.append(("" if last is None else "\n") + label)
+                last = rank
+            day_prefix = f"{when:%a %-d %b} " if rank >= 2 else ""
+            lines.append(f"{n}. {day_prefix}{text}")
+            buttons.append((str(n), kind, item_id))
+        footer = f"\n\n+ {extra} more" if extra else ""
+        return [
+            Reply(
+                "Coming up — tap a number to open it.\n\n" + "\n".join(lines) + footer,
+                agenda_keyboard(buttons),
+            )
+        ]
+
+    async def open_item(self, user: User, kind: str, item_id: str) -> list[Reply]:
+        """Open one agenda item as its own card, so it can be edited or removed."""
+        try:
+            UUID(item_id)
+        except ValueError:
+            return [Reply("That button isn't valid. Use /plans.")]
+        if kind == "pc":
+            event = await self.repo.get_event(user.id, item_id)
+            if not event or event.status in (Status.PREVIEW, Status.DECLINED, Status.CANCELLED):
+                return [Reply("That plan isn't in your plans any more. Use /plans.")]
+            return [event_card(event, await self.availability(user, event, event.id), synced(user))]
+        if kind == "dc":
+            deadline = await self.repo.get_deadline(user.id, item_id)
+            if not deadline:
+                return [Reply("That deadline is gone. Use /plans.")]
+            return [
+                Reply(
+                    card_text(deadline, self.clock(), user.reminders_enabled),
+                    deadline_keyboard(deadline.id),
+                )
+            ]
+        rule = next((r for r in await self.repo.list_blocks(user.id) if r.id == item_id), None)
+        if not rule:
+            return [Reply("That busy block is gone. Use /plans.")]
+        return [Reply(describe(rule), remove_block_keyboard(rule.id))]
 
     async def list_events(self, user: User, page: int = 0, plans: bool = False) -> list[Reply]:
         events = await self.repo.recent_events(user.id)
@@ -1376,6 +1469,8 @@ class SchedulingService:
             return await self.list_events(user, int(page), plans=prefix == "plans")
         parts = data.split(":")
         action = parts[0]
+        if action in ("pc", "dc", "bc") and len(parts) == 2:
+            return await self.open_item(user, action, parts[1])
         if action == "dl" and len(parts) == 3 and parts[1] in ("done", "rm"):
             return await self.deadline_action(user, parts[1], parts[2])
         if action == "chg" and len(parts) == 3 and parts[1] in ("venue", "time", "title"):

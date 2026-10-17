@@ -320,3 +320,10 @@ def menu_keyboard() -> InlineKeyboardMarkup:
             [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
         ]
     )
+
+
+def settings_keyboard(reminders_on: bool) -> InlineKeyboardMarkup:
+    label, target = ("Turn off", "off") if reminders_on else ("Turn on", "on")
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(f"🔔 {label} reminders", callback_data=f"set:reminders:{target}")]]
+    )

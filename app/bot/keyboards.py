@@ -12,34 +12,46 @@ def event_keyboard(
     def button(label, action, target=event):
         return InlineKeyboardButton(label, callback_data=f"{action}:{target.id}:{target.version}")
 
-    go = "force" if clash else "go"
-    # Shared group plans are edited once by their organiser, not per member.
-    edit = [] if event.group_event_id else [button("Edit", "edit")]
-    if event.status == Status.PREVIEW:
-        rows = [
-            [button("Going anyway" if clash else "Going", go), button("Maybe", "maybe")],
-            [button("Can't make it", "decline")] + edit,
-            [button("Save", "save")],
-        ]
-    else:
-        # Once decided, offer only the other answers. No Save: on a Going plan it would
-        # quietly downgrade the commitment to "Saved (not decided)".
+    add_action = "force" if clash else "go"
+
+    def calendar_row():
+        from app.services.calendar_export import google_link
+
+        return calendar_keyboard(event, google_link(event)).inline_keyboard[0]
+
+    if event.group_event_id:
+        # A member's RSVP to a shared group plan: keep Going / Maybe / Can't, edited
+        # once by the organiser from the group, never per member.
         answers = [
-            (Status.GOING, button("Going anyway" if clash else "Going", go)),
+            (Status.GOING, button("Going anyway" if clash else "Going", add_action)),
             (Status.MAYBE, button("Maybe", "maybe")),
             (Status.DECLINED, button("Can't make it", "decline")),
         ]
-        rows = [[b for status, b in answers if status != event.status]]
-        if edit:
-            rows.append(edit)
-        # With a live calendar subscription the plan is already on its way: no buttons.
+        if event.status == Status.PREVIEW:
+            rows = [[b for _, b in answers]]
+        else:
+            rows = [[b for status, b in answers if status != event.status]]
         if event.status in (Status.SAVED, Status.GOING) and not synced:
-            from app.services.calendar_export import google_link
-
-            rows.append(calendar_keyboard(event, google_link(event)).inline_keyboard[0])
+            rows.append(calendar_row())
+    else:
+        # A personal plan: it's in your plans (blocks your time, goes to your calendar)
+        # or it isn't. Save and Maybe were removed in favour of one Add to plans.
+        add = button("Add anyway" if clash else "Add to plans", add_action)
+        edit = button("Edit", "edit")
+        if event.status == Status.GOING:
+            rows = [[edit, button("Remove", "decline")]]
+            if not synced:
+                rows.append(calendar_row())
+        elif event.status == Status.PREVIEW:
+            rows = [[add], [button("Skip", "decline"), edit]]
+        else:
+            # Declined, or a legacy Saved/Maybe plan: offer to add it to your plans.
+            rows = [[add, edit]]
+            if event.status == Status.SAVED and not synced:
+                rows.append(calendar_row())
     if possible:
         # Choosing one never deletes the other; it only commits the chosen plan.
-        rows.append([button("Attend this one", go)])
+        rows.append([button("Attend this one", add_action)])
         rows.extend([button(f"Attend {other.title[:40]}", "go", other)] for other in possible[:3])
     return InlineKeyboardMarkup(rows)
 

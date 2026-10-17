@@ -79,8 +79,7 @@ def has_calendar(reply):
 
 async def save_plan(service, reference):
     card = (await service.message(1, 2, TEXT, reference))[0]
-    save = card.keyboard.inline_keyboard[2][0]
-    return await service.callback(1, save.callback_data)
+    return await service.callback(1, tap(card, "Add to plans"))
 
 
 async def test_saving_offers_both_calendars(service_factory, reference):
@@ -103,14 +102,12 @@ async def test_apple_button_sends_the_ics_file(service_factory, reference):
     assert any(a[1] == "calendar_export" for a in repo.actions)
 
 
-async def test_going_offers_calendars_but_maybe_does_not(service_factory, reference):
+async def test_adding_offers_calendars_a_preview_does_not(service_factory, reference):
     service, _ = service_factory(extraction())
     card = (await service.message(1, 2, TEXT, reference))[0]
-    going, maybe = card.keyboard.inline_keyboard[0]
-    marked_maybe = await service.callback(1, maybe.callback_data)
-    assert not has_calendar(marked_maybe[0])
-    went = await service.callback(1, tap(marked_maybe[0], "Going"))
-    assert calendar_row(went[0])[0].text == "📅 Google Calendar"
+    assert not has_calendar(card)  # a preview, not yet added, has no calendar buttons
+    added = await service.callback(1, tap(card, "Add to plans"))
+    assert calendar_row(added[0])[0].text == "📅 Google Calendar"
 
 
 async def test_other_users_and_dropped_plans_get_no_file(service_factory, reference):
@@ -119,7 +116,7 @@ async def test_other_users_and_dropped_plans_get_no_file(service_factory, refere
     data = calendar_row(saved[0])[1].callback_data
     assert (await service.callback(2, data))[0].document is None  # not your plan
     assert "isn't valid" in (await service.callback(1, "ics:not-a-uuid"))[0].text
-    decline = tap(saved[0], "Can't make it")
+    decline = tap(saved[0], "Remove")
     await service.callback(1, decline)
     assert (await service.callback(1, data))[0].document is None
 

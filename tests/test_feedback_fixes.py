@@ -17,7 +17,7 @@ UNCHANGED = dict(
 async def going_dinner(service, reference):
     await onboard(service, reference)
     card = (await service.message(1, 2, TEXT, reference))[0]
-    return await service.callback(1, tap(card, "Going"))
+    return await service.callback(1, tap(card, "Add to plans"))
 
 
 # 1. Changing only the venue ------------------------------------------------------------

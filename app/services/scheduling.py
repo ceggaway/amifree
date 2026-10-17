@@ -1533,18 +1533,19 @@ class SchedulingService:
         availability = await self.availability(user, event, event.id)
         if action == "go" and availability.conflicts:
             return [
-                Reply(
-                    "Your availability changed. Review the clashes before choosing Going anyway."
-                ),
+                Reply("Your availability changed. Review the clashes before adding it anyway."),
                 event_card(event, availability),
             ]
+        was_preview = event.status == Status.PREVIEW
         result = await self.repo.rsvp(user.id, event, statuses[action])
         if not result:
             return [Reply("That event changed. Use /events to see the latest card.")]
         await self.group_changed(result.group_event_id)
-        note = {
-            Status.GOING: "Added to your commitments: this time is now blocked.",
-            Status.MAYBE: "Marked Maybe. This won't block your time.",
-            Status.DECLINED: "Marked Can't make it. This won't block your time.",
-        }[statuses[action]]
+        if statuses[action] == Status.DECLINED:
+            note = "Skipped." if was_preview else "Removed from your plans."
+        else:
+            note = {
+                Status.GOING: "Added to your plans. This time is now blocked.",
+                Status.MAYBE: "Marked Maybe. This won't block your time.",
+            }[statuses[action]]
         return [decided_card(result, availability, note, user)]

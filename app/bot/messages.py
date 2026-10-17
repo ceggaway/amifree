@@ -52,6 +52,12 @@ STATUS_LABELS = {
     Status.MAYBE: "Maybe",
     Status.DECLINED: "Can't make it",
 }
+# A personal plan is simply in your plans or not; a group RSVP keeps the words above.
+PERSONAL_STATUS_LABELS = {
+    Status.PREVIEW: "Not added yet",
+    Status.GOING: "In your plans",
+    Status.DECLINED: "Not in your plans",
+}
 
 
 @dataclass
@@ -207,7 +213,10 @@ def event_card(event: Event, availability: Availability, synced: bool = False) -
             + ". Which will you attend?"
         )
     body += "\n\n" + checked_line(availability)
-    body += "\nStatus: " + STATUS_LABELS[event.status]
+    label = STATUS_LABELS[event.status]
+    if not event.group_event_id:
+        label = PERSONAL_STATUS_LABELS.get(event.status, label)
+    body += "\nStatus: " + label
     if synced and event.status in (Status.SAVED, Status.GOING):
         body += "\n📅 Syncing to your calendar automatically."
     keyboard = event_keyboard(event, bool(availability.conflicts), availability.possible, synced)

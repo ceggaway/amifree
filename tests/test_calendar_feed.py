@@ -31,7 +31,7 @@ def link_in(reply):
 
 async def going(service, reference, telegram_id=1, message_id=2, text=TEXT):
     card = (await service.message(telegram_id, message_id, text, reference))[0]
-    return (await service.callback(telegram_id, tap(card, "Going")))[0]
+    return (await service.callback(telegram_id, tap(card, "Add to plans")))[0]
 
 
 async def test_calendar_command_gives_a_private_link_and_iphone_steps(online):
@@ -61,9 +61,9 @@ async def test_feed_has_only_your_going_and_saved_plans(online, reference):
     token = link_in((await service.command(1, "calendar"))[0])[1]
     await going(service, reference)
     supper = (await service.message(1, 3, "Hall supper Friday 10pm-11pm", reference))[0]
-    await service.callback(1, tap(supper, "Save"))
+    await service.callback(1, tap(supper, "Add to plans"))
     badminton = (await service.message(1, 4, "Badminton Saturday 7-9pm", reference))[0]
-    await service.callback(1, tap(badminton, "Maybe"))
+    await service.callback(1, tap(badminton, "Skip"))  # skipped: never in the feed
     await going(service, reference, telegram_id=2, message_id=5)
     feed = (await service.calendar_feed(token)).decode()
     assert feed.count("BEGIN:VEVENT") == 2
@@ -77,7 +77,7 @@ async def test_dropping_a_plan_removes_it_from_the_feed(online, reference):
     token = link_in((await service.command(1, "calendar"))[0])[1]
     card = await going(service, reference)
     assert "CCA dinner" in (await service.calendar_feed(token)).decode()
-    await service.callback(1, tap(card, "Can't make it"))
+    await service.callback(1, tap(card, "Remove"))
     assert "BEGIN:VEVENT" not in (await service.calendar_feed(token)).decode()
 
 

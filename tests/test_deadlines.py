@@ -183,7 +183,7 @@ async def test_no_reminder_for_a_deadline_added_after_its_moment(service_factory
 async def test_nightly_summary_mentions_tomorrows_deadlines(service_factory, reference):
     service, repo = service_factory(extraction(), due())
     card = (await service.message(1, 1, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-    await service.callback(1, tap(card, "Going"))
+    await service.callback(1, tap(card, "Add to plans"))
     await service.message(1, 2, REPORT, reference)
     hour = service.settings.nightly_hour
     sent = await reminders_at(service, repo, at(8, hour) + timedelta(minutes=5))

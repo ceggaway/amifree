@@ -140,7 +140,7 @@ def create_app(
                     BotCommand("block", "Mark yourself busy: busy sat 2-6pm"),
                     BotCommand("deadline", "Save a deadline: CS3244 report fri 11:59pm"),
                     BotCommand("deadlines", "Upcoming deadlines"),
-                    BotCommand("reminders", "Night-before summary on or off"),
+                    BotCommand("settings", "Reminders and other settings"),
                     BotCommand("free", "Am I free? e.g. /free fri 7-9pm"),
                     BotCommand("usual", "Your usual free times: /usual tue evenings"),
                     BotCommand("calendar", "Calendar sync and your calendar's busy times"),

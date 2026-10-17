@@ -24,6 +24,7 @@ from app.bot.keyboards import (
     personal_calendars_keyboard,
     recurring_keyboard,
     remove_block_keyboard,
+    settings_keyboard,
 )
 from app.bot.messages import (
     HELP,
@@ -161,12 +162,12 @@ def decided_card(event: Event, availability, note: str, user: User) -> Reply:
     return Reply(f"{card.text}\n{note}", card.keyboard, edit=True)
 
 
-# Menu button -> the command it runs. Settings is /reminders until /settings exists.
+# Menu button -> the command it runs.
 MENU_COMMANDS = {
     "menu:plans": "plans",
     "menu:free": "free",
     "menu:deadlines": "deadlines",
-    "menu:settings": "reminders",
+    "menu:settings": "settings",
 }
 
 
@@ -324,6 +325,8 @@ class SchedulingService:
             "pro",
         ):
             return [Reply(f"/{command} works in group chats. Add me to a group and use it there.")]
+        if command == "settings":
+            return [self.settings_panel(user)]
         if command == "reminders":
             choice = args.lower()
             if choice in ("on", "off"):
@@ -379,6 +382,16 @@ class SchedulingService:
                 return [Reply("No busy blocks yet. " + USAGE)]
             return [Reply(describe(rule), remove_block_keyboard(rule.id)) for rule in rules[:20]]
         return [Reply("Use /help to see the available commands.")]
+
+    def settings_panel(self, user: User) -> Reply:
+        on = user.reminders_enabled
+        text = (
+            "⚙️ Settings\n\n"
+            f"Reminders: {'on' if on else 'off'}\n"
+            "The night-before summary, deadline reminders and nudges about plans you "
+            "haven't answered. Change alerts for plans you've added always arrive."
+        )
+        return Reply(text, settings_keyboard(on))
 
     async def usual_command(self, user: User, args: str) -> list[Reply]:
         """/usual tue evenings, sat all day: standing free times that pre-fill poll grids."""
@@ -1499,6 +1512,16 @@ class SchedulingService:
             return await self.choose_field(user, parts[1], parts[2])
         if data.startswith("rec:") and len(parts) == 3 and parts[1] in ("once", "weekly"):
             return await self.choose_recurring(user, parts[1], parts[2])
+        if (
+            action == "set"
+            and len(parts) == 3
+            and parts[1] == "reminders"
+            and parts[2] in ("on", "off")
+        ):
+            await self.repo.set_user_flags(user.id, reminders_enabled=parts[2] == "on")
+            user = await self.repo.ensure_user(telegram_id)
+            panel = self.settings_panel(user)
+            return [Reply(panel.text, panel.keyboard, edit=True)]
         if data in MENU_COMMANDS:
             return await self.command(telegram_id, MENU_COMMANDS[data])
         if data.startswith("setup:"):

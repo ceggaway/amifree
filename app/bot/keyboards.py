@@ -339,3 +339,14 @@ def reminder_keyboard(reminder_id: str) -> InlineKeyboardMarkup:
             [btn("Snooze 10 min", "10"), btn("1 hr", "60"), btn("Tomorrow", "tmr")],
         ]
     )
+
+
+def undo_keyboard(token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Undo", callback_data=f"undo:{token}")]])
+
+
+def plan_undo_keyboard(event: Event) -> InlineKeyboardMarkup:
+    """After removing a plan: one tap adds it back (the same action as Add to plans)."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("↩️ Undo", callback_data=f"go:{event.id}:{event.version}")]]
+    )

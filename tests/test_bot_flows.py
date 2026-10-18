@@ -264,5 +264,5 @@ async def test_card_buttons_follow_the_plans_status(service_factory, reference):
     assert labels(added[0]) == ["Edit", "Remove", *cal]
     assert next(iter(repo.events.values())).status == Status.GOING
     removed = await service.callback(1, tap(added[0], "Remove"))
-    assert labels(removed[0]) == ["Add to plans", "Edit"]  # out of plans: can add it back
+    assert labels(removed[0]) == ["↩️ Undo"]  # one tap brings it back
     assert next(iter(repo.events.values())).status == Status.DECLINED

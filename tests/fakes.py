@@ -695,6 +695,22 @@ class MemoryRepository:
         ]
         return sorted(found, key=lambda g: g.start_at)
 
+    async def chat_events(self, chat_id, ends_after, limit=200):
+        found = [
+            g.model_copy(deep=True)
+            for g in self.group_events.values()
+            if g.chat_id == chat_id and g.status == "ACTIVE" and g.end_at > ends_after
+        ]
+        return sorted(found, key=lambda g: (g.start_at, g.id))[:limit]
+
+    async def chat_polls(self, chat_id, now):
+        found = [
+            p.model_copy(deep=True)
+            for p in self.polls.values()
+            if p.chat_id == chat_id and p.status != "CLOSED" and p.window_end > now
+        ]
+        return found[:20]
+
     async def group_tier(self, chat_id, now):
         tier, expires = self.tiers.get(chat_id, ("FREE", None))
         return "PRO" if tier == "PRO" and (expires is None or expires > now) else "FREE"

@@ -11,13 +11,34 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 
-from app.api.auth import AuthError, issue_token, session_key, verify_init_data, verify_token
-from app.api.schemas import AuthRequest, AvailabilityRequest, BlockRequest, PlanPatch
+from app.api.auth import (
+    AuthError,
+    init_data_profile,
+    issue_token,
+    session_key,
+    verify_init_data,
+    verify_token,
+)
+from app.api.schemas import (
+    AttendanceRequest,
+    AuthRequest,
+    AvailabilityRequest,
+    BlockRequest,
+    GroupEventForm,
+    GroupEventPatch,
+    PlanPatch,
+    PollForm,
+    RsvpRequest,
+    SeriesRequest,
+    VersionRequest,
+)
 from app.config import Settings
 from app.models.user import User
 from app.schemas.event import Event, EventDraft, Status
+from app.services.app_links import parse_chat_code
 from app.services.availability import Availability
 from app.services.date_resolution import Clarification
+from app.services.group_hub import NotFound, Refused
 from app.services.quick_blocks import MAX_RULES, describe, parse_block
 from app.services.ratelimit import RateLimiter
 
@@ -75,6 +96,27 @@ def window(start: datetime, end: datetime, max_days: int):
         raise HTTPException(422, f"Choose a range of at most {max_days} days")
 
 
+def hub_json(data):
+    """Turn the hub's Availability objects into the same JSON the rest of the API uses."""
+    if isinstance(data, Availability):
+        return availability_json(data)
+    if isinstance(data, dict):
+        return {k: hub_json(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [hub_json(v) for v in data]
+    return data
+
+
+async def hub_call(work):
+    """Run a hub call: not yours and missing both read 404; a refusal carries its reason."""
+    try:
+        return hub_json(await work)
+    except NotFound:
+        raise HTTPException(404, "Not found") from None
+    except Refused as exc:
+        raise HTTPException(409, hub_json({"message": str(exc), **(exc.detail or {})})) from None
+
+
 def valid_id(value: str) -> str:
     try:
         return str(UUID(value))
@@ -125,6 +167,8 @@ def build_router(settings: Settings) -> APIRouter:
         except AuthError:
             raise HTTPException(401, "Telegram sign-in could not be verified") from None
         await service.repo.ensure_user(telegram_id)
+        # Kept so people who only use the app still have a name in "Who's going?".
+        service.hub.remember_profile(telegram_id, *init_data_profile(body.init_data))
         return {
             "token": issue_token(telegram_id, key, settings.session_ttl),
             "expires_in": settings.session_ttl,
@@ -252,28 +296,101 @@ def build_router(settings: Settings) -> APIRouter:
             await service.group_changed(event.group_event_id)
         return plan_json(event, await service.availability(user, event, event.id))
 
+    # ---- groups: the Mini App opened from a group or one of its cards ----
+
+    def chat_of(code: str) -> int:
+        chat_id = parse_chat_code(code)
+        if chat_id is None:
+            raise HTTPException(404, "Not found")
+        return chat_id
+
+    async def group_card(request: Request, user: User, event_id: str, organiser=False):
+        hub = service_of(request).hub
+        found = hub.organised if organiser else hub.event_for
+        return hub, await hub_call(found(user, valid_id(event_id)))
+
+    @router.get("/groups/{code}")
+    async def group_overview(code: str, request: Request, user: CurrentUser):
+        return await hub_call(service_of(request).hub.overview(user, chat_of(code)))
+
+    @router.post("/groups/{code}/events")
+    async def create_group_event(
+        code: str, body: GroupEventForm, request: Request, user: CurrentUser
+    ):
+        fields = body.model_dump(include={"title", "start_at", "end_at", "location", "notes"})
+        return await hub_call(
+            service_of(request).hub.create_event(
+                user, chat_of(code), body.request_id, fields, body.weekdays, body.until
+            )
+        )
+
+    @router.post("/groups/{code}/polls")
+    async def create_group_poll(code: str, body: PollForm, request: Request, user: CurrentUser):
+        return await hub_call(
+            service_of(request).hub.create_poll(
+                user,
+                chat_of(code),
+                body.request_id,
+                body.title,
+                body.minutes,
+                body.first,
+                body.last,
+                body.reply_by,
+            )
+        )
+
     @router.get("/group-events/{event_id}")
     async def group_event(event_id: str, request: Request, user: CurrentUser):
-        service = service_of(request)
-        event = await service.repo.get_group_event(valid_id(event_id))
-        # Visible only to people already seen in that group; the ID alone grants nothing.
-        if not event or user.id not in await service.repo.group_member_ids(event.chat_id):
-            raise HTTPException(404, "Not found")
-        linked = await service.repo.linked_event(user.id, event.id)
-        counts = await service.repo.group_counts(event.id)
-        found = await service.availability(user, event, linked.id if linked else None)
-        return {
-            "id": event.id,
-            "title": event.title,
-            "start_at": event.start_at.isoformat(),
-            "end_at": event.end_at.isoformat(),
-            "location": event.location,
-            "notes": event.notes,
-            "status": event.status,
-            "counts": {s: counts.get(s, 0) for s in ("GOING", "MAYBE", "DECLINED")},
-            "my_status": linked.status.value if linked else None,
-            "availability": availability_json(found),
-        }
+        hub, event = await group_card(request, user, event_id)
+        return await hub_call(hub.detail(user, event))
+
+    @router.post("/group-events/{event_id}/rsvp")
+    async def group_rsvp(event_id: str, body: RsvpRequest, request: Request, user: CurrentUser):
+        hub, event = await group_card(request, user, event_id)
+        return await hub_call(hub.rsvp(user, event, body.status, body.force))
+
+    @router.post("/group-events/{event_id}/check-in")
+    async def group_check_in(event_id: str, request: Request, user: CurrentUser):
+        hub, event = await group_card(request, user, event_id)
+        return await hub_call(hub.check_in(user, event))
+
+    @router.post("/group-events/{event_id}/going-to-all")
+    async def group_going_to_all(event_id: str, request: Request, user: CurrentUser):
+        hub, event = await group_card(request, user, event_id)
+        return await hub_call(hub.going_to_all(user, event))
+
+    @router.patch("/group-events/{event_id}")
+    async def edit_group_event(
+        event_id: str, body: GroupEventPatch, request: Request, user: CurrentUser
+    ):
+        hub, event = await group_card(request, user, event_id, organiser=True)
+        changes = {f: getattr(body, f) for f in EDITABLE if f in body.model_fields_set}
+        return await hub_call(hub.edit(user, event, body.version, changes))
+
+    @router.post("/group-events/{event_id}/cancel")
+    async def cancel_group_event(
+        event_id: str, body: VersionRequest, request: Request, user: CurrentUser
+    ):
+        hub, event = await group_card(request, user, event_id, organiser=True)
+        return await hub_call(hub.cancel(user, event, body.version))
+
+    @router.post("/group-events/{event_id}/series")
+    async def group_series(event_id: str, body: SeriesRequest, request: Request, user: CurrentUser):
+        hub, event = await group_card(request, user, event_id, organiser=True)
+        return await hub_call(hub.series(user, event, body.action))
+
+    @router.post("/group-events/{event_id}/nudge")
+    async def nudge_group_event(event_id: str, request: Request, user: CurrentUser):
+        hub, event = await group_card(request, user, event_id, organiser=True)
+        return await hub_call(hub.nudge(user, event))
+
+    @router.put("/group-events/{event_id}/attendance")
+    async def mark_group_attendance(
+        event_id: str, body: AttendanceRequest, request: Request, user: CurrentUser
+    ):
+        hub, event = await group_card(request, user, event_id, organiser=True)
+        person = valid_id(body.user_id) if body.user_id else None
+        return await hub_call(hub.mark(user, event, person, body.present))
 
     # Each heatmap reads every participant's schedule: bound how often one person can ask.
     heatmap_limit = RateLimiter(20, 60)

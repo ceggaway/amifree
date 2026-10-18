@@ -3,18 +3,32 @@ import { HashRouter, NavLink, Route, Routes, useNavigate } from "react-router-do
 import { mockMode } from "./api";
 import { Blocks } from "./pages/Blocks";
 import { Calendar } from "./pages/Calendar";
+import { FindTime } from "./pages/FindTime";
+import { GroupEvent } from "./pages/GroupEvent";
+import { GroupHome } from "./pages/GroupHome";
+import { NewEvent } from "./pages/NewEvent";
 import { Heatmap } from "./pages/Heatmap";
 import { MyTimes } from "./pages/MyTimes";
 import { Home } from "./pages/Home";
 import { Plans } from "./pages/Plans";
 import { startParam } from "./telegram";
 
-/** A link from a group poll card opens straight onto that poll's heatmap. */
+/** Where a link from a group opens: t.me/<bot>/<app>?startapp=<page>_<id>. */
+export function startPath(param: string): string | null {
+  const poll = /^(poll|mine)_([0-9a-f-]{36})$/i.exec(param);
+  if (poll) return `/poll/${poll[2]}${poll[1] === "mine" ? "/mine" : ""}`;
+  const event = /^ev_([0-9a-f-]{36})$/i.exec(param);
+  if (event) return `/e/${event[1]}`;
+  const group = /^(g|new|find)_([np]\d{1,20})$/.exec(param);
+  if (group) return `/g/${group[2]}${group[1] === "g" ? "" : `/${group[1]}`}`;
+  return null;
+}
+
 function StartRoute() {
   const navigate = useNavigate();
   useEffect(() => {
-    const match = /^(poll|mine)_([0-9a-f-]{36})$/i.exec(startParam());
-    if (match) navigate(`/poll/${match[2]}${match[1] === "mine" ? "/mine" : ""}`, { replace: true });
+    const path = startPath(startParam());
+    if (path) navigate(path, { replace: true });
   }, [navigate]);
   return null;
 }
@@ -33,6 +47,10 @@ export function App() {
           <Route path="/busy" element={<Blocks />} />
           <Route path="/poll/:id" element={<Heatmap />} />
           <Route path="/poll/:id/mine" element={<MyTimes />} />
+          <Route path="/g/:code" element={<GroupHome />} />
+          <Route path="/g/:code/new" element={<NewEvent />} />
+          <Route path="/g/:code/find" element={<FindTime />} />
+          <Route path="/e/:id" element={<GroupEvent />} />
         </Routes>
       </main>
       <nav>

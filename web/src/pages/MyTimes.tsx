@@ -2,16 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api";
 import { dragState, paint, setDay, ticked } from "../availability";
-import { rowTimes } from "../heatmap";
+import { time } from "../format";
+import { dayLabel, rowTimes } from "../heatmap";
 import type { MyGrid } from "../types";
 import { useLoad } from "../useLoad";
-
-const dayLabel = (date: string) =>
-  new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
-const clock = (iso: string) => {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
 
 /** A member's own times for a poll: busy cells are blocked, the rest can be ticked or cleared. */
 export function MyTimes() {
@@ -41,8 +35,8 @@ export function MyTimes() {
       </section>
     );
   }
-  const rows = rowTimes(grid.days.map((d) => ({ date: d.date, cells: d.cells.map((c) => ({ ...c, free: 0 })) })));
-  const lookup = grid.days.map((d) => new Map(d.cells.map((c) => [clock(c.start_at), c])));
+  const rows = rowTimes(grid.days);
+  const lookup = grid.days.map((d) => new Map(d.cells.map((c) => [time(c.start_at), c])));
   const count = ticked(grid).length;
 
   function tap(start: string) {
@@ -81,6 +75,8 @@ export function MyTimes() {
     try {
       const done = await api.saveGrid(id, ticked(grid));
       setStatus(`Saved ${done.saved} half hours.${done.dropped ? ` ${done.dropped} were blocked and left out.` : ""}`);
+      // The button now updates the saved answer rather than submitting a first one.
+      setGrid((current) => (current ? { ...current, submitted: true } : current));
     } catch (e) {
       setStatus((e as Error).message || "Couldn't save. Try again.");
     } finally {

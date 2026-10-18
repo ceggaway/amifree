@@ -183,11 +183,11 @@ async def test_detected_plan_becomes_a_card_only_on_a_tap(service_factory):
         await run(bot, "Badminton Saturday 4pm-6pm at UTSRC anyone keen?", 92, 2)
         assert len(repo.suggestions) == 1
         await bot.process_update(
-            Update.de_json(group_tap(taps["Make event card"], 3, update_id=9100), bot.bot)
+            Update.de_json(group_tap(taps["Make event card"], 2, update_id=9100), bot.bot)
         )
     event = next(iter(repo.group_events.values()))
     assert event.title == "Badminton" and event.message_id == 101
-    assert event.creator_user_id == (await repo.ensure_user(3)).id
+    assert event.creator_user_id == (await repo.ensure_user(2)).id
     assert event.source_message_id == 92 and not repo.suggestions
     edits = [p for name, p in transport.calls if name == "editMessageText"]
     assert "📅 Badminton" in edits[-1]["text"] and "Going 0" in edits[-1]["text"]
@@ -208,7 +208,7 @@ async def test_ignored_and_stale_suggestions_disappear(service_factory):
         await run(bot, "Badminton Saturday 4pm-6pm at UTSRC", 95, 2)
         taps = buttons(transport.sent[-1]["reply_markup"])
         await bot.process_update(
-            Update.de_json(group_tap(taps["Ignore"], 3, update_id=9200), bot.bot)
+            Update.de_json(group_tap(taps["Ignore"], 2, update_id=9200), bot.bot)
         )
         assert [c for c in transport.calls if c[0] == "deleteMessage"]
         assert not repo.suggestions and not repo.group_events

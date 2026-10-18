@@ -74,6 +74,11 @@ def clock_date(when: datetime) -> str:
     return f"{when.astimezone(SG):%Y%m%d}"
 
 
+def member_label(names: dict[str, tuple[str | None, str | None]], user_id: str) -> str:
+    name, username = names.get(user_id, (None, None))
+    return name or (f"@{username}" if username else "Someone")
+
+
 class GroupEventService:
     def __init__(self, scheduling):
         self.scheduling = scheduling
@@ -238,18 +243,20 @@ class GroupEventService:
         if not event or not event.series_id or event.creator_user_id != user.id:
             return [Reply("Only the organiser can change a series.")]
         series = await self.repo.get_series(event.series_id)
+        now = self.scheduling.clock()
+        # Sessions already held stay as they were: changing them would rewrite attendance stats.
         later = [
             s
             for s in await self.repo.series_sessions(event.series_id)
             if s.occurrence_date
             and event.occurrence_date
             and s.occurrence_date > event.occurrence_date
+            and s.status == "ACTIVE"
+            and s.end_at > now
         ]
         if parts[1] == "stop":
             keys = []
             for session in later:
-                if session.status != "ACTIVE":
-                    continue
                 result = await self.repo.update_group_event(user.id, session, None, True)
                 if result:
                     keys.append(f"{result.id}:{result.version}")
@@ -267,7 +274,7 @@ class GroupEventService:
         length = event.end_at - event.start_at
         changed, keys = [], []
         for session in later:
-            if session.status != "ACTIVE" or session.edited_alone:
+            if session.edited_alone:
                 continue
             start = datetime.combine(session.occurrence_date, event.start_at.timetz(), SG)
             draft = EventDraft(
@@ -297,8 +304,9 @@ class GroupEventService:
                 changed.append(session.id)
                 keys.append(f"{result.id}:{result.version}")
                 await self.scheduling.group_changed(session.id)
-        # Applying a series-wide change is not "edited on its own": later bulk changes still reach them.
-        await self.repo.clear_edited(changed)
+        # Applying a series-wide change is not "edited on its own": later bulk changes still
+        # reach them, and the session it was applied from now matches the series too.
+        await self.repo.clear_edited([event.id, *changed])
         await self.repo.update_series(
             series.id,
             title=event.title,
@@ -585,17 +593,12 @@ class GroupEventService:
         answers = await self.repo.group_answers(event.id)
         present = await self.repo.attendees(event.id)
         names = await self.repo.member_names(event.chat_id)
-
-        def label(user_id: str) -> str:
-            name, username = names.get(user_id, (None, None))
-            return name or (f"@{username}" if username else "Someone")
-
+        labels = {u: member_label(names, u) for u in set(answers) | present}
         order = {"GOING": 0, "MAYBE": 1, "SAVED": 2, "DECLINED": 3}
         people = sorted(
-            set(answers) | present,
-            key=lambda u: (order.get(answers.get(u, ""), 4), label(u).lower(), u),
+            labels, key=lambda u: (order.get(answers.get(u, ""), 4), labels[u].lower(), u)
         )
-        return people, {u: label(u) for u in people}, present
+        return people, labels, present
 
     async def attendance_panel(self, event: GroupEvent, page: int = 0) -> Reply:
         people, labels, present = await self.people_for(event)
@@ -643,7 +646,8 @@ class GroupEventService:
         event = await self.repo.get_group_event(event_id) if event_id else None
         if not event or event.creator_user_id != user.id:
             return [Reply("Only the organiser can mark attendance.")]
-        kind, people = parts[0], (await self.people_for(event))[0]
+        kind = parts[0]
+        people, _, present = await self.people_for(event)
         if kind == "ap" and len(parts) == 3 and parts[2].isdigit():
             return [dataclass_edit(await self.attendance_panel(event, int(parts[2])))]
         if kind == "aa":
@@ -657,7 +661,6 @@ class GroupEventService:
             if parts[3] != digest or index >= len(people):
                 # The list changed since this panel was drawn: show the fresh one.
                 return [dataclass_edit(await self.attendance_panel(event))]
-            _, _, present = await self.people_for(event)
             person = people[index]
             await self.repo.mark_attendance(event.id, person, person not in present, user.id)
         else:
@@ -771,12 +774,7 @@ class GroupEventService:
         if not going:
             return "Nobody has said Going yet."
         names = await self.repo.member_names(event.chat_id)
-
-        def label(user_id: str) -> str:
-            name, username = names.get(user_id, (None, None))
-            return name or (f"@{username}" if username else "Someone")
-
-        labels = sorted((label(u) for u in going), key=str.lower)
+        labels = sorted((member_label(names, u) for u in going), key=str.lower)
         head, shown = f"Going ({len(labels)}): ", []
         for index, text in enumerate(labels):
             left = len(labels) - index

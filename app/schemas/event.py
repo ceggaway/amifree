@@ -134,6 +134,8 @@ class Suggestion(BaseModel):
     source_message_id: int
     message_id: int | None = None
     draft: dict
+    # Who wrote the message: they, or a group admin, decide what happens to the suggestion.
+    author_telegram_id: int | None = None
     created_at: datetime | None = None
 
 

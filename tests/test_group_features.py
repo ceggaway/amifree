@@ -102,7 +102,7 @@ async def test_finished_cards_are_redrawn_once_with_who_went(service_factory):
     assert len([e for e in repo.events.values() if e.group_event_id == event.id]) == 3
 
 
-async def test_ended_card_without_check_ins_counts_going(service_factory):
+async def test_ended_card_without_check_ins_says_who_planned_to_go(service_factory):
     service, repo = service_factory(extraction())
     bot, transport, _, taps, event = await card(service, repo)
     start = repo.group_events[event.id].start_at
@@ -112,7 +112,7 @@ async def test_ended_card_without_check_ins_counts_going(service_factory):
         service.clock = lambda: start + timedelta(days=1)
         await service.notifier.run()
     edits = [p for name, p in transport.calls if name == "editMessageText"]
-    assert "2 went" in edits[-1]["text"]
+    assert "2 said Going" in edits[-1]["text"] and "went" not in edits[-1]["text"]
 
 
 async def test_still_coming_check_and_organiser_summary(service_factory):

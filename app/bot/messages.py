@@ -179,9 +179,10 @@ def group_card(
     if event.status == "CANCELLED":
         return Reply("❌ Cancelled\n" + details(event))
     if ended:
-        count = counts.get("GOING", 0) if went is None else went
+        # Without check-ins nobody knows who came: say how many planned to, not that they went.
+        count = f"{counts.get('GOING', 0)} said Going" if went is None else f"{went} went"
         when = f"{event.start_at:%a %-d %b} · {time_range(event.start_at, event.end_at)}"
-        return Reply(f"📣 {event.title} · ended\n{when} · {count} went")
+        return Reply(f"📣 {event.title} · ended\n{when} · {count}")
     series = "\n🔁 Recurring event. Going to all adds every session." if event.series_id else ""
     body = (
         "📅 "

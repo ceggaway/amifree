@@ -88,6 +88,12 @@ async def test_deadline_does_nothing_without_enough_schedules(service_factory):
     result = await service.notifier.run()
     assert "suggested" not in result
     assert repo.polls[poll.id].status == "COLLECTING"
+    # The card says why no slots appeared, instead of still promising them at the reply time.
+    text = last_card(transport)["text"]
+    assert "The reply time has passed" in text and "Set my times" in text
+    edits = len([c for c in transport.calls if c[0] == "editMessageText"])
+    await service.notifier.run()  # nothing changed since: not redrawn again
+    assert len([c for c in transport.calls if c[0] == "editMessageText"]) == edits
 
 
 async def test_heatmap_is_for_participants_with_enough_schedules(service_factory):

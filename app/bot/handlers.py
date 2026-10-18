@@ -166,8 +166,12 @@ async def is_admin(bot, message) -> bool:
     # An anonymous admin posts as the group itself.
     if message.sender_chat and message.sender_chat.id == message.chat.id:
         return True
+    return await is_member_admin(bot, message.chat.id, message.from_user.id)
+
+
+async def is_member_admin(bot, chat_id: int, telegram_id: int) -> bool:
     try:
-        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+        member = await bot.get_chat_member(chat_id, telegram_id)
     except TelegramError:
         return False
     return member.status in ("creator", "administrator")
@@ -196,6 +200,8 @@ async def deliver_group(update: Update, service, result):
                 parts = (query.data or "").split(":")
                 if parts[0] == "g" and len(parts) == 3:
                     await service.group_changed(parts[2])
+                elif parts[0] == "p" and len(parts) in (3, 4):
+                    await service.poll_changed(parts[2])
             except TelegramError:
                 # Telegram rejects an edit that leaves the card unchanged, or one too old.
                 pass
@@ -262,7 +268,13 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
                     "Open a private chat with AmIFree to check availability.", show_alert=True
                 )
                 return
-            result = await handler.callback(user.id, update.effective_chat.id, data, **who)
+            extra = {}
+            if handler is service.detection:
+                # Only asked when someone other than the message's author taps.
+                extra["is_admin"] = lambda: is_member_admin(
+                    context.bot, update.effective_chat.id, user.id
+                )
+            result = await handler.callback(user.id, update.effective_chat.id, data, **who, **extra)
         elif operation == "command":
             name, args = split_command(message.text)
             if not addressed_to_me(message.text, context.bot.username):
@@ -479,6 +491,8 @@ def register_handlers(application: Application, service):
                 message_id=poll.message_id,
                 reply_markup=card.keyboard,
             )
+        except RetryAfter:
+            raise  # CardRefresher tries again when Telegram allows
         except TelegramError:
             pass
 
@@ -492,14 +506,16 @@ def register_handlers(application: Application, service):
         except TelegramError:
             pass
 
-    refresher = CardRefresher(service.settings.card_edit_interval_seconds, edit_card)
+    interval = service.settings.card_edit_interval_seconds
+    refresher = CardRefresher(interval, edit_card)
+    poll_refresher = CardRefresher(interval, edit_poll)
 
     async def refund_stars(telegram_id: int, charge_id: str):
         await application.bot.refund_star_payment(telegram_id, charge_id)
 
     service.refund_star_payment = refund_stars
     service.on_group_change = refresher.refresh
-    service.on_poll_change = edit_poll
+    service.on_poll_change = poll_refresher.refresh
     service.post_group_card = post_card
     service.delete_group_message = delete_message
     application.add_handler(

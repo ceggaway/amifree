@@ -708,7 +708,7 @@ class MemoryRepository:
     async def set_detection(self, chat_id, enabled, telegram_id):
         self.detection[chat_id] = enabled
 
-    async def create_suggestion(self, chat_id, source_message_id, draft):
+    async def create_suggestion(self, chat_id, source_message_id, draft, author_telegram_id=None):
         for s in self.suggestions.values():
             if (s.chat_id, s.source_message_id) == (chat_id, source_message_id):
                 return None
@@ -717,6 +717,7 @@ class MemoryRepository:
             chat_id=chat_id,
             source_message_id=source_message_id,
             draft=draft.model_dump(mode="json"),
+            author_telegram_id=author_telegram_id,
             created_at=datetime.now(UTC),
         )
         self.suggestions[s.id] = s

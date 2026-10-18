@@ -1,12 +1,10 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
-import { bestCell, dayLookup, rowTimes, shade } from "../heatmap";
+import { day as dayText, time } from "../format";
+import { bestCell, dayLabel, dayLookup, rowTimes, shade } from "../heatmap";
 import type { Heatmap as HeatmapData } from "../types";
 import { useLoad } from "../useLoad";
-
-const dayLabel = (date: string) =>
-  new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 
 /** How many members are free at each half hour. Counts only: nobody's name or reason is shown. */
 export function Heatmap() {
@@ -36,9 +34,7 @@ export function Heatmap() {
   const rows = rowTimes(data.days);
   const lookups = data.days.map(dayLookup);
   const best = bestCell(data.days);
-  const bestText = best
-    ? `${dayLabel(best.start_at.slice(0, 10))} ${new Date(best.start_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
-    : "";
+  const bestText = best ? `${dayText(best.start_at)} ${time(best.start_at)}` : "";
   return (
     <section className="heatmap">
       <h2>{data.title}</h2>

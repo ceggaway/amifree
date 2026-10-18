@@ -28,9 +28,9 @@ const grid: MyGrid = {
     {
       date: "2026-10-13",
       cells: [
-        { start_at: "2026-10-13T08:00:00", state: "free" },
-        { start_at: "2026-10-13T08:30:00", state: "busy" },
-        { start_at: "2026-10-13T09:00:00", state: "free" },
+        { start_at: "2026-10-13T08:00:00+08:00", state: "free" },
+        { start_at: "2026-10-13T08:30:00+08:00", state: "busy" },
+        { start_at: "2026-10-13T09:00:00+08:00", state: "free" },
       ],
     },
   ],
@@ -74,7 +74,7 @@ describe("MyTimes", () => {
     fireEvent.click(screen.getByLabelText(/09:00: free/));
     expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
     fireEvent.click(screen.getByText("Submit my times"));
-    await waitFor(() => expect(saved).toEqual([["2026-10-13T08:00:00"]]));
+    await waitFor(() => expect(saved).toEqual([["2026-10-13T08:00:00+08:00"]]));
     expect(await screen.findByText(/Saved 1 half hours/)).toBeTruthy();
   });
 
@@ -85,10 +85,10 @@ describe("MyTimes", () => {
         {
           date: "2026-10-13",
           cells: [
-            { start_at: "2026-10-13T08:00:00", state: "free" },
-            { start_at: "2026-10-13T08:30:00", state: "busy" },
-            { start_at: "2026-10-13T09:00:00", state: "free" },
-            { start_at: "2026-10-13T09:30:00", state: "free" },
+            { start_at: "2026-10-13T08:00:00+08:00", state: "free" },
+            { start_at: "2026-10-13T08:30:00+08:00", state: "busy" },
+            { start_at: "2026-10-13T09:00:00+08:00", state: "free" },
+            { start_at: "2026-10-13T09:30:00+08:00", state: "free" },
           ],
         },
       ],
@@ -123,7 +123,7 @@ describe("MyTimes", () => {
   });
 
   it("asks people with no schedule to tap the times they are free", async () => {
-    show({ ...grid, known: false, days: [{ date: grid.days[0].date, cells: [{ start_at: "2026-10-13T08:00:00", state: "off" }] }] });
+    show({ ...grid, known: false, days: [{ date: grid.days[0].date, cells: [{ start_at: "2026-10-13T08:00:00+08:00", state: "off" }] }] });
     expect(await screen.findByText(/don't have your schedule yet/)).toBeTruthy();
   });
 

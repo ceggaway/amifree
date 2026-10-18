@@ -27,7 +27,8 @@ the Group features table in the README.
 1. queues "still coming?" messages for events starting in 4–30 hours;
 2. redraws finished cards as ended;
 3. posts the cards of series sessions starting within four days;
-4. opens polls whose reply-by time has passed (when three schedules are known);
+4. opens polls whose reply-by time has passed (when three schedules are known; otherwise the
+   card says why no slots appeared);
 5. removes unanswered detection suggestions older than 10 minutes.
 
 Each step is isolated: one failing is logged and the rest still run.

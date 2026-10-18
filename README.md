@@ -102,7 +102,7 @@ Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `
 5. As the organiser tap **Edit**. Telegram opens the private chat; send the correction and confirm. Members who kept the plan each receive one message stating what changed.
 6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **Count me in**. Slots are suggested when the reply-by time passes; the organiser can also tap **Suggest slots** earlier.
 7. Tap **Who's going?** for the Going names, and **I'm here** from 30 minutes before the start to check in.
-8. A card is redrawn as "ended · N went" once the event is over.
+8. A card is redrawn as "ended · N went" once the event is over (or "N said Going" when nobody checked in).
 
 #### Group features
 

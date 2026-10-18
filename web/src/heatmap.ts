@@ -1,20 +1,19 @@
+import { day as dayText, startOfDay, time } from "./format";
 import type { HeatmapDay } from "./types";
 
-const clock = (iso: string) => {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
+/** A poll day's YYYY-MM-DD key as "Tue 13 Oct", in Singapore time like the cells. */
+export const dayLabel = (key: string) => dayText(startOfDay(key));
 
 /** The time-of-day rows to draw, in order, across every day. */
-export function rowTimes(days: HeatmapDay[]): string[] {
+export function rowTimes(days: { cells: { start_at: string }[] }[]): string[] {
   const seen = new Set<string>();
-  for (const day of days) for (const cell of day.cells) seen.add(clock(cell.start_at));
+  for (const day of days) for (const cell of day.cells) seen.add(time(cell.start_at));
   return [...seen].sort();
 }
 
 /** free count by "HH:MM" for one day. */
 export function dayLookup(day: HeatmapDay): Map<string, number> {
-  return new Map(day.cells.map((c) => [clock(c.start_at), c.free]));
+  return new Map(day.cells.map((c) => [time(c.start_at), c.free]));
 }
 
 /** 0 (nobody free) to 1 (everyone free). */

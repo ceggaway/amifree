@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { bestCell, dayLookup, rowTimes, shade } from "./heatmap";
+import { bestCell, dayLabel, dayLookup, rowTimes, shade } from "./heatmap";
 
+// Cells arrive from the API in Singapore time, as the bot writes them.
 const day = (date: string, frees: number[]) => ({
   date,
   cells: frees.map((free, i) => ({
-    start_at: new Date(2026, 9, 13, 8 + Math.floor(i / 2), (i % 2) * 30).toISOString(),
+    start_at: new Date(Date.UTC(2026, 9, 13, Math.floor(i / 2), (i % 2) * 30)).toISOString(),
     free,
   })),
 });
@@ -20,6 +21,11 @@ describe("heatmap helpers", () => {
 
   it("looks cells up by time of day", () => {
     expect(dayLookup(day("2026-10-13", [4, 5])).get("08:30")).toBe(5);
+  });
+
+  it("labels rows and days in Singapore time, whatever the phone's time zone", () => {
+    expect(rowTimes([{ cells: [{ start_at: "2026-10-13T08:00:00+08:00" }] }])).toEqual(["08:00"]);
+    expect(dayLabel("2026-10-13")).toMatch(/Tue.*13.*Oct/);
   });
 
   it("shades from nobody to everybody and survives an empty group", () => {

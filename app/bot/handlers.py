@@ -196,6 +196,8 @@ async def deliver_group(update: Update, service, result):
                 parts = (query.data or "").split(":")
                 if parts[0] == "g" and len(parts) == 3:
                     await service.group_changed(parts[2])
+                elif parts[0] == "p" and len(parts) in (3, 4):
+                    await service.poll_changed(parts[2])
             except TelegramError:
                 # Telegram rejects an edit that leaves the card unchanged, or one too old.
                 pass
@@ -479,6 +481,8 @@ def register_handlers(application: Application, service):
                 message_id=poll.message_id,
                 reply_markup=card.keyboard,
             )
+        except RetryAfter:
+            raise  # CardRefresher tries again when Telegram allows
         except TelegramError:
             pass
 
@@ -492,14 +496,16 @@ def register_handlers(application: Application, service):
         except TelegramError:
             pass
 
-    refresher = CardRefresher(service.settings.card_edit_interval_seconds, edit_card)
+    interval = service.settings.card_edit_interval_seconds
+    refresher = CardRefresher(interval, edit_card)
+    poll_refresher = CardRefresher(interval, edit_poll)
 
     async def refund_stars(telegram_id: int, charge_id: str):
         await application.bot.refund_star_payment(telegram_id, charge_id)
 
     service.refund_star_payment = refund_stars
     service.on_group_change = refresher.refresh
-    service.on_poll_change = edit_poll
+    service.on_poll_change = poll_refresher.refresh
     service.post_group_card = post_card
     service.delete_group_message = delete_message
     application.add_handler(

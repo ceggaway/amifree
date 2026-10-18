@@ -22,7 +22,9 @@ USAGE = "Try: /whosfree project meeting 2h next week"
 ANSWERS = {"F": "FREE", "M": "MAYBE", "B": "BUSY"}
 HOURS = re.compile(r"\b(\d{1,2}(?:\.5)?)\s*h(?:(?:ou)?rs?)?\b", re.IGNORECASE)
 MINUTES = re.compile(r"\b(\d{2,3})\s*min(?:ute)?s?\b", re.IGNORECASE)
-WINDOWS = ("this week", "next week", "this weekend", "weekend", "tomorrow", "today")
+# Longest first, so "this weekend" is not read as "this week" followed by "end".
+WINDOWS = ("this weekend", "next week", "this week", "weekend", "tomorrow", "today")
+WINDOW = re.compile(r"\b(" + "|".join(WINDOWS) + r")\b", re.IGNORECASE)
 
 
 def parse_request(text: str, now: datetime) -> tuple[str, int, datetime, datetime]:
@@ -37,12 +39,9 @@ def parse_request(text: str, now: datetime) -> tuple[str, int, datetime, datetim
     minutes = max(30, min(minutes, 480))
     today = datetime.combine(now.astimezone(SG).date(), time.min, SG)
     start, end = today + timedelta(days=1), today + timedelta(days=8)
-    lowered = text.lower()
-    for phrase in WINDOWS:
-        index = lowered.find(phrase)
-        if index < 0:
-            continue
-        text = text[:index] + text[index + len(phrase) :]
+    if match := WINDOW.search(text):
+        phrase = match[1].lower()
+        text = text[: match.start()] + text[match.end() :]
         monday = today - timedelta(days=today.weekday())
         if phrase == "today":
             start, end = today, today + timedelta(days=1)
@@ -56,9 +55,12 @@ def parse_request(text: str, now: datetime) -> tuple[str, int, datetime, datetim
             start, end = monday + timedelta(days=5), monday + timedelta(days=7)
             if end <= now:
                 start, end = start + timedelta(days=7), end + timedelta(days=7)
-        break
     title = " ".join(text.split()).strip(" ,-") or "Meetup"
     return title[:200], minutes, start, end
+
+
+def clashes(spans: list[tuple[datetime, datetime]], start: datetime, end: datetime) -> bool:
+    return any(start < b_end and end > b_start for b_start, b_end in spans)
 
 
 def suggest_slots(
@@ -81,10 +83,7 @@ def suggest_slots(
         last = datetime.combine(day, DAY_END, SG) - length
         while slot <= last:
             if slot >= max(start, now) and slot + length <= end:
-                free = sum(
-                    not any(slot < b_end and slot + length > b_start for b_start, b_end in spans)
-                    for spans in busy.values()
-                )
+                free = sum(not clashes(spans, slot, slot + length) for spans in busy.values())
                 candidates.append((-free, slot))
             slot += STEP
         day += timedelta(days=1)
@@ -152,10 +151,7 @@ def heatmap_cells(
         while slot < stop:
             nxt = slot + STEP
             if slot >= max(start, now) and nxt <= end:
-                free = sum(
-                    not any(slot < b_end and nxt > b_start for b_start, b_end in spans)
-                    for spans in busy.values()
-                )
+                free = sum(not clashes(spans, slot, nxt) for spans in busy.values())
                 cells.append({"start_at": slot.isoformat(), "free": free})
             slot = nxt
         if cells:
@@ -180,6 +176,7 @@ def poll_card(
     tally: dict[tuple[int, str], int],
     heatmap_url: str | None = None,
     mine_url: str | None = None,
+    now: datetime | None = None,
 ) -> Reply:
     hours = poll.duration_minutes / 60
     length = f"{hours:g}h" if poll.duration_minutes % 30 == 0 else f"{poll.duration_minutes}min"
@@ -193,14 +190,26 @@ def poll_card(
     )
     if poll.status == "COLLECTING":
         last = poll.window_end - timedelta(days=1)
+        if now and poll.deadline_at and poll.deadline_at <= now:
+            # The automatic suggestion ran and could not open the poll: say why, not "soon".
+            when = (
+                f"\n\nJoined: {joined}. The reply time has passed, but slots need at least"
+                f" {MIN_PARTICIPANTS} members whose schedule AmIFree can read. Members can send"
+                " their NUSMods or calendar link to the bot, or use Set my times; the organiser"
+                " can then tap Suggest."
+            )
+        else:
+            when = (
+                f"\n\nJoined: {joined}. Slots are suggested when the reply time passes,"
+                f" or when the organiser taps Suggest ({MIN_PARTICIPANTS} must have joined)."
+            )
         return Reply(
             head
             + f"\nLooking at {poll.window_start:%a %-d %b} to {last:%a %-d %b}, 08:00–22:00."
             + deadline
             + "\n\nTap Count me in to let AmIFree use your schedule for this poll. The group only"
             + " sees how many people are free in each slot, never who is busy or why."
-            + f"\n\nJoined: {joined}. Slots are suggested when the reply time passes,"
-            + f" or when the organiser taps Suggest ({MIN_PARTICIPANTS} must have joined).",
+            + when,
             poll_keyboard(poll, heatmap_url, mine_url),
         )
     lines = []
@@ -250,6 +259,7 @@ class PollService:
             await self.repo.poll_tally(poll.id),
             s.heatmap_link(poll.id),
             s.availability_link(poll.id),
+            self.scheduling.clock(),
         )
 
     async def create(
@@ -372,9 +382,9 @@ class PollService:
                 self._tried.clear()
             self._tried[poll.id] = joined
             found, _ = await self.suggest(poll)
-            if found:
-                opened += 1
-                await self.scheduling.poll_changed(poll.id)
+            opened += bool(found)
+            # Redrawn either way: opened with slots, or saying why it could not open yet.
+            await self.scheduling.poll_changed(poll.id)
         return opened
 
     async def may_answer(self, poll: Poll, user_id: str) -> bool:
@@ -396,10 +406,7 @@ class PollService:
         for day in days:
             for cell in day["cells"]:
                 start = datetime.fromisoformat(cell["start_at"])
-                blocked = any(
-                    start < b_end and start + STEP > b_start for b_start, b_end in spans or []
-                )
-                if blocked:
+                if clashes(spans or [], start, start + STEP):
                     state = "busy"
                 elif submitted is not None:
                     state = "free" if cell["start_at"] in ticked else "off"
@@ -440,14 +447,11 @@ class PollService:
                 raise ValueError("A time in your answer isn't valid.") from None
             if cell.isoformat() in valid:
                 chosen.add(cell.isoformat())
-        spans = await self.schedule_spans(poll, user_id)
+        spans = await self.schedule_spans(poll, user_id) or []
         kept = sorted(
             c
             for c in chosen
-            if not any(
-                datetime.fromisoformat(c) < b_end and datetime.fromisoformat(c) + STEP > b_start
-                for b_start, b_end in spans or []
-            )
+            if not clashes(spans, datetime.fromisoformat(c), datetime.fromisoformat(c) + STEP)
         )
         await self.repo.poll_join(poll.id, user_id)
         await self.repo.set_availability(poll.id, user_id, kept)
@@ -460,9 +464,9 @@ class PollService:
         Only people who joined may look, and only once enough schedules are known that a cell
         cannot be traced back to one person."""
         poll = await self.repo.get_poll(poll_id)
-        if not poll or user_id not in await self.repo.poll_participants(poll.id):
+        people = await self.repo.poll_participants(poll.id) if poll else []
+        if user_id not in people:
             return None
-        people = await self.repo.poll_participants(poll.id)
         spans = {person: await self.busy_spans(poll, person) for person in people}
         busy = {person: found for person, found in spans.items() if found is not None}
         base = {
@@ -519,7 +523,8 @@ class PollService:
         if poll.status != "OPEN":
             return GroupResult(alert="The organiser hasn't suggested slots yet.")
         if action == "fill":
-            if await self.busy_spans(poll, user.id) is None:
+            spans = await self.busy_spans(poll, user.id)
+            if spans is None:
                 # An empty schedule would answer "Free" to everything: say so instead.
                 return GroupResult(
                     alert="I have no schedule for you yet, so I can't fill this in. Send your"
@@ -527,12 +532,14 @@ class PollService:
                 )
             votes, summary = {}, []
             for index in range(len(poll.slots)):
-                availability = await self.scheduling.availability(user, slot_draft(poll, index))
-                answer = (
-                    "BUSY"
-                    if availability.conflicts
-                    else ("MAYBE" if availability.possible else "FREE")
-                )
+                draft = slot_draft(poll, index)
+                availability = await self.scheduling.availability(user, draft)
+                # The spans also hold the cells left unticked in "Set my times" and the time
+                # outside their usual times, which the schedule check alone does not know.
+                if availability.conflicts or clashes(spans, draft.start_at, draft.end_at):
+                    answer = "BUSY"
+                else:
+                    answer = "MAYBE" if availability.possible else "FREE"
                 votes[str(index)] = answer
                 summary.append(f"{index + 1} {answer.capitalize()}")
             await self.repo.poll_vote(poll.id, user.id, votes)

@@ -170,7 +170,7 @@ async def test_one_session_changed_alone_then_all_later_ones(service_factory, re
         date(2026, 10, 15),
     ] + [g.start_at.date() for g in later[4:]]
     # Series-wide changes are not "on their own": a later bulk change still reaches them.
-    assert not any(g.edited_alone for g in later[2:3] + later[4:])
+    assert not any(g.edited_alone for g in later[1:3] + later[4:])
     # Member 2 said Going on the first card only: nothing to tell them about 8 Oct yet.
     series = next(iter(repo.series.values()))
     assert (series.start_time.hour, series.end_time.hour) == (20, 22)

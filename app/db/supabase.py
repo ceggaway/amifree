@@ -1191,11 +1191,12 @@ class SupabaseRepository:
         return GroupEvent.model_validate(created)
 
     async def clear_edited(self, group_event_ids: list[str]):
-        for group_event_id in group_event_ids:
+        # A series has at most MAX_SESSIONS sessions, so one request covers them all.
+        if group_event_ids:
             await (
                 self.client.table("group_events")
                 .update({"edited_alone": False})
-                .eq("id", group_event_id)
+                .in_("id", group_event_ids)
                 .execute()
             )
 

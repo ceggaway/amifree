@@ -27,8 +27,8 @@ const base: HeatmapData = {
     {
       date: "2026-10-13",
       cells: [
-        { start_at: "2026-10-13T08:00:00", free: 1 },
-        { start_at: "2026-10-13T08:30:00", free: 4 },
+        { start_at: "2026-10-13T08:00:00+08:00", free: 1 },
+        { start_at: "2026-10-13T08:30:00+08:00", free: 4 },
       ],
     },
   ],

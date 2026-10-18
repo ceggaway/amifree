@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -68,7 +68,7 @@ class SupabaseRepository:
             "attendance_checks": "group_event_id",
             "group_plans": "chat_id",
             "group_settings": "chat_id",
-            "event_suggestions": "id",
+            "event_suggestions": "id,author_telegram_id",
             "poll_availability": "poll_id",
             "pro_payments": "charge_id,refunded_at",
             "weekly_availability": "user_id,weekday,start_min,end_min",
@@ -1276,7 +1276,11 @@ class SupabaseRepository:
         )
 
     async def create_suggestion(
-        self, chat_id: int, source_message_id: int, draft: EventDraft
+        self,
+        chat_id: int,
+        source_message_id: int,
+        draft: EventDraft,
+        author_telegram_id: int | None = None,
     ) -> Suggestion | None:
         """None when this message already has a suggestion (a retried delivery)."""
         found = (
@@ -1296,6 +1300,7 @@ class SupabaseRepository:
                     "chat_id": chat_id,
                     "source_message_id": source_message_id,
                     "draft": draft.model_dump(mode="json"),
+                    "author_telegram_id": author_telegram_id,
                 }
             )
             .execute()

@@ -5,10 +5,13 @@ import json
 from datetime import datetime, timedelta
 
 import pytest
+from telegram import Update
 
-from app.schemas.event import SG
+from app.schemas.event import SG, Suggestion
+from app.services.detection import DetectionService
 from app.services.polls import STEP, PollService, parse_request
-from tests.test_group_events import CHAT, make_bot
+from tests.test_group_events import CHAT, alerts, buttons, group_tap, make_bot
+from tests.test_group_reports import PLAN, run
 from tests.test_group_series import SERIES, post_series, sessions
 
 WEDNESDAY = datetime(2026, 10, 7, 12, tzinfo=SG)
@@ -120,3 +123,33 @@ async def test_rate_limited_poll_card_edit_is_retried(service_factory):
         await asyncio.sleep(1.7)
     edits = [name for name, _ in transport.calls if name == "editMessageText"]
     assert len(edits) == 2  # refused once, then redrawn instead of lost
+
+
+async def test_only_the_author_or_an_admin_decides_a_suggestion(service_factory):
+    service, repo = service_factory(PLAN)
+    repo.detection[CHAT] = True
+    bot, transport = make_bot(service)
+    async with bot:
+        await run(bot, "Badminton Saturday 4pm-6pm at UTSRC", 97, 2)
+        taps = buttons(transport.sent[-1]["reply_markup"])
+        assert next(iter(repo.suggestions.values())).author_telegram_id == 2
+        # Another member can neither take it over nor remove it.
+        for n, label in enumerate(("Make event card", "Ignore")):
+            await bot.process_update(
+                Update.de_json(group_tap(taps[label], 3, update_id=9300 + n), bot.bot)
+            )
+            assert "Only the person who wrote that message" in alerts(transport)[-1]["text"]
+        assert len(repo.suggestions) == 1 and not repo.group_events
+        assert not [c for c in transport.calls if c[0] == "deleteMessage"]
+        # A group admin can.
+        transport.admins.add(5)
+        await bot.process_update(
+            Update.de_json(group_tap(taps["Ignore"], 5, update_id=9310), bot.bot)
+        )
+    assert not repo.suggestions
+    assert [c for c in transport.calls if c[0] == "deleteMessage"]
+
+
+async def test_suggestions_from_before_the_migration_stay_open(service_factory):
+    old = Suggestion(id="x", chat_id=CHAT, source_message_id=1, draft={})
+    assert await DetectionService.may_decide(old, 3, None)

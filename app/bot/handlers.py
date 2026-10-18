@@ -166,8 +166,12 @@ async def is_admin(bot, message) -> bool:
     # An anonymous admin posts as the group itself.
     if message.sender_chat and message.sender_chat.id == message.chat.id:
         return True
+    return await is_member_admin(bot, message.chat.id, message.from_user.id)
+
+
+async def is_member_admin(bot, chat_id: int, telegram_id: int) -> bool:
     try:
-        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+        member = await bot.get_chat_member(chat_id, telegram_id)
     except TelegramError:
         return False
     return member.status in ("creator", "administrator")
@@ -264,7 +268,13 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
                     "Open a private chat with AmIFree to check availability.", show_alert=True
                 )
                 return
-            result = await handler.callback(user.id, update.effective_chat.id, data, **who)
+            extra = {}
+            if handler is service.detection:
+                # Only asked when someone other than the message's author taps.
+                extra["is_admin"] = lambda: is_member_admin(
+                    context.bot, update.effective_chat.id, user.id
+                )
+            result = await handler.callback(user.id, update.effective_chat.id, data, **who, **extra)
         elif operation == "command":
             name, args = split_command(message.text)
             if not addressed_to_me(message.text, context.bot.username):

@@ -208,7 +208,7 @@ await check('user deletion cascades to all personal data', async () => {
   await q('delete from events');
 });
 await check('migration ledger and durable update claims behave', async () => {
-  assert.equal((await one('select max(version)::int v from schema_migrations')).v,13);
+  assert.equal((await one('select max(version)::int v from schema_migrations')).v,14);
   const claim = async (id, stale = 120) =>
     (await one('select amifree_claim_update($1,$2) claimed',[id,stale])).claimed;
   assert.equal(await claim(5001),true);
@@ -348,6 +348,17 @@ await check('migration 011: usual times replace atomically and go with their own
   await assert.rejects(q('select amifree_replace_usual($1,$2)', [owner.id, '[]']));
   await db.exec('reset role; set role service_role;');
   await q('delete from users where id=$1', [owner.id]);
+});
+await check('migration 014: a suggestion records its author, and older rows need none', async () => {
+  const draft = JSON.stringify({title:'Badminton', start_at:'2026-10-10T16:00:00+08:00', end_at:'2026-10-10T18:00:00+08:00'});
+  await q('insert into event_suggestions(chat_id,source_message_id,draft,author_telegram_id) values(-930,1,$1,77)', [draft]);
+  await q('insert into event_suggestions(chat_id,source_message_id,draft) values(-930,2,$1)', [draft]);
+  const rows = (await q('select author_telegram_id a from event_suggestions where chat_id=-930 order by source_message_id')).rows;
+  assert.deepEqual(rows.map(r => r.a === null ? null : Number(r.a)), [77, null]);
+  await db.exec('reset role; set role anon;');
+  await assert.rejects(q('select author_telegram_id from event_suggestions'));
+  await db.exec('reset role; set role service_role;');
+  await q('delete from event_suggestions where chat_id=-930');
 });
 await db.close();
 console.log(`${count} PostgreSQL schema checks passed.`);

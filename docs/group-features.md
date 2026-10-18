@@ -18,7 +18,7 @@ the Group features table in the README.
 | Clubs Pro (Telegram Stars) | `app/services/pro.py`, payment handlers in `app/bot/handlers.py` | `group_plans`, `pro_payments` (migration 010) |
 | Members' own availability | `PollService.my_grid`, `save_grid`, `web/src/pages/MyTimes.tsx` | `poll_availability` (migration 010) |
 | Usual weekly times | `app/services/usual_times.py`, `/usual` | `weekly_availability` (migration 011) |
-| Event detection | `app/services/detection.py` | `group_settings`, `event_suggestions` |
+| Event detection | `app/services/detection.py` | `group_settings`, `event_suggestions` (author: migration 014) |
 
 ## What runs on the tick
 
@@ -62,6 +62,10 @@ Each step is isolated: one failing is logged and the rest still run.
   built and tested, so turning it on needs only that setting (and a price in `PRO_PRICE_STARS`).
 - **Attendance is two ways:** members tap **I'm here**, and the organiser can tick names in a
   private panel (`/attendance`), including "everyone who said Going came".
+- **Only the author or an admin decides a detected plan.** Make event card and Ignore work for
+  the person who wrote the message and for group admins; anyone else gets a private refusal.
+  The author is kept as a Telegram id (they may never have used AmIFree) for the suggestion's
+  10 minutes.
 - **A submitted grid replaces the schedule for those cells.** Cells a member leaves unticked
   count as busy, on top of what their schedule blocks. Ticked cells the schedule blocks are
   dropped on save.

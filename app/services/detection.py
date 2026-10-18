@@ -9,11 +9,12 @@ Ignore button that removes itself; the message text is never stored.
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 
 from app.bot.keyboards import suggestion_keyboard
 from app.bot.messages import Reply, details
-from app.schemas.event import EventDraft
+from app.schemas.event import EventDraft, Suggestion
 from app.services.date_resolution import Clarification, validate_extraction
 from app.services.group_events import GroupResult, parse_id
 from app.services.ratelimit import RateLimiter
@@ -35,14 +36,15 @@ NOTICE = (
     "👀 Event detection is on for this group.\n\n"
     "AmIFree will now look at messages here that mention a day and a time, read them once to"
     " spot a plan, and offer to turn it into an event card. Only a tap on Make event card"
-    " saves anything. Message text is not stored, and suggestions remove themselves after"
-    " 10 minutes.\n\n"
+    " saves anything, and only the person who wrote the message or a group admin can tap it."
+    " Message text is not stored, and suggestions remove themselves after 10 minutes.\n\n"
     "AmIFree must be an admin of this group to see messages. A group admin can turn this off"
     " any time with /detect off."
 )
 OFF = "Event detection is off. Messages in this group are not read."
 ADMIN_ONLY = "Only a group admin can change event detection."
 HOW_TO = "Send /detect on or /detect off (group admins only)."
+AUTHOR_ONLY = "Only the person who wrote that message, or a group admin, can decide this."
 
 
 def looks_like_plan(text: str) -> bool:
@@ -106,7 +108,7 @@ class DetectionService:
             return None
         # Notes can quote the message itself; the suggestion keeps only the plan's facts.
         draft = draft.model_copy(update={"notes": None})
-        suggestion = await self.repo.create_suggestion(chat_id, message_id, draft)
+        suggestion = await self.repo.create_suggestion(chat_id, message_id, draft, telegram_id)
         if suggestion is None:
             return None
         text = (
@@ -126,12 +128,15 @@ class DetectionService:
         data: str,
         name: str | None = None,
         username: str | None = None,
+        is_admin: Callable[[], Awaitable[bool]] | None = None,
     ) -> GroupResult:
         parts = data.split(":")
         suggestion_id = parse_id(parts[2]) if len(parts) == 3 else None
         suggestion = await self.repo.get_suggestion(suggestion_id) if suggestion_id else None
         if not suggestion or suggestion.chat_id != chat_id or parts[1] not in ("ok", "no"):
             return GroupResult(alert="That suggestion has expired.", delete_message=True)
+        if not await self.may_decide(suggestion, telegram_id, is_admin):
+            return GroupResult(alert=AUTHOR_ONLY)
         if parts[1] == "no":
             await self.repo.delete_suggestion(suggestion.id)
             return GroupResult(delete_message=True)
@@ -151,6 +156,15 @@ class DetectionService:
             card=await groups.render(event),
             adopt_event_id=event.id,
         )
+
+    @staticmethod
+    async def may_decide(
+        suggestion: Suggestion, telegram_id: int, is_admin: Callable[[], Awaitable[bool]] | None
+    ) -> bool:
+        """The message's author or a group admin. Asks Telegram only when it is someone else."""
+        if suggestion.author_telegram_id in (None, telegram_id):
+            return True  # suggestions from before migration 014 have no author
+        return bool(is_admin and await is_admin())
 
     async def sweep(self, now: datetime) -> int:
         """Remove suggestions nobody answered."""

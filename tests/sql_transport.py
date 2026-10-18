@@ -172,6 +172,7 @@ COLUMNS = {
     "detection_enabled",
     "enabled_by_telegram_id",
     "enabled_at",
+    "author_telegram_id",
     "draft",
     "weekdays",
     "first_date",

@@ -82,3 +82,14 @@ def verify_token(token: str, key: bytes, now: float | None = None) -> int:
     if expires <= now:
         raise AuthError("Session expired")
     return telegram_id
+
+
+def init_data_profile(init_data: str) -> tuple[str | None, str | None]:
+    """(first name, username) from initData that verify_init_data has already accepted."""
+    try:
+        user = json.loads(dict(parse_qsl(init_data))["user"])
+    except (KeyError, ValueError, TypeError):
+        return None, None
+    name = user.get("first_name") if isinstance(user.get("first_name"), str) else None
+    username = user.get("username") if isinstance(user.get("username"), str) else None
+    return name, username

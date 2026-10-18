@@ -50,3 +50,34 @@ input { width: 100%; padding: 10px; border: 1px solid var(--hint); border-radius
 .heat-cell.mine.busy { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--hint) 4px 5px); opacity: 0.6; }
 .heat-scroll.painting { touch-action: none; }
 .heat-scroll.painting .heat-cell { touch-action: none; }
+
+/* Group pages */
+h1 { font-size: 21px; margin: 8px 0 6px; }
+.group-head h1 { margin-top: 0; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 4px; }
+.action { display: flex; flex-direction: column; gap: 4px; padding: 14px 12px; border-radius: 12px; background: var(--accent); color: var(--accent-text); text-decoration: none; font-weight: 600; }
+.action span { font-size: 22px; }
+a.card.link { display: block; color: inherit; text-decoration: none; }
+a { color: var(--accent); }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--bg); white-space: nowrap; }
+.chip.going { background: #2e9d5b; color: #fff; }
+.chip.maybe { background: #e0a100; color: #fff; }
+.chip.declined { color: var(--hint); }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+label.check { flex-direction: row; align-items: center; gap: 8px; }
+label.check input { width: auto; }
+textarea { width: 100%; padding: 10px; border: 1px solid var(--hint); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; resize: vertical; }
+fieldset { border: 0; padding: 0; margin: 0; }
+legend { font-size: 14px; margin-bottom: 4px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.indent { padding-left: 4px; }
+.chip-button { min-height: 34px; padding: 6px 12px; border-radius: 999px; background: var(--panel); }
+.chip-button.on { background: var(--accent); color: var(--accent-text); }
+button.big { min-height: 48px; font-weight: 600; margin-top: 4px; }
+.segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0; }
+.segmented button { background: var(--bg); }
+.segmented button.on { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.link-button { background: none; padding: 0; min-height: 0; color: var(--accent); text-decoration: underline; }
+.organiser h2 { margin-top: 0; }
+.organiser h3 { margin-top: 14px; }
+.people { list-style: none; padding: 0; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }

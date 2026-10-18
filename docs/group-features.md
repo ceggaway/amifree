@@ -28,6 +28,27 @@ Mark who came); anyone else is refused privately. Cards posted before this chang
 the old Edit / Cancel event / Nudge / Status / Save buttons, and those keep working. `/help`
 (and `/start`) inside a group shows a short guide, and is listed in the group command menu.
 
+## The Mini App for a group
+
+`app/services/group_hub.py` (`GroupHub`) runs the group pages of the Mini App, and
+`app/services/app_links.py` builds their links. Routes in `app/api/routes.py`:
+
+| Route | Who | Does |
+| --- | --- | --- |
+| `GET /api/groups/{code}` | members | upcoming events (one per series) and open polls |
+| `POST /api/groups/{code}/events` | members | posts a card, or a weekly series (`weekdays`, `until`) |
+| `POST /api/groups/{code}/polls` | members | posts a `/whosfree` poll |
+| `GET /api/group-events/{id}` | members | the event, your answer, your clash check, who's going |
+| `POST …/rsvp`, `…/check-in`, `…/going-to-all` | members | answer, check in, Going to every session |
+| `PATCH …`, `POST …/cancel`, `…/series`, `…/nudge`, `PUT …/attendance` | organiser | edit, cancel, apply to later sessions, nudge, mark who came |
+
+`{code}` is the chat id as `n<digits>` (negative) or `p<digits>`. Membership is asked of Telegram
+and cached for five minutes (30 seconds for a "no"). Someone it lets in is recorded as a group
+member, with the first name from their signed sign-in, so headcounts, nudges and "Who's going?"
+include people who only ever use the app. Forms carry a `request_id`, so a double tap posts one
+card. A card the bot can't post (removed from the group) is cancelled again, so nothing silent
+is left behind.
+
 ## What runs on the tick
 
 `Notifier.run()` (every 60 seconds in-process, or `POST /internal/jobs/run`) now also:

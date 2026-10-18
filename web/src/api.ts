@@ -1,5 +1,18 @@
 import { initData } from "./telegram";
-import type { Availability, Block, Heatmap, Me, MyGrid, Plan, Rule } from "./types";
+import type {
+  Answer,
+  Availability,
+  Block,
+  EventForm,
+  GroupEventDetail,
+  GroupOverview,
+  Heatmap,
+  Me,
+  MyGrid,
+  Plan,
+  PollForm,
+  Rule,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -69,4 +82,34 @@ export const api = {
     request<{ saved: number; dropped: number }>("PUT", `/api/polls/${id}/availability`, { free }),
   patchPlan: (id: string, body: Record<string, unknown>) =>
     request<Plan>("PATCH", `/api/plans/${id}`, body),
+
+  // A group, opened from a link in it. The server checks with Telegram that you're in it.
+  group: (code: string) => request<GroupOverview>("GET", `/api/groups/${code}`),
+  createEvent: (code: string, form: EventForm) =>
+    request<{ id: string }>("POST", `/api/groups/${code}/events`, form),
+  createPoll: (code: string, form: PollForm) =>
+    request<{ id: string }>("POST", `/api/groups/${code}/polls`, form),
+  groupEvent: (id: string) => request<GroupEventDetail>("GET", `/api/group-events/${id}`),
+  rsvp: (id: string, status: Answer, force = false) =>
+    request<GroupEventDetail>("POST", `/api/group-events/${id}/rsvp`, { status, force }),
+  checkIn: (id: string) => request<GroupEventDetail>("POST", `/api/group-events/${id}/check-in`),
+  goingToAll: (id: string) =>
+    request<{ message: string; event: GroupEventDetail }>("POST", `/api/group-events/${id}/going-to-all`),
+  editEvent: (id: string, body: Record<string, unknown>) =>
+    request<{ event: GroupEventDetail; series_followup: boolean }>("PATCH", `/api/group-events/${id}`, body),
+  cancelEvent: (id: string, version: number) =>
+    request<{ event: GroupEventDetail; series_followup: boolean }>("POST", `/api/group-events/${id}/cancel`, { version }),
+  series: (id: string, action: "all" | "stop") =>
+    request<{ message: string }>("POST", `/api/group-events/${id}/series`, { action }),
+  nudge: (id: string) => request<{ message: string }>("POST", `/api/group-events/${id}/nudge`),
+  markAttendance: (id: string, userId: string | null, present = true) =>
+    request<GroupEventDetail>("PUT", `/api/group-events/${id}/attendance`, { user_id: userId, present }),
 };
+
+/** The server's reason for a refused change: { message, reason?, availability? }. */
+export function refusal(error: unknown): { message: string; reason?: string; availability?: Availability } {
+  if (error instanceof ApiError && error.detail && typeof error.detail === "object") {
+    return error.detail as { message: string; reason?: string };
+  }
+  return { message: error instanceof Error && error.message ? error.message : "That didn't work. Try again." };
+}

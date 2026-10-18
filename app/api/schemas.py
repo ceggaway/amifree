@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,3 +37,66 @@ class AvailabilityRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     free: list[Annotated[str, Field(min_length=10, max_length=40)]] = Field(max_length=800)
+
+
+RequestId = Annotated[str, Field(min_length=32, max_length=36)]
+
+
+class GroupEventForm(BaseModel):
+    """A new event card from the Mini App. request_id makes a retried submit post one card."""
+
+    model_config = ConfigDict(extra="forbid")
+    request_id: RequestId
+    title: str = Field(min_length=1, max_length=200)
+    start_at: datetime
+    end_at: datetime
+    location: str | None = Field(default=None, max_length=300)
+    notes: str | None = Field(default=None, max_length=1000)
+    # Repeat on these weekdays (0 = Monday) until `until`; empty for a one-off event.
+    weekdays: list[Annotated[int, Field(ge=0, le=6)]] = Field(default=[], max_length=7)
+    until: date | None = None
+
+
+class PollForm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: RequestId
+    title: str = Field(min_length=1, max_length=200)
+    minutes: int = Field(ge=30, le=480)
+    first: date
+    last: date
+    reply_by: date | None = None
+
+
+class RsvpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["GOING", "MAYBE", "DECLINED"]
+    # Going over a definite clash must be acknowledged, as with the bot's "Going anyway".
+    force: bool = False
+
+
+class GroupEventPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: int
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    location: str | None = Field(default=None, max_length=300)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class VersionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: int
+
+
+class SeriesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["all", "stop"]
+
+
+class AttendanceRequest(BaseModel):
+    """Mark one person (by the id the event page gave), or everyone who said Going."""
+
+    model_config = ConfigDict(extra="forbid")
+    user_id: str | None = Field(default=None, max_length=36)
+    present: bool = True

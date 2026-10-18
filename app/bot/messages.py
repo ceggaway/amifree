@@ -181,12 +181,16 @@ GROUP_HELP = """👋 AmIFree in this group
 /attendance, /stats, /export: turnout for your events (sent to you privately)
 /detect on: admins only, suggests a card when someone posts a plan
 
-Organisers: tap ⚙️ Manage on a card to edit, cancel, nudge or mark who came.
+Organisers: tap 📱 Open (or ⚙️ Manage) on a card to edit, cancel, nudge or mark who came.
 To use your schedule, open a private chat with me and send /start."""
 
 
 def group_card(
-    event: GroupEvent, counts: dict[str, int], went: int | None = None, ended: bool = False
+    event: GroupEvent,
+    counts: dict[str, int],
+    went: int | None = None,
+    ended: bool = False,
+    app_url: str | None = None,
 ) -> Reply:
     """The shared card: details and a headcount. Names only ever appear in "Who's going?"."""
     if event.status == "CANCELLED":
@@ -205,7 +209,7 @@ def group_card(
         + f" · Can't {counts.get('DECLINED', 0)}"
         + "\nAm I free? shows a private check that only you can see."
     )
-    return Reply(body, group_keyboard(event))
+    return Reply(body, group_keyboard(event, app_url))
 
 
 def event_card(event: Event, availability: Availability, synced: bool = False) -> Reply:

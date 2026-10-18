@@ -56,7 +56,7 @@ def event_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def group_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
+def group_keyboard(event: GroupEvent, app_url: str | None = None) -> InlineKeyboardMarkup:
     # No version in the data: a tap always applies to the card's latest state.
     def button(label, action):
         return InlineKeyboardButton(label, callback_data=f"g:{action}:{event.id}")
@@ -64,12 +64,24 @@ def group_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
     rows = [
         [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")],
         [button("Am I free?", "free"), button("Who's going?", "who")],
-        # Manage opens the organiser's private menu; everyone else gets a private refusal.
-        [button("I'm here", "here"), button("⚙️ Manage", "manage")],
+        # 📱 Open shows the whole event in the Mini App, organiser tools included. Without the
+        # app, Manage opens the organiser's private menu; others get a private refusal.
+        [
+            button("I'm here", "here"),
+            InlineKeyboardButton("📱 Open", url=app_url)
+            if app_url
+            else button("⚙️ Manage", "manage"),
+        ],
     ]
     if event.series_id:
         rows.insert(2, [button("Going to all", "goall")])
     return InlineKeyboardMarkup(rows)
+
+
+def links_keyboard(links: list[tuple[str, str | None]]) -> InlineKeyboardMarkup | None:
+    """URL buttons, one per row; links that aren't configured are left out."""
+    rows = [[InlineKeyboardButton(label, url=url)] for label, url in links if url]
+    return InlineKeyboardMarkup(rows) if rows else None
 
 
 def manage_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:

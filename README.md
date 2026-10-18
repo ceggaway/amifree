@@ -131,6 +131,28 @@ npm run dev        # browser-only UI work with mock data, proxied to a local bac
 
 Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for example `https://your-service.onrender.com/app/`). On startup the bot sets its menu button to **Open AmIFree**. Telegram only opens HTTPS Mini Apps, so local testing inside Telegram needs a tunnel or a staging deploy. The Mini App sends Telegram's signed `initData` to `POST /api/auth/telegram`; the server verifies it and returns a one-hour session token. A normal browser has no signature and cannot sign in. Development builds fall back to mock data, which is compiled out of production builds.
 
+#### The Mini App in groups
+
+Groups can do everything from the Mini App. `/app` in a group, `/help`, and `/event` or
+`/whosfree` sent with nothing after them reply with buttons that open it: **Create an event**,
+**Find a time** and **This group's events**. Every event card has **📱 Open**, which shows the
+event with Going / Maybe / Can't, your private clash check, who's going and check-in. For the
+organiser it also has edit, cancel, nudge, "still coming?" and marking who came. A card made in
+the app is posted in the group like any other.
+
+Telegram doesn't allow Mini App buttons in groups, so these are `t.me/<bot>/<app>?startapp=…`
+links. A link names the group, and anyone can change a link, so the server asks Telegram
+(`getChatMember`) whether the person is in that group before it shows or posts anything.
+
+To switch it on (once, by whoever runs the bot):
+
+1. In BotFather, send `/newapp`, choose the bot, and give the URL
+   `https://<your-render-service>.onrender.com/app/` and a short name such as `app`.
+2. On Render, set `BOT_USERNAME` (without @), `MINI_APP_SHORT_NAME` (the short name from step 1)
+   and `MINI_APP_URL` (the same URL), then redeploy.
+
+Without these, the group commands and cards work exactly as before, with no app buttons.
+
 ### Weekly events and posters
 
 A post that repeats on one weekday ("Saturdays, 9:30am-11:30am", "every Tue 7-8pm") asks once: **Just the next one** (a normal card for the coming date), **Every Saturday** (a weekly busy block, previewed before saving) or **Neither**. If its end time is missing, the bot asks for that rather than for a date. Any forwarded message is read: text, a caption, a forwarded poll (question and options), and **pictures** (a photo, or an image sent as a file). A picture is read by the OpenAI vision model into plain text, which then goes through the same extractor and the same deterministic date/time checks as typed text, so a poster behaves exactly like its words would. The picture is not stored. `READ_PICTURES=false` turns this off, and `OPENAI_VISION_MODEL` picks a different model. A caption and the picture's text are combined; a picture with no event text, or one that can't be read, falls back to the caption or a short explanation. Pictures are limited to 10 per person per 5 minutes. Voice notes, videos without a caption and stickers are not read.

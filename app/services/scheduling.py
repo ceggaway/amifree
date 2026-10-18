@@ -72,6 +72,7 @@ from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
 from app.services.free_time import free_gaps, parse_free, weekend
 from app.services.group_events import GroupEventService
+from app.services.group_hub import GroupHub
 from app.services.image_reader import PictureError
 from app.services.personal_calendar import (
     MAX_CALENDARS,
@@ -220,6 +221,10 @@ class SchedulingService:
         self.refund_star_payment = None
         self.detection = DetectionService(self)
         self.pro = ProService(self)
+        self.hub = GroupHub(self)
+        # Set by the bot layer: is this person in that group (asks Telegram), and its name.
+        self.check_chat_member = None
+        self.chat_title = None
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.
         self.notifier = None
         # What was just removed, kept briefly so Undo can put it back: token -> (expires,

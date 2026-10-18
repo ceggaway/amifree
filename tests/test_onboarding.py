@@ -14,7 +14,19 @@ async def test_new_user_gets_the_welcome(service_factory):
     reply = (await service.command(1, "start"))[0]
     assert reply.text == onboarding.WELCOME
     assert reply.parse_mode == "HTML"
-    assert labels(reply) == ["📚 NUSMods link?", "📅 Calendar link?", "Skip"]
+    # Forwarding a plan comes first; connecting a schedule is optional, and the four
+    # everyday buttons are already here.
+    assert reply.text.splitlines()[2].startswith("📩 Start here: forward me a plan") or (
+        "Start here: forward me a plan" in reply.text
+    )
+    assert labels(reply) == [
+        "📚 NUSMods link?",
+        "📅 Calendar link?",
+        "📋 My plans",
+        "🕒 Am I free?",
+        "📌 Deadlines",
+        "⚙️ Settings",
+    ]
 
 
 async def test_every_guide_is_reachable_and_comes_back(service_factory):
@@ -52,11 +64,30 @@ async def test_nusmods_guide_links_to_nusmods(service_factory):
     assert open_button.url == onboarding.NUSMODS_URL
 
 
-async def test_skip(service_factory):
+async def test_old_skip_buttons_still_work(service_factory):
+    """Welcome messages sent before Skip was removed still have the button."""
+    service, _ = service_factory()
+    skipped = (await service.callback(1, "setup:skip"))[0]
+    assert skipped.edit and skipped.text.startswith("✅ All set") and "/calendar" in skipped.text
+
+
+async def test_welcome_menu_buttons_work_before_any_setup(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]
-    skipped = (await service.callback(1, tap(welcome, "Skip")))[0]
-    assert skipped.edit and skipped.text.startswith("✅ All set") and "/calendar" in skipped.text
+    assert (await service.callback(1, tap(welcome, "📋 My plans")))[0].text.startswith(
+        "Nothing coming up"
+    )
+    assert "Reminders: on" in (await service.callback(1, tap(welcome, "⚙️ Settings")))[0].text
+
+
+async def test_nusmods_guide_points_to_its_own_calendar_export(service_factory):
+    service, _ = service_factory()
+    welcome = (await service.command(1, "start"))[0]
+    guide = (await service.callback(1, tap(welcome, "📚 NUSMods link?")))[0]
+    export = (await service.callback(1, tap(guide, "Classes in my own calendar?")))[0]
+    assert export.edit and "Export" in export.text and "not your classes" in export.text
+    back = (await service.callback(1, tap(export, "« NUSMods link")))[0]
+    assert back.text.startswith("📚 Your NUSMods link")
 
 
 async def test_after_a_calendar_link_start_says_all_set(service_factory, reference):

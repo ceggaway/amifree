@@ -176,6 +176,7 @@ def decided_card(event: Event, availability, note: str, user: User) -> Reply:
 
 
 UNDO_WINDOW = timedelta(minutes=30)
+AGENDA_PAGE = 10
 
 # Menu button -> the command it runs.
 MENU_COMMANDS = {
@@ -685,7 +686,7 @@ class SchedulingService:
         more = f"\n…and {len(hits) - 5} more" if len(hits) > 5 else ""
         return "\n\n⚠️ This clashes with your plans:\n" + "\n".join(lines) + more
 
-    async def agenda(self, user: User) -> list[Reply]:
+    async def agenda(self, user: User, page: int = 0) -> list[Reply]:
         """One message: plans, deadlines and busy time, grouped by day with a button each."""
         now = self.clock()
         today = now.astimezone(SG).date()
@@ -722,7 +723,9 @@ class SchedulingService:
         if not items:
             return [Reply("Nothing coming up. Forward a plan, or add a deadline with /deadline.")]
         items.sort(key=lambda it: it[0])
-        shown, extra = items[:24], max(0, len(items) - 24)
+        pages = (len(items) + AGENDA_PAGE - 1) // AGENDA_PAGE
+        page = max(0, min(page, pages - 1))
+        shown = items[page * AGENDA_PAGE : (page + 1) * AGENDA_PAGE]
 
         def bucket(when: datetime) -> tuple[int, str]:
             day = when.astimezone(SG).date()
@@ -745,11 +748,12 @@ class SchedulingService:
             day_prefix = f"{when:%a %-d %b} " if rank >= 2 else ""
             lines.append(f"{n}. {day_prefix}{text}")
             buttons.append((str(n), kind, item_id))
-        footer = f"\n\n+ {extra} more" if extra else ""
+        footer = f"\n\nPage {page + 1} of {pages}" if pages > 1 else ""
         return [
             Reply(
                 "Coming up — tap a number to open it.\n\n" + "\n".join(lines) + footer,
-                agenda_keyboard(buttons),
+                agenda_keyboard(buttons, page, pages),
+                edit=page > 0,
             )
         ]
 
@@ -1656,7 +1660,9 @@ class SchedulingService:
             prefix, _, page = data.partition(":")
             if not page.isascii() or not page.isdigit() or len(page) > 8:
                 return [Reply(f"That page isn't valid. Use /{prefix}.")]
-            return await self.list_events(user, int(page), plans=prefix == "plans")
+            if prefix == "plans":
+                return await self.agenda(user, int(page))
+            return await self.list_events(user, int(page))
         parts = data.split(":")
         action = parts[0]
         if action in ("pc", "dc", "bc", "rc") and len(parts) == 2:
@@ -1857,6 +1863,10 @@ class SchedulingService:
                 Status.GOING: "Added to your plans. This time is now blocked.",
                 Status.MAYBE: "Marked Maybe. This won't block your time.",
             }[statuses[action]]
+        if statuses[action] == Status.GOING and was_preview and not result.group_event_id:
+            going = [e for e in await self.repo.recent_events(user.id) if e.status == Status.GOING]
+            if len(going) == 1:
+                note += "\nNext, try /free tomorrow to see your day."
         card = decided_card(result, availability, note, user)
         if statuses[action] == Status.DECLINED and not was_preview and not result.group_event_id:
             # One tap brings it back: Undo is just "add to my plans" again.

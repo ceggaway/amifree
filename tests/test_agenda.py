@@ -103,3 +103,39 @@ async def test_start_menu_buttons_run_the_matching_command(service_factory, refe
     )
     assert "No upcoming deadlines" in (await service.callback(1, tap(menu, "📌 Deadlines")))[0].text
     assert await service.callback(1, tap(menu, "🕒 Am I free?"))
+
+
+async def test_agenda_pages_ten_at_a_time(service_factory, reference):
+    service, repo = service_factory()
+    await onboard(service, reference)
+    for n in range(13):
+        await service.message(
+            1, 10 + n, f"remind me at {n % 9 + 1}pm tomorrow to task {n}", reference
+        )
+    first = (await service.command(1, "plans"))[0]
+    labels = [b.text for row in first.keyboard.inline_keyboard for b in row]
+    assert labels == [str(n) for n in range(1, 11)] + ["Next"]
+    assert "Page 1 of 2" in first.text and not first.edit
+    second = (await service.callback(1, tap(first, "Next")))[0]
+    assert second.edit and "Page 2 of 2" in second.text
+    assert [b.text for row in second.keyboard.inline_keyboard for b in row] == [
+        "1",
+        "2",
+        "3",
+        "Previous",
+    ]
+    assert (await service.callback(1, "plans:99"))[0].text.startswith("Coming up")  # clamped
+
+
+async def test_first_plan_gets_one_tip(service_factory, reference):
+    service, _ = service_factory(
+        extraction(),
+        extraction(title="Study group", start_time_text="2", end_time_text="4pm", location=None),
+    )
+    await onboard(service, reference)
+    first = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
+    added = (await service.callback(1, tap(first, "Add to plans")))[0]
+    assert "Next, try /free tomorrow" in added.text
+    second = (await service.message(1, 3, "Study group Friday 2–4pm", reference))[0]
+    added = (await service.callback(1, tap(second, "Add to plans")))[0]
+    assert "Next, try /free tomorrow" not in added.text

@@ -22,10 +22,12 @@ from app.bot.keyboards import (
     menu_keyboard,
     page_keyboard,
     personal_calendars_keyboard,
+    plan_undo_keyboard,
     recurring_keyboard,
     reminder_keyboard,
     remove_block_keyboard,
     settings_keyboard,
+    undo_keyboard,
 )
 from app.bot.messages import (
     HELP,
@@ -40,7 +42,15 @@ from app.bot.messages import (
 from app.config import Settings
 from app.models.timetable import BlockRule
 from app.models.user import User
-from app.schemas.event import SG, Event, EventDraft, Extraction, GroupEvent, Status
+from app.schemas.event import (
+    SG,
+    DeadlineDraft,
+    Event,
+    EventDraft,
+    Extraction,
+    GroupEvent,
+    Status,
+)
 from app.services import quick_reminders
 from app.services.availability import check_availability
 from app.services.calendar_export import build_feed, build_ics, ics_filename
@@ -164,6 +174,8 @@ def decided_card(event: Event, availability, note: str, user: User) -> Reply:
     return Reply(f"{card.text}\n{note}", card.keyboard, edit=True)
 
 
+UNDO_WINDOW = timedelta(minutes=30)
+
 # Menu button -> the command it runs.
 MENU_COMMANDS = {
     "menu:plans": "plans",
@@ -209,6 +221,9 @@ class SchedulingService:
         self.pro = ProService(self)
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.
         self.notifier = None
+        # What was just removed, kept briefly so Undo can put it back: token -> (expires,
+        # user id, kind, fields). In memory only: after a restart an old Undo says it's too late.
+        self.removed: dict[str, tuple[datetime, str, str, dict]] = {}
         # Bound what one person can spend: LLM extractions and outbound calendar fetches.
         self.extraction_limit = RateLimiter(15, 300)
         self.picture_limit = RateLimiter(10, 300)  # a picture is also an extraction afterwards
@@ -416,7 +431,10 @@ class SchedulingService:
             return [Reply("That reminder is already gone. /plans lists the rest.", edit=True)]
         if action == "del":
             await self.repo.delete_reminder(user.id, reminder_id)
-            return [Reply(f"🗑 Removed: {reminder.text}", edit=True)]
+            token = self.remember_removed(
+                user, "reminder", {"text": reminder.text, "remind_at": reminder.remind_at}
+            )
+            return [Reply(f"🗑 Removed: {reminder.text}", undo_keyboard(token), edit=True)]
         if action == "done":
             await self.repo.finish_reminder(user.id, reminder_id)
             return [Reply(f"✅ Done: {reminder.text}", edit=True)]
@@ -431,6 +449,43 @@ class SchedulingService:
                 edit=True,
             )
         ]
+
+    def remember_removed(self, user: User, kind: str, fields: dict) -> str:
+        now = self.clock()
+        self.removed = {k: v for k, v in self.removed.items() if v[0] > now}
+        if len(self.removed) >= 500:
+            self.removed.pop(next(iter(self.removed)))
+        token = secrets.token_hex(4)
+        self.removed[token] = (now + UNDO_WINDOW, user.id, kind, fields)
+        return token
+
+    async def undo_removal(self, user: User, token: str) -> list[Reply]:
+        found = self.removed.pop(token, None)
+        if not found or found[0] <= self.clock() or found[1] != user.id:
+            return [Reply("It's too late to undo that. You can add it again.", edit=True)]
+        _, _, kind, fields = found
+        if kind == "deadline":
+            deadline = await self.repo.create_deadline(user.id, None, DeadlineDraft(**fields))
+            text = card_text(deadline, self.clock(), user.reminders_enabled)
+            return [
+                Reply(
+                    "↩️ Restored.\n" + text.rsplit("\n\n", 1)[0],
+                    deadline_keyboard(deadline.id),
+                    edit=True,
+                )
+            ]
+        if kind == "reminder":
+            reminder = await self.repo.create_reminder(user.id, fields["text"], fields["remind_at"])
+            when = quick_reminders.when_text(reminder.remind_at, self.clock())
+            return [
+                Reply(
+                    f"↩️ Restored. I'll remind you {when}: {reminder.text}",
+                    reminder_keyboard(reminder.id),
+                    edit=True,
+                )
+            ]
+        rule = await self.repo.create_block(user.id, BlockRule.model_validate(fields))
+        return [Reply("↩️ Restored.\n" + describe(rule), remove_block_keyboard(rule.id), edit=True)]
 
     def settings_panel(self, user: User) -> Reply:
         on = user.reminders_enabled
@@ -1030,7 +1085,12 @@ class SchedulingService:
             return [Reply("That deadline is already gone. /deadlines lists the rest.", edit=True)]
         if action == "rm":
             await self.repo.delete_deadline(user.id, deadline_id)
-            return [Reply(f"🗑 Removed: {deadline.title}", edit=True)]
+            token = self.remember_removed(
+                user,
+                "deadline",
+                {"title": deadline.title, "due_at": deadline.due_at, "notes": deadline.notes},
+            )
+            return [Reply(f"🗑 Removed: {deadline.title}", undo_keyboard(token), edit=True)]
         await self.repo.finish_deadline(user.id, deadline_id)
         await self.safe_action(user.id, "deadline_done")
         return [Reply(f"✅ Done: {deadline.title}. No more reminders for it.", edit=True)]
@@ -1583,6 +1643,8 @@ class SchedulingService:
             return [Reply(panel.text, panel.keyboard, edit=True)]
         if action == "rem" and len(parts) == 3 and parts[1] in ("done", "del", "10", "60", "tmr"):
             return await self.reminder_action(user, parts[1], parts[2])
+        if action == "undo" and len(parts) == 2:
+            return await self.undo_removal(user, parts[1])
         if data in MENU_COMMANDS:
             return await self.command(telegram_id, MENU_COMMANDS[data])
         if data.startswith("setup:"):
@@ -1619,8 +1681,12 @@ class SchedulingService:
                 UUID(parts[1])
             except ValueError:
                 return [Reply("That button isn't valid. Use /blocks.")]
-            removed = await self.repo.delete_block(user.id, parts[1])
-            return [Reply("Busy block removed." if removed else "That block is already gone.")]
+            rule = next((r for r in await self.repo.list_blocks(user.id) if r.id == parts[1]), None)
+            removed = rule is not None and await self.repo.delete_block(user.id, parts[1])
+            if not removed:
+                return [Reply("That block is already gone.")]
+            token = self.remember_removed(user, "block", rule.model_dump(mode="json"))
+            return [Reply("Busy block removed.", undo_keyboard(token), edit=True)]
         if action in ("confirm", "dismiss") and len(parts) == 2:
             pending = user.pending
             if not pending or pending.get("nonce") != parts[1]:
@@ -1755,4 +1821,8 @@ class SchedulingService:
                 Status.GOING: "Added to your plans. This time is now blocked.",
                 Status.MAYBE: "Marked Maybe. This won't block your time.",
             }[statuses[action]]
-        return [decided_card(result, availability, note, user)]
+        card = decided_card(result, availability, note, user)
+        if statuses[action] == Status.DECLINED and not was_preview and not result.group_event_id:
+            # One tap brings it back: Undo is just "add to my plans" again.
+            card.keyboard = plan_undo_keyboard(result)
+        return [card]

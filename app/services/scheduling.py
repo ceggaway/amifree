@@ -28,6 +28,7 @@ from app.bot.keyboards import (
     remove_block_keyboard,
     settings_keyboard,
     undo_keyboard,
+    with_undo,
 )
 from app.bot.messages import (
     HELP,
@@ -376,6 +377,8 @@ class SchedulingService:
             return await self.usual_command(user, args)
         if command == "refund":
             return await self.pro.refund(user, telegram_id)
+        if command == "deadline" and not args.strip():
+            return await self.list_deadlines(user)
         if command == "deadline":
             # The next message (or the rest of this command) is a deadline, whatever the AI says.
             await self.repo.set_pending(
@@ -390,8 +393,6 @@ class SchedulingService:
                     "extraction": None,
                 },
             )
-            if not args.strip():
-                return [Reply(f"What's due, and when? {DEADLINE_EXAMPLE}\n/cancel to stop.")]
             return await self.message(telegram_id, 0, args, self.clock())
         if command == "deadlines":
             return await self.list_deadlines(user)
@@ -484,6 +485,21 @@ class SchedulingService:
                     edit=True,
                 )
             ]
+        if kind == "plan_edit":
+            event = await self.repo.get_event(user.id, fields["event_id"])
+            if not event or event.status == Status.CANCELLED:
+                return [Reply("That plan is gone, so there's nothing to undo.", edit=True)]
+            keep = {
+                k: getattr(event, k) for k in ("title", "start_at", "end_at", "location", "notes")
+            }
+            draft = EventDraft(**(keep | {fields["key"]: fields["value"]}))
+            result = await self.repo.update_event(user.id, event, draft)
+            if not result:
+                return [Reply("That plan changed since, so I left it as it is.", edit=True)]
+            card = event_card(
+                result, await self.availability(user, result, result.id), synced(user)
+            )
+            return [Reply("↩️ Changed back.\n\n" + card.text, card.keyboard, edit=True)]
         rule = await self.repo.create_block(user.id, BlockRule.model_validate(fields))
         return [Reply("↩️ Restored.\n" + describe(rule), remove_block_keyboard(rule.id), edit=True)]
 
@@ -1053,7 +1069,7 @@ class SchedulingService:
             return [
                 Reply(
                     "No upcoming deadlines. Forward a message with a due date, or send "
-                    "/deadline CS3244 report fri 11:59pm"
+                    f"/deadline {DEADLINE_EXAMPLE.removeprefix('For example: ')}"
                 )
             ]
         overdue = [d for d in found if d.due_at < now]
@@ -1193,6 +1209,8 @@ class SchedulingService:
                 )
             ]
         key = "location" if pending["field"] == "venue" else "title"
+        if not pending.get("group") and isinstance(existing, Event):
+            return await self.apply_text_edit(user, existing, key, value)
         extraction = Extraction.model_validate(pending["extraction"]).model_copy(
             update={key: value, "ambiguity": None}
         )
@@ -1203,6 +1221,24 @@ class SchedulingService:
             extraction=extraction.model_dump(mode="json"),
         )
         return await self.prepare(user, extraction, state, existing)
+
+    async def apply_text_edit(self, user: User, event: Event, key: str, value: str) -> list[Reply]:
+        """A new venue or title cannot cause a clash, so it is applied at once, with an Undo."""
+        fields = {
+            k: getattr(event, k) for k in ("title", "start_at", "end_at", "location", "notes")
+        }
+        before = fields[key]
+        draft = EventDraft(**(fields | {key: value}), assumed_duration=event.assumed_duration)
+        result = await self.repo.update_event(user.id, event, draft)
+        await self.repo.set_pending(user.id, None)
+        if not result:
+            return [Reply("That event changed. Use /plans to open its latest card.")]
+        token = self.remember_removed(
+            user, "plan_edit", {"event_id": result.id, "key": key, "value": before}
+        )
+        word = "venue" if key == "location" else "title"
+        card = event_card(result, await self.availability(user, result, result.id), synced(user))
+        return [Reply(f"✏️ Updated the {word}.\n\n{card.text}", with_undo(card.keyboard, token))]
 
     async def prepare(
         self, user: User, extraction: Extraction, state: dict, existing: Event | GroupEvent

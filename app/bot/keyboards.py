@@ -350,3 +350,9 @@ def plan_undo_keyboard(event: Event) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("↩️ Undo", callback_data=f"go:{event.id}:{event.version}")]]
     )
+
+
+def with_undo(markup: InlineKeyboardMarkup | None, token: str) -> InlineKeyboardMarkup:
+    """The same buttons, plus an Undo row underneath."""
+    rows = list(markup.inline_keyboard) if markup else []
+    return InlineKeyboardMarkup([*rows, *undo_keyboard(token).inline_keyboard])

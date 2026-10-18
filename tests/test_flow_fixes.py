@@ -20,12 +20,14 @@ async def test_venue_button_sets_the_venue_as_typed(service_factory, reference):
     assert ask.text.startswith("What do you want to change?")
     prompt = (await service.callback(1, tap(ask, "📍 Venue")))[0]
     assert prompt.text.startswith("Send the new venue.")
-    preview = (await service.message(1, 5, "clb lvl 3", reference))[0]
-    before, after = preview.text.split("After:")
-    assert "Location: Vivo" in before and "Location: clb lvl 3" in after
-    await service.callback(1, tap(preview, "Confirm update"))
+    done = (await service.message(1, 5, "clb lvl 3", reference))[0]
+    # Applied at once: a venue cannot cause a clash, so there is no preview to confirm.
+    assert done.text.startswith("✏️ Updated the venue.") and "Location: clb lvl 3" in done.text
     assert [e.location for e in repo.events.values()] == ["clb lvl 3"]
     assert len(service.extractor.calls) == 1  # only the original message used the AI
+    back = (await service.callback(1, tap(done, "↩️ Undo")))[0]
+    assert back.text.startswith("↩️ Changed back.") and "Location: Vivo" in back.text
+    assert [e.location for e in repo.events.values()] == ["Vivo"]
 
 
 async def test_title_button(service_factory, reference):
@@ -33,8 +35,12 @@ async def test_title_button(service_factory, reference):
     card = await saved_dinner(service, reference)
     ask = (await service.callback(1, tap(card, "Edit")))[0]
     await service.callback(1, tap(ask, "✏️ Title"))
-    preview = (await service.message(1, 5, "Hall dinner", reference))[0]
-    assert "After:\nHall dinner" in preview.text
+    done = (await service.message(1, 5, "Hall dinner", reference))[0]
+    assert done.text.startswith("✏️ Updated the title.") and "Hall dinner" in done.text
+    assert [e.title for e in repo.events.values()] == ["Hall dinner"]
+    await service.callback(1, tap(done, "↩️ Undo"))
+    assert [e.title for e in repo.events.values()] == ["CCA dinner"]
+    assert "too late" in (await service.callback(1, tap(done, "↩️ Undo")))[0].text
 
 
 async def test_a_change_that_changes_nothing_asks_again(service_factory, reference):

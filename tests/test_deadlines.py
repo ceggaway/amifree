@@ -85,9 +85,11 @@ async def test_deadline_command_overrides_the_ai(service_factory, reference):
     )
     card = (await service.command(1, "deadline", REPORT))[0]
     assert card.text.startswith("📌 CS3244 report")
-    ask = (await service.command(1, "deadline"))[0]
-    assert ask.text.startswith("What's due, and when?")
-    card = (await service.message(1, 5, "Pay hall fees by Fri", reference))[0]
+    # With no text, /deadline shows the list (and leaves nothing pending).
+    listed = (await service.command(1, "deadline"))[0]
+    assert listed.text.startswith("📌 CS3244 report")
+    assert (await repo.ensure_user(1)).pending is None
+    card = (await service.command(1, "deadline", "Pay hall fees by Fri"))[0]
     assert card.text.startswith("📌 Pay hall fees")
     assert len(repo.deadlines) == 2 and not repo.events
 
@@ -212,3 +214,11 @@ async def test_list_shows_overdue_first_and_days_left(service_factory, reference
     again = await service.command(1, "deadlines")
     assert [r.text.split("\n")[0] for r in again] == ["📌 CS3244 report"]
     assert user
+
+
+async def test_bare_deadline_with_none_saved_explains_how_to_add(service_factory, reference):
+    service, _ = service_factory()
+    reply = (await service.command(1, "deadline"))[0]
+    assert (
+        reply.text.startswith("No upcoming deadlines") and "/deadline CS3244 report" in reply.text
+    )

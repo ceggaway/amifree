@@ -20,6 +20,14 @@ the Group features table in the README.
 | Usual weekly times | `app/services/usual_times.py`, `/usual` | `weekly_availability` (migration 011) |
 | Event detection | `app/services/detection.py` | `group_settings`, `event_suggestions` (author: migration 014) |
 
+## The card's buttons
+
+Going / Maybe / Can't, Am I free?, Who's going?, I'm here, and **⚙️ Manage**. Manage opens the
+organiser's private menu (`manage_keyboard`: Edit, Cancel event, Nudge members, Who's confirmed,
+Mark who came); anyone else is refused privately. Cards posted before this change still carry
+the old Edit / Cancel event / Nudge / Status / Save buttons, and those keep working. `/help`
+(and `/start`) inside a group shows a short guide, and is listed in the group command menu.
+
 ## What runs on the tick
 
 `Notifier.run()` (every 60 seconds in-process, or `POST /internal/jobs/run`) now also:

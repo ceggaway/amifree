@@ -15,7 +15,12 @@ from uuid import UUID
 
 from telegram.error import BadRequest, Forbidden
 
-from app.bot.keyboards import attendance_keyboard, attendance_panel_keyboard, series_keyboard
+from app.bot.keyboards import (
+    attendance_keyboard,
+    attendance_panel_keyboard,
+    manage_keyboard,
+    series_keyboard,
+)
 from app.bot.messages import Reply, group_card, private_verdict, time_range
 from app.schemas.event import SG, EventDraft, GroupEvent, Status
 from app.services.chase import enqueue_nudges
@@ -680,6 +685,40 @@ class GroupEventService:
             return [Reply("That event was already cancelled.")]
         return await self.scheduling.begin_change(user, event, cancel=action == "cancel")
 
+    async def manage_panel(self, user, payload: str) -> list[Reply]:
+        """Handle /start manage_<id>: the organiser's private menu for one card."""
+        event_id = parse_id(payload.partition("_")[2])
+        event = await self.repo.get_group_event(event_id) if event_id else None
+        if not event or event.creator_user_id != user.id:
+            return [Reply("Only the organiser can manage that event.")]
+        when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+        state = (
+            "This event was cancelled." if event.status != "ACTIVE" else "What do you want to do?"
+        )
+        return [Reply(f"⚙️ {event.title} · {when}\n{state}", manage_keyboard(event))]
+
+    async def manage_action(self, user, data: str) -> list[Reply]:
+        """m:<action>:<event> from the organiser's private menu."""
+        parts = data.split(":")
+        event_id = parse_id(parts[2]) if len(parts) == 3 else None
+        event = await self.repo.get_group_event(event_id) if event_id else None
+        if not event or event.creator_user_id != user.id:
+            return [Reply("Only the organiser can manage that event.")]
+        action = parts[1]
+        if event.status != "ACTIVE":
+            return [Reply("That event was cancelled.")]
+        if action in ("edit", "cancel"):
+            return await self.scheduling.begin_change(user, event, cancel=action == "cancel")
+        if action == "status":
+            return [Reply(await self.status_text(event))]
+        if action == "att":
+            return [await self.attendance_panel(event)]
+        if action == "nudge":
+            if self.is_ended(event):
+                return [Reply(ENDED)]
+            return [Reply(await self.nudge(event))]
+        return [Reply("That button isn't valid.")]
+
     async def nudge(self, card) -> str:
         queued = await enqueue_nudges(self.repo, card, self.scheduling.clock())
         await self.scheduling.flush_notifications()
@@ -730,6 +769,10 @@ class GroupEventService:
             return GroupResult(alert="This event was cancelled.", card=await self.render(event))
         action = parts[1]
         organiser = event.creator_user_id == user.id
+        if action == "manage":
+            if not organiser:
+                return GroupResult(alert="Only the organiser can manage this event.")
+            return GroupResult(start=f"manage_{event.id}")
         if action in ("edit", "cancel"):
             if not organiser:
                 return GroupResult(alert="Only the organiser can change this card.")

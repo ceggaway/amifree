@@ -151,6 +151,7 @@ def create_app(
             )
             await bot_app.bot.set_my_commands(
                 [
+                    BotCommand("help", "How to use AmIFree in this group"),
                     BotCommand("event", "Post an event card (reply to a plan, or add details)"),
                     BotCommand("whosfree", "Find a time: /whosfree project meeting 2h next week"),
                     BotCommand("stats", "Turnout for your events (sent privately)"),

@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 from app.bot.delivery import webhook_delivery
-from app.bot.messages import Reply, send_reply
+from app.bot.messages import GROUP_HELP, Reply, send_reply
 from app.services.image_reader import MAX_BYTES, PictureError
 from app.services.jobs import Notifier, Undeliverable
 from app.services.nusmods import ImportError
@@ -279,6 +279,9 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             name, args = split_command(message.text)
             if not addressed_to_me(message.text, context.bot.username):
                 return  # /stats@OtherBot belongs to another bot in this group
+            if name in ("help", "start"):
+                await send(update, [Reply(GROUP_HELP)])
+                return
             if name not in GROUP_COMMANDS:
                 await send(update, [Reply(PRIVATE_ONLY)])
                 return

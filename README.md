@@ -99,7 +99,7 @@ Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `
 2. Reply `/event` to a message containing a plan, or send `/event Dinner Fri 7-9pm at Vivo`. The bot posts a card.
 3. With two accounts, tap **Am I free?** on the same card. Each sees a private popup; nothing appears in the group.
 4. Tap Going / Maybe / Can't and watch the headcount. The plan appears in each member's `/plans`.
-5. As the organiser tap **Edit**. Telegram opens the private chat; send the correction and confirm. Members who kept the plan each receive one message stating what changed.
+5. As the organiser tap **⚙️ Manage**. Telegram opens the private chat with Edit, Cancel event, Nudge members, Who's confirmed and Mark who came. Choose Edit, send the correction and confirm. Members who kept the plan each receive one message stating what changed.
 6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **Count me in**. Slots are suggested when the reply-by time passes; the organiser can also tap **Suggest slots** earlier.
 7. Tap **Who's going?** for the Going names, and **I'm here** from 30 minutes before the start to check in.
 8. A card is redrawn as "ended · N went" once the event is over (or "N said Going" when nobody checked in).
@@ -108,7 +108,7 @@ Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `
 
 | Feature | How it works |
 | --- | --- |
-| **"Still coming?"** | 4–30 hours before an event starts, each member marked Going gets one private message: Still coming / Not sure / Can't anymore. Can't anymore also sets their RSVP to Can't. The organiser taps **Status** on the card for "18 confirmed · 4 unsure · 3 dropped · 2 no reply". Members with `/reminders off` are not asked. |
+| **"Still coming?"** | 4–30 hours before an event starts, each member marked Going gets one private message: Still coming / Not sure / Can't anymore. Can't anymore also sets their RSVP to Can't. The organiser sees, under **⚙️ Manage → Who's confirmed**, "18 confirmed · 4 unsure · 3 dropped · 2 no reply". Members with `/reminders off` are not asked. |
 | **Recurring events** | `/event Training every Tue/Thu 7-9pm at UTSRC until week 13` (also `until 30 Nov`, `for 8 weeks`). Every session is its own card, posted four days before it. Week numbers use the NUS calendar (recess between weeks 6 and 7). Editing a card changes that session only; the organiser is then offered **Apply to all future sessions** or **Cancel all future sessions**. **Going to all** RSVPs to every remaining session. A series is capped at 26 weeks / 60 sessions. |
 | **Auto-chase** | Up to two private nudges per card: a day after posting (or halfway to the deadline, if sooner) and three hours before the deadline. A person is nudged at most once per stage. A poll's deadline is its reply-by time; a card's is its start. |
 | **Heatmap** | The poll card's **📊 Who's free when** opens the Mini App grid of how many participants are free in each half hour. Counts only; shown to poll participants, and only once three schedules are known. Needs `BOT_USERNAME` and `MINI_APP_SHORT_NAME` (create the short name with `/newapp` in BotFather). |

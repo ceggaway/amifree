@@ -300,6 +300,8 @@ class SchedulingService:
                 await self.repo.set_user_flags(user.id, dm_blocked=False)
             if args.startswith(("edit_", "cancel_")):
                 return await self.groups.begin_change(user, args)
+            if args.startswith("manage_"):
+                return await self.groups.manage_panel(user, args)
             connected = []
             if user.onboarding_status == "READY":
                 connected.append(f"NUSMods ({user.academic_year}, semester {user.semester})")
@@ -1648,6 +1650,8 @@ class SchedulingService:
             return await self.groups.from_private(telegram_id, data)
         if data.startswith("c:"):
             return await self.groups.confirm_attendance(telegram_id, data)
+        if data.startswith("m:"):
+            return await self.groups.manage_action(user, data)
         if data.startswith("ser:"):
             return await self.groups.series_action(user, data)
         if data.startswith(("at:", "ap:", "aa:")):

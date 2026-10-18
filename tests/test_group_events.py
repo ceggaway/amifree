@@ -58,9 +58,30 @@ def make_bot(service):
     return bot, transport
 
 
-def buttons(markup):
+# Cards posted before the Manage button still carry these; their handlers must keep working.
+LEGACY = {
+    "Save": "save",
+    "Edit": "edit",
+    "Cancel event": "cancel",
+    "Nudge": "nudge",
+    "Status": "status",
+}
+
+
+def labels_on(markup):
     markup = json.loads(markup) if isinstance(markup, str) else markup
-    return {b["text"]: b["callback_data"] for row in markup["inline_keyboard"] for b in row}
+    return [b["text"] for row in markup["inline_keyboard"] for b in row]
+
+
+def buttons(markup):
+    """Label -> callback data of the card, plus the buttons older cards in a group still have."""
+    markup = json.loads(markup) if isinstance(markup, str) else markup
+    found = {b["text"]: b["callback_data"] for row in markup["inline_keyboard"] for b in row}
+    sample = next((d for d in found.values() if d.startswith("g:")), None)
+    if sample:
+        event_id = sample.split(":")[2]
+        found |= {label: f"g:{action}:{event_id}" for label, action in LEGACY.items()}
+    return found
 
 
 def alerts(transport):
@@ -83,18 +104,15 @@ async def test_event_card_from_a_replied_message(service_factory):
     assert service.extractor.calls[0][0] == TEXT
     assert "CCA dinner" in card["text"] and "Location: Vivo" in card["text"]
     assert "Going 0 · Maybe 0 · Can't 0" in card["text"]
-    assert list(taps) == [
+    # Seven buttons: the answers, two private checks, check-in, and one organiser menu.
+    assert labels_on(card["reply_markup"]) == [
         "Going",
         "Maybe",
         "Can't",
         "Am I free?",
         "Who's going?",
         "I'm here",
-        "Save",
-        "Edit",
-        "Cancel event",
-        "Nudge",
-        "Status",
+        "⚙️ Manage",
     ]
     assert all(len(data.encode()) <= 64 for data in taps.values())
     # The bot records its own card message so later edits can re-render it.

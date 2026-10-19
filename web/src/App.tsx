@@ -1,5 +1,5 @@
 import { Icon } from "./components/Icon";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { HashRouter, Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { mockMode } from "./api";
 import { Blocks } from "./pages/Blocks";
@@ -26,9 +26,15 @@ export function startPath(param: string): string | null {
   return null;
 }
 
-function StartRoute() {
+/** Opens the page a group link points to, once, when the app starts. React Router gives a
+ * new `navigate` after every page change, so without the `done` guard this effect ran again
+ * on each tap and sent people back to the start page. */
+export function StartRoute() {
   const navigate = useNavigate();
+  const done = useRef(false);
   useEffect(() => {
+    if (done.current) return;
+    done.current = true;
     const path = startPath(startParam());
     if (path) navigate(path, { replace: true });
   }, [navigate]);

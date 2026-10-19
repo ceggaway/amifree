@@ -11,22 +11,29 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 NUSMODS_URL = "https://nusmods.com/timetable"
 
 WELCOME = (
-    "👋 <b>Hi! I’m AmIFree, your personal planning assistant.</b>\n\n"
-    "📩 <b>Start here: forward me a plan.</b> I’ll check if you’re free and flag any clashes "
-    "with your schedule.\n"
-    "📌 <b>Keep track of your plans.</b> Add plans and deadlines and see what’s coming up, "
-    "all in one place.\n"
-    "👥 <b>Find a time together.</b> Add me to a group to find when everyone’s free.\n\n"
-    "<b>Optional:</b> connect your schedule so I can check it too.\n"
-    "📅 Your Google or Apple Calendar\n"
-    "📚 Your NUSMods timetable, if classes are missing from your calendar\n\n"
-    "🔒 <b>Your privacy matters.</b> I never read your group chats."
+    "👋 <b>Hi! I’m AmIFree.</b> Forward me any plan and I’ll tell you if you’re free.\n\n"
+    "<b>Get set up in about a minute:</b>\n"
+    "1️⃣ <b>Connect your calendar</b> so I can see when you’re busy.\n"
+    "2️⃣ <b>Add your NUSMods</b> if your classes aren’t in your calendar.\n"
+    "3️⃣ <b>Forward me a plan</b>, like “Dinner Fri 7–9pm at Vivo”.\n\n"
+    "Want to skip 1 and 2? Just start forwarding plans. You can set up any time with /calendar.\n"
+    "👥 Organising for a group? Add me to the chat and reply /event to a plan.\n\n"
+    "🔒 I only see <i>when</i> you’re busy, never what your events are. I never read your "
+    "group chats."
 )
 
 PICK_CALENDAR = (
     "📅 Which calendar do you use?\n\n"
-    "I only read when you're busy, never what your events are called, where they are "
+    "🍎 iPhone works right from your phone.\n"
+    "📅 Google and 📧 Outlook need a computer (or your phone's browser in desktop mode).\n\n"
+    "I only see when you're busy, never what your events are called, where they are "
     "or who's going."
+)
+
+# Every calendar guide ends the same way, so nobody wonders what to do after the last step.
+PASTE_NEXT = (
+    "\n\n👇 Paste the link here when you have it.\n"
+    "Stuck? Setup is optional: you can forward me a plan any time."
 )
 
 GUIDES = {
@@ -38,50 +45,50 @@ GUIDES = {
         "there. To have me check your classes, paste your NUSMods Share/Sync link instead."
     ),
     "nusmods": (
-        "📚 Your NUSMods link\n\n"
+        "📚 Your NUSMods link · about 1 minute\n\n"
         "1. Open NUSMods (button below) and go to your timetable.\n"
         "2. Check every class type is chosen: lecture, tutorial, lab…\n"
-        "3. Tap Share/Sync, then Copy link.\n"
-        "4. Come back here and paste it.\n\n"
+        "3. Tap Share/Sync, then Copy link.\n\n"
         "I'll add your classes and exams as busy times. Send a new link whenever your "
-        "timetable changes."
+        "timetable changes." + PASTE_NEXT
     ),
     "ios": (
-        "🍎 iPhone / iCloud calendar link\n\n"
+        "🍎 iPhone / iCloud calendar · about 1 minute\n\n"
         "1. Open the Calendar app on your iPhone.\n"
         "2. Tap Calendars at the bottom.\n"
         "3. Tap ⓘ next to the calendar you use most.\n"
         "4. Turn on Public Calendar.\n"
-        "5. Tap Share Link…, then Copy.\n"
-        "6. Come back here and paste it. It starts with webcal://, that's right.\n\n"
+        "5. Tap Share Link…, then Copy.\n\n"
+        "It starts with webcal://, that's right.\n\n"
         "Use several calendars, like Classes, CCA and Events? Do this for each one and paste "
         "every link. I'll check them all.\n\n"
         "Anyone who has a link can see that calendar, so only paste it here. Turn Public "
-        "Calendar off any time to stop sharing it."
+        "Calendar off any time to stop sharing it." + PASTE_NEXT
     ),
     "google": (
-        "📅 Google Calendar link\n\n"
-        "This needs a computer, or your phone's browser in desktop mode: the Google "
+        "📅 Google Calendar · about 1 minute\n\n"
+        "Do this on a computer, or your phone's browser in desktop mode: the Google "
         "Calendar app can't show it.\n\n"
         "1. Go to calendar.google.com and sign in.\n"
         "2. Click ⚙️ at the top right, then Settings.\n"
         "3. On the left, under Settings for my calendars, click your calendar.\n"
         "4. Scroll down to Integrate calendar.\n"
-        "5. Copy Secret address in iCal format. It ends in .ics.\n"
-        "6. Paste it here.\n\n"
+        "5. Copy Secret address in iCal format. It ends in .ics.\n\n"
         "Several calendars? Repeat for each one and paste every link.\n\n"
         "Keep it secret: anyone with it can see your calendar. If it ever leaks, click "
-        "Reset next to it in Google and send me the new one."
+        "Reset next to it in Google and send me the new one." + PASTE_NEXT
     ),
     "outlook": (
-        "📧 Outlook calendar link\n\n"
-        "1. Go to outlook.com (or outlook.office.com for a school or work account) on a "
-        "computer, then ⚙️ Settings.\n"
+        "📧 Outlook calendar · about 1 minute\n\n"
+        "Do this on a computer.\n\n"
+        "1. Go to outlook.com (or outlook.office.com for a school or work account), then "
+        "⚙️ Settings.\n"
         "2. Choose Calendar, then Shared calendars.\n"
         '3. Under Publish a calendar, pick your calendar and "Can view when I\'m busy", '
         "then Publish.\n"
-        "4. Copy the ICS link and paste it here.\n\n"
-        "Can't see Publish? Your school account may not allow it; use another calendar."
+        "4. Copy the ICS link.\n\n"
+        "Can't see Publish? Your school account may not allow it. Try another calendar, or "
+        "add your NUSMods instead." + PASTE_NEXT
     ),
 }
 
@@ -91,8 +98,8 @@ SKIPPED = (
 )
 
 NOT_A_SCHEDULE_LINK = (
-    "That's not a NUSMods or personal calendar link. Send /start and I'll show you where "
-    "to find yours."
+    "That's not a NUSMods or personal calendar link. Pick yours below and I'll show you "
+    "where to find it."
 )
 
 
@@ -151,11 +158,29 @@ def welcome_keyboard() -> InlineKeyboardMarkup:
     """Setup is optional, so the four everyday buttons are on the first screen too."""
     return InlineKeyboardMarkup(
         [
-            [_button("📚 NUSMods link?", "nusmods"), _button("📅 Calendar link?", "calendar")],
+            [
+                _button("📅 Connect my calendar", "calendar"),
+                _button("📚 Add my NUSMods", "nusmods"),
+            ],
             [_menu("📋 My plans", "plans"), _menu("🕒 Am I free?", "free")],
             [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
         ]
     )
+
+
+def link_help_keyboard() -> InlineKeyboardMarkup:
+    """After a link that didn't work: one tap to the right guide, no retyping /start."""
+    return InlineKeyboardMarkup(
+        [
+            [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
+            [_button("📧 Outlook", "outlook"), _button("📚 NUSMods", "nusmods")],
+        ]
+    )
+
+
+def try_it_keyboard() -> InlineKeyboardMarkup:
+    """After the first schedule is connected: one tap to see it working."""
+    return InlineKeyboardMarkup([[_menu("🕒 Am I free?", "free")]])
 
 
 def pick_calendar_keyboard() -> InlineKeyboardMarkup:

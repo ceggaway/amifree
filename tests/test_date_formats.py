@@ -94,6 +94,24 @@ def test_weekday_that_disagrees_with_the_date_asks():
             "20:30",
         ),
         (
+            "Workshop Wednesday 7:30–9:00 PM",
+            dict(date_text="Wednesday", start_time_text="7:30", end_time_text="9:00 PM"),
+            "19:30",
+            "21:00",
+        ),
+        (
+            "Seminar Wednesday 11:30-1pm",
+            dict(date_text="Wednesday", start_time_text="11:30", end_time_text="1pm"),
+            "11:30",
+            "13:00",
+        ),
+        (
+            "Dinner Wednesday 19:30-9pm",
+            dict(date_text="Wednesday", start_time_text="19:30", end_time_text="9pm"),
+            "19:30",
+            "21:00",
+        ),
+        (
             "Lunch Thursday noon to 1.30pm",
             dict(date_text="Thursday", start_time_text="noon", end_time_text="1.30pm"),
             "12:00",

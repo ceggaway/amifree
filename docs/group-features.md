@@ -22,8 +22,9 @@ the Group features table in the README.
 
 ## The card's buttons
 
-Going / Maybe / Can't, Am I free?, Who's going?, I'm here, and **⚙️ Manage**. Manage opens the
-organiser's private menu (`manage_keyboard`: Edit, Cancel event, Nudge members, Who's confirmed,
+With the Mini App set up: Going / Maybe / Can't and **📱 Details**; everything else is on the
+event's page in the app. Without it: Going / Maybe / Can't, Am I free?, Who's going?, I'm here,
+and **⚙️ Manage**. Manage opens the organiser's private menu (`manage_keyboard`: Edit, Cancel event, Nudge members, Who's confirmed,
 Mark who came); anyone else is refused privately. Cards posted before this change still carry
 the old Edit / Cancel event / Nudge / Status / Save buttons, and those keep working. `/help`
 (and `/start`) inside a group shows a short guide, and is listed in the group command menu.
@@ -82,8 +83,10 @@ Each step is isolated: one failing is logged and the rest still run.
 - **Poll auto-suggest happens at the reply-by time, not at the third join.** Suggesting the
   moment three people join would fix the slots before the rest of the group has had a chance.
   The organiser's Suggest button still works at any time.
-- **Fill mine is the one-tap confirm.** It answers every slot from the member's schedule in
-  one tap; they can change single answers afterwards.
+- **Poll voting is one tap per time.** Members tap ✅ 1 / ✅ 2 / ✅ 3 for the times they can
+  make; a second tap takes it back. Maybe, the heatmap and the organiser's Suggest, Nudge and
+  Pick are in the app (or on the card when the app isn't set up). Cards posted before this
+  change keep their Fill mine and ✅ / 🤔 / ❌ buttons, which still work.
 - **A series is materialised.** Every session is a normal card row, so RSVPs, chase,
   "still coming?", attendance and export need no special cases. Sessions without a posted
   card are never chased or asked about.

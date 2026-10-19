@@ -62,7 +62,9 @@ async def run_poll(service, repo, joiners=(2, 3)):
         taps = buttons(card["reply_markup"])
         for n, member in enumerate(joiners):
             await bot.process_update(
-                Update.de_json(group_tap(taps["Count me in"], member, update_id=8000 + n), bot.bot)
+                Update.de_json(
+                    group_tap(taps["✋ Count me in"], member, update_id=8000 + n), bot.bot
+                )
             )
     return bot, transport, card, taps, next(iter(repo.polls.values()))
 
@@ -78,7 +80,7 @@ async def test_slots_need_three_opt_ins_and_the_organiser(service_factory):
     assert poll.message_id == 101
     async with bot:
         # A second tap by the same member does not count twice.
-        await bot.process_update(Update.de_json(group_tap(taps["Count me in"], 2), bot.bot))
+        await bot.process_update(Update.de_json(group_tap(taps["✋ Count me in"], 2), bot.bot))
         assert "Joined: 2" in last_card(transport)["text"]
         suggest = taps["Suggest slots (organiser)"]
         await bot.process_update(Update.de_json(group_tap(suggest, 2, update_id=8100), bot.bot))
@@ -123,26 +125,31 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
         assert "Lab" not in opened["text"] and "Brunch" not in opened["text"]
         taps = buttons(opened["reply_markup"])
         assert all(len(data.encode()) <= 64 for data in taps.values())
-        await bot.process_update(
-            Update.de_json(group_tap(taps["Fill mine"], 3, update_id=8201), bot.bot)
-        )
+        assert list(taps)[:3] == ["✅ 1", "✅ 2", "✅ 3"] and "Fill mine" not in taps
+        # Cards posted before the redesign still have Fill mine and ✅/🤔/❌: they keep working.
+        fill, vote = f"p:fill:{poll.id}", f"p:v:{poll.id}:0"
+        await bot.process_update(Update.de_json(group_tap(fill, 3, update_id=8201), bot.bot))
         filled = alerts(transport)[-1]
         assert filled["text"].startswith("Filled from your schedule: 1 Maybe · 2 Free · 3 Free")
         assert filled["show_alert"] and len(filled["text"]) <= 200
-        await bot.process_update(
-            Update.de_json(group_tap(taps["Fill mine"], 2, update_id=8202), bot.bot)
-        )
+        await bot.process_update(Update.de_json(group_tap(fill, 2, update_id=8202), bot.bot))
         # Someone who never opted in can still answer by hand, and change an answer.
+        await bot.process_update(Update.de_json(group_tap(vote + "B", 9, update_id=8203), bot.bot))
+        await bot.process_update(Update.de_json(group_tap(vote + "M", 3, update_id=8204), bot.bot))
+        await bot.process_update(Update.de_json(group_tap(vote + "F", 3, update_id=8205), bot.bot))
+        assert "1. Mon 5 Oct 14:00–16:00" in last_card(transport)["text"]
+        assert "✅ 2 can make it" in last_card(transport)["text"]
+        # Today's card: one tap says "I can make it", a second tap takes it back.
         await bot.process_update(
-            Update.de_json(group_tap(taps["1 ❌"], 9, update_id=8203), bot.bot)
+            Update.de_json(group_tap(taps["✅ 1"], 9, update_id=8210), bot.bot)
         )
+        assert "you can make it" in alerts(transport)[-1]["text"]
+        assert "✅ 3 can make it" in last_card(transport)["text"]
         await bot.process_update(
-            Update.de_json(group_tap(taps["1 🤔"], 3, update_id=8204), bot.bot)
+            Update.de_json(group_tap(taps["✅ 1"], 9, update_id=8211), bot.bot)
         )
-        await bot.process_update(
-            Update.de_json(group_tap(taps["1 ✅"], 3, update_id=8205), bot.bot)
-        )
-        assert "✅ 2 · 🤔 0 · ❌ 1" in last_card(transport)["text"]
+        assert "removed" in alerts(transport)[-1]["text"]
+        assert "✅ 2 can make it" in last_card(transport)["text"]
         assert len(repo.poll_people[poll.id]) == 3
         # Only the organiser can settle it; picking posts a normal event card.
         await bot.process_update(
@@ -160,7 +167,7 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
         await bot.process_update(Update.de_json(group_tap(going, 2, update_id=8208), bot.bot))
         # A closed poll no longer accepts answers, and a repeated pick makes no second card.
         await bot.process_update(
-            Update.de_json(group_tap(taps["1 ✅"], 2, update_id=8209), bot.bot)
+            Update.de_json(group_tap(taps["✅ 1"], 2, update_id=8209), bot.bot)
         )
         assert alerts(transport)[-1]["text"] == "This poll is closed."
     assert len(repo.group_events) == 1
@@ -174,7 +181,7 @@ async def test_poll_is_bound_to_its_chat_and_needs_a_topic(service_factory):
     bot, transport, _, taps, poll = await run_poll(service, repo, joiners=())
     async with bot:
         await bot.process_update(
-            Update.de_json(group_tap(taps["Count me in"], 2, chat=CHAT - 1), bot.bot)
+            Update.de_json(group_tap(taps["✋ Count me in"], 2, chat=CHAT - 1), bot.bot)
         )
         assert alerts(transport)[-1]["text"] == "This poll is no longer available."
         await bot.process_update(Update.de_json(group_message("/whosfree", 31, 1), bot.bot))
@@ -221,15 +228,11 @@ async def test_fill_mine_refuses_to_answer_free_for_someone_with_no_schedule(ser
         await bot.process_update(
             Update.de_json(group_tap(taps["Suggest slots (organiser)"], 1, update_id=8500), bot.bot)
         )
-        taps = buttons(last_card(transport)["reply_markup"])
-        await bot.process_update(
-            Update.de_json(group_tap(taps["Fill mine"], 4, update_id=8501), bot.bot)
-        )
+        fill = f"p:fill:{poll.id}"  # on cards posted before the one-tap redesign
+        await bot.process_update(Update.de_json(group_tap(fill, 4, update_id=8501), bot.bot))
         assert "no schedule for you yet" in alerts(transport)[-1]["text"]
         # Nothing was recorded for them; members who do have a schedule can still fill.
         fourth = (await repo.ensure_user(4)).id
         assert not any(key[1] == fourth for key in repo.poll_votes)
-        await bot.process_update(
-            Update.de_json(group_tap(taps["Fill mine"], 2, update_id=8502), bot.bot)
-        )
+        await bot.process_update(Update.de_json(group_tap(fill, 2, update_id=8502), bot.bot))
         assert alerts(transport)[-1]["text"].startswith("Filled from your schedule")

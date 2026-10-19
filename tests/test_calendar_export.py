@@ -58,6 +58,11 @@ def test_ics_escapes_text_and_folds_long_lines():
     assert all(len(line.encode()) <= 75 for line in ics.split("\r\n"))
 
 
+def test_a_title_cannot_add_lines_to_the_calendar_file():
+    ics = build_ics(event(notes="Bring cash\rDTSTART:20991231T000000Z")).decode()
+    assert "\rDTSTART" not in ics and "Bring cash\\nDTSTART" in ics.replace("\r\n ", "")
+
+
 def test_cancelled_ics():
     ics = build_ics(event(), cancelled=True).decode()
     assert "METHOD:CANCEL" in ics and "STATUS:CANCELLED" in ics

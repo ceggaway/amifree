@@ -63,7 +63,9 @@ async def test_poll_shows_deadline_and_suggests_itself_when_it_passes(service_fa
         taps = buttons(card["reply_markup"])
         for n, member in enumerate((2, 3)):
             await bot.process_update(
-                Update.de_json(group_tap(taps["Count me in"], member, update_id=8300 + n), bot.bot)
+                Update.de_json(
+                    group_tap(taps["✋ Count me in"], member, update_id=8300 + n), bot.bot
+                )
             )
         poll = next(iter(repo.polls.values()))
         assert poll.deadline_at == datetime(2026, 10, 5, 23, 59, tzinfo=SG)
@@ -90,7 +92,7 @@ async def test_deadline_does_nothing_without_enough_schedules(service_factory):
     assert repo.polls[poll.id].status == "COLLECTING"
     # The card says why no slots appeared, instead of still promising them at the reply time.
     text = last_card(transport)["text"]
-    assert "The reply time has passed" in text and "Set my times" in text
+    assert "The reply time has passed" in text and "taps Suggest" in text
     edits = len([c for c in transport.calls if c[0] == "editMessageText"])
     await service.notifier.run()  # nothing changed since: not redrawn again
     assert len([c for c in transport.calls if c[0] == "editMessageText"]) == edits
@@ -126,8 +128,8 @@ async def test_poll_card_links_to_the_mini_app_when_configured(service_factory):
     markup = json.loads(markup) if isinstance(markup, str) else markup
     urls = [b["url"] for row in markup["inline_keyboard"] for b in row if b.get("url")]
     poll = next(iter(repo.polls.values()))
-    assert urls == [
-        f"https://t.me/AmIFreeBot/free?startapp=poll_{poll.id}",
-        f"https://t.me/AmIFreeBot/free?startapp=mine_{poll.id}",
-    ]
+    # One way into the app per card; the organiser's Suggest and Nudge live there.
+    assert urls == [f"https://t.me/AmIFreeBot/free?startapp=poll_{poll.id}"]
+    labels = [b["text"] for row in markup["inline_keyboard"] for b in row]
+    assert labels == ["✋ Count me in", "📱 Open"]
     assert alerts(transport) == []

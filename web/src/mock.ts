@@ -1,5 +1,5 @@
 // Development-only canned data. Never imported in production builds (see api.ts).
-import type { Availability, GroupEventDetail, Plan, Rule } from "./types";
+import type { Availability, GroupEventDetail, Plan, PollAnswer, PollDetail, Rule } from "./types";
 
 const free: Availability = {
   verdict: "UNKNOWN",
@@ -14,6 +14,20 @@ const at = (days: number, hour: number) => {
   d.setDate(d.getDate() + days);
   d.setHours(hour, 0, 0, 0);
   return d.toISOString();
+};
+let mockPoll: PollDetail = {
+  id: "mock",
+  chat: "n100500",
+  title: "Project meeting",
+  status: "OPEN",
+  duration_minutes: 120,
+  deadline_at: at(1, 23),
+  joined: 5,
+  joined_by_me: true,
+  min_joined: 3,
+  slots: [2, 3, 4].map((offset, i) => ({ start_at: at(offset, 14), end_at: at(offset, 16), free: 5 - i, of: 5, yes: 3 - i, maybe: i })),
+  mine: {},
+  organiser: true,
 };
 let plans: Plan[] = [
   {
@@ -112,6 +126,13 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
     result = groupEvent;
   } else if (path === "/api/me") {
     result = { telegram_user_id: 1, reminders_enabled: true, nusmods: { connected: false }, calendars: [], outside_calendars_connected: false };
+  } else if (/^\/api\/polls\/[^/]+(\/(join|vote))?$/.test(path)) {
+    if (path.endsWith("/vote")) mockPoll = { ...mockPoll, mine: { ...mockPoll.mine, [String(data.slot)]: data.answer as PollAnswer } };
+    result = mockPoll;
+  } else if (/^\/api\/polls\/[^/]+\/(suggest|nudge)$/.test(path)) {
+    result = { message: "Nudging 2 members privately." };
+  } else if (path.endsWith("/pick")) {
+    result = { event_id: groupEvent.id };
   } else if (path.startsWith("/api/polls/") && path.endsWith("/availability")) {
     if (method === "PUT") {
       result = { saved: ((data.free as string[]) ?? []).length, dropped: 0 };

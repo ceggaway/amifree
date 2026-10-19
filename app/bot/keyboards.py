@@ -61,17 +61,16 @@ def group_keyboard(event: GroupEvent, app_url: str | None = None) -> InlineKeybo
     def button(label, action):
         return InlineKeyboardButton(label, callback_data=f"g:{action}:{event.id}")
 
+    answer = [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")]
+    if app_url:
+        # Everything else (Am I free?, who's going, check-in, every session, organiser tools)
+        # is on the event's page in the Mini App, so the card stays four buttons.
+        return InlineKeyboardMarkup([answer, [InlineKeyboardButton("📱 Details", url=app_url)]])
+    # Without the app: the same tools as buttons. Manage opens the organiser's private menu.
     rows = [
-        [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")],
+        answer,
         [button("Am I free?", "free"), button("Who's going?", "who")],
-        # 📱 Open shows the whole event in the Mini App, organiser tools included. Without the
-        # app, Manage opens the organiser's private menu; others get a private refusal.
-        [
-            button("I'm here", "here"),
-            InlineKeyboardButton("📱 Open", url=app_url)
-            if app_url
-            else button("⚙️ Manage", "manage"),
-        ],
+        [button("I'm here", "here"), button("⚙️ Manage", "manage")],
     ]
     if event.series_id:
         rows.insert(2, [button("Going to all", "goall")])
@@ -104,40 +103,29 @@ def nudge_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(group_keyboard(event).inline_keyboard[:1])
 
 
-def poll_keyboard(
-    poll: Poll, heatmap_url: str | None = None, mine_url: str | None = None
-) -> InlineKeyboardMarkup:
+def poll_keyboard(poll: Poll, app_url: str | None = None) -> InlineKeyboardMarkup:
+    """Members tap the times that work; everything else is in the app (📱 Open).
+
+    Without the app, the organiser's buttons stay on the card, since there's nowhere else."""
+
     def button(label, action, extra=""):
         data = f"p:{action}:{poll.id}" + (f":{extra}" if extra else "")
         return InlineKeyboardButton(label, callback_data=data)
 
-    heatmap = []
-    if heatmap_url:
-        heatmap.append(InlineKeyboardButton("📊 Who's free when", url=heatmap_url))
-    if mine_url:
-        heatmap.append(InlineKeyboardButton("✍️ Set my times", url=mine_url))
-    heatmap = [heatmap] if heatmap else []
+    open_app = [InlineKeyboardButton("📱 Open", url=app_url)] if app_url else []
     if poll.status == "COLLECTING":
-        return InlineKeyboardMarkup(
-            [
-                [button("Count me in", "join")],
-                [button("Suggest slots (organiser)", "suggest"), button("Nudge", "nudge")],
-                *heatmap,
-            ]
-        )
-    rows = [[button("Fill mine", "fill"), button("Count me in", "join")], *heatmap]
-    for index in range(len(poll.slots)):
+        rows = [[button("✋ Count me in", "join"), *open_app]]
+        if not app_url:
+            rows.append([button("Suggest slots (organiser)", "suggest"), button("Nudge", "nudge")])
+        return InlineKeyboardMarkup(rows)
+    rows = [[button(f"✅ {index + 1}", "t", str(index)) for index in range(len(poll.slots))]]
+    if app_url:
+        rows.append(open_app)
+    else:
         rows.append(
-            [
-                button(f"{index + 1} ✅", "v", f"{index}F"),
-                button(f"{index + 1} 🤔", "v", f"{index}M"),
-                button(f"{index + 1} ❌", "v", f"{index}B"),
-            ]
+            [button(f"Pick {index + 1}", "pick", str(index)) for index in range(len(poll.slots))]
+            + [button("Nudge", "nudge")]
         )
-    rows.append(
-        [button(f"Pick {index + 1}", "pick", str(index)) for index in range(len(poll.slots))]
-        + [button("Nudge", "nudge")]
-    )
     return InlineKeyboardMarkup(rows)
 
 

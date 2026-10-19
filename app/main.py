@@ -138,6 +138,12 @@ def create_app(
             register_handlers(bot_app, app.state.service)
             app.state.telegram = bot_app
             await stack.enter_async_context(bot_app)
+            # Mini App links need the @username, not the display name: trust Telegram over config.
+            actual = bot_app.bot.username
+            if settings.bot_username.lstrip("@").lower() != actual.lower():
+                if settings.bot_username:
+                    log.warning("bot_username_mismatch configured_ignored using=%s", actual)
+                settings.bot_username = actual
             await bot_app.bot.set_my_commands(
                 [
                     BotCommand("start", "Getting started"),

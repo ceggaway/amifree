@@ -15,5 +15,7 @@ describe("Singapore time handling", () => {
     const iso = fromInput("2026-10-09T19:00");
     expect(iso).toBe("2026-10-09T19:00:00+08:00");
     expect(toInput(iso)).toBe("2026-10-09T19:00");
+    // Browsers that add seconds still give a valid time.
+    expect(fromInput("2026-10-09T19:00:00")).toBe("2026-10-09T19:00:00+08:00");
   });
 });

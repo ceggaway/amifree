@@ -23,7 +23,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from urllib.parse import quote
 
@@ -308,6 +308,29 @@ class GoogleCalendar:
         if response.status_code in (404, 410):
             return False
         return self._write_failed(response)
+
+    async def add_code(self, calendar_email: str, code: str, now: datetime) -> str:
+        """Put a one-time code in the calendar, as proof that whoever sends it back can open
+        that calendar. Marked free, so it never counts as busy. Returns the event's id."""
+        cal = quote(calendar_email, safe="")
+        start = now.astimezone(SG)
+        body = {
+            "summary": f"AmIFree code {code}",
+            "description": "Send this number to the AmIFree bot. I'll delete this event after.",
+            "transparency": "transparent",
+            "start": {"dateTime": start.isoformat(), "timeZone": "Asia/Singapore"},
+            "end": {
+                "dateTime": (start + timedelta(minutes=30)).isoformat(),
+                "timeZone": "Asia/Singapore",
+            },
+            "extendedProperties": {"private": {"amifree": "1"}},
+        }
+        response = await self._call(
+            "POST", f"/calendars/{cal}/events", params={"sendUpdates": "none"}, json=body
+        )
+        if response.status_code not in (200, 201):
+            self._write_failed(response)
+        return response.json()["id"]
 
     async def delete_event(self, calendar_email: str, event: Event | str):
         event_id = event if isinstance(event, str) else google_event_id(event)

@@ -723,6 +723,17 @@ class SupabaseRepository:
         ).data
         return GoogleConnection.model_validate(rows[0]) if rows else None
 
+    async def google_calendar_owner(self, calendar_email: str) -> str | None:
+        """The user already connected to this Google calendar, if any."""
+        rows = (
+            await self.client.table("google_connections")
+            .select("user_id")
+            .eq("calendar_email", calendar_email)
+            .limit(1)
+            .execute()
+        ).data
+        return rows[0]["user_id"] if rows else None
+
     async def save_google_connection(
         self, user_id: str, calendar_email: str, calendar_id: str
     ) -> GoogleConnection:
@@ -977,6 +988,17 @@ class SupabaseRepository:
             "amifree_poll_vote", {"p_poll_id": poll_id, "p_user_id": user_id, "p_votes": votes}
         ).execute()
         return bool(result.data)
+
+    async def poll_my_votes(self, poll_id: str, user_id: str) -> dict[int, str]:
+        """One member's own answers, slot -> FREE/MAYBE/BUSY."""
+        rows = (
+            await self.client.table("poll_votes")
+            .select("slot,answer")
+            .eq("poll_id", poll_id)
+            .eq("user_id", user_id)
+            .execute()
+        ).data
+        return {row["slot"]: row["answer"] for row in rows or []}
 
     async def poll_tally(self, poll_id: str) -> dict[tuple[int, str], int]:
         result = await self.client.rpc("amifree_poll_tally", {"p_poll_id": poll_id}).execute()
@@ -1492,6 +1514,16 @@ class SupabaseRepository:
             )
         )
         return {r["user_id"]: r["free"] for r in rows}
+
+    async def payment_recorded(self, charge_id: str) -> bool:
+        found = (
+            await self.client.table("pro_payments")
+            .select("charge_id")
+            .eq("charge_id", charge_id)
+            .limit(1)
+            .execute()
+        ).data
+        return bool(found)
 
     async def record_payment(
         self, charge_id: str, chat_id: int, telegram_id: int, stars: int, days: int

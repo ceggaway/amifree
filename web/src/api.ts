@@ -10,6 +10,8 @@ import type {
   Me,
   MyGrid,
   Plan,
+  PollAnswer,
+  PollDetail,
   PollForm,
   Rule,
 } from "./types";
@@ -76,6 +78,13 @@ export const api = {
   block: (text: string, confirm: boolean) =>
     request<{ saved: boolean; block: Rule }>("POST", "/api/blocks", { text, confirm }),
   removeBlock: (id: string) => request<void>("DELETE", `/api/blocks/${id}`),
+  poll: (id: string) => request<PollDetail>("GET", `/api/polls/${id}`),
+  joinPoll: (id: string) => request<PollDetail>("POST", `/api/polls/${id}/join`),
+  vote: (id: string, slot: number, answer: PollAnswer) =>
+    request<PollDetail>("POST", `/api/polls/${id}/vote`, { slot, answer }),
+  suggest: (id: string) => request<{ message: string }>("POST", `/api/polls/${id}/suggest`),
+  pick: (id: string, slot: number) => request<{ event_id: string }>("POST", `/api/polls/${id}/pick`, { slot }),
+  nudgePoll: (id: string) => request<{ message: string }>("POST", `/api/polls/${id}/nudge`),
   pollHeatmap: (id: string) => request<Heatmap>("GET", `/api/polls/${id}/heatmap`),
   myGrid: (id: string) => request<MyGrid>("GET", `/api/polls/${id}/availability`),
   saveGrid: (id: string, free: string[]) =>

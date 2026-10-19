@@ -9,9 +9,10 @@ Privacy rules, enforced here rather than left to the caller:
 import re
 from datetime import datetime, time, timedelta
 
-from app.bot.keyboards import poll_keyboard
+from app.bot.keyboards import links_keyboard, poll_keyboard
 from app.bot.messages import Reply, clock
 from app.schemas.event import SG, EventDraft, Poll, Status
+from app.services.app_links import group_link
 from app.services.date_resolution import Clarification, resolve_date
 from app.services.group_events import GroupResult, parse_id
 from app.services.usual_times import covers
@@ -266,6 +267,18 @@ class PollService:
         self, telegram_id: int, chat_id: int, message_id: int, args: str
     ) -> GroupResult:
         if not args.strip():
+            form = links_keyboard(
+                [
+                    (
+                        "🗳 Find a time that works",
+                        group_link(self.scheduling.settings, chat_id, "find"),
+                    )
+                ]
+            )
+            if form:
+                return GroupResult(
+                    post=Reply("Pick the dates and length in the app, or type it. " + USAGE, form)
+                )
             return GroupResult(post=Reply("What are you scheduling? " + USAGE))
         user = await self.repo.ensure_user(telegram_id)
         now = self.scheduling.clock()

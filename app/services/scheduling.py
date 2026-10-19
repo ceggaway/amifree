@@ -75,6 +75,7 @@ from app.services.google_calendar import EMAIL as GOOGLE_EMAIL
 from app.services.google_calendar import GCAL_PREFIX
 from app.services.google_sync import GoogleSyncService
 from app.services.group_events import GroupEventService
+from app.services.group_hub import GroupHub
 from app.services.image_reader import PictureError
 from app.services.personal_calendar import (
     MAX_CALENDARS,
@@ -233,6 +234,10 @@ class SchedulingService:
         self.refund_star_payment = None
         self.detection = DetectionService(self)
         self.pro = ProService(self)
+        self.hub = GroupHub(self)
+        # Set by the bot layer: is this person in that group (asks Telegram), and its name.
+        self.check_chat_member = None
+        self.chat_title = None
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.
         self.notifier = None
         # What was just removed, kept briefly so Undo can put it back: token -> (expires,
@@ -313,6 +318,8 @@ class SchedulingService:
                 await self.repo.set_user_flags(user.id, dm_blocked=False)
             if args.startswith(("edit_", "cancel_")):
                 return await self.groups.begin_change(user, args)
+            if args.startswith("manage_"):
+                return await self.groups.manage_panel(user, args)
             connected = []
             if user.onboarding_status == "READY":
                 connected.append(f"NUSMods ({user.academic_year}, semester {user.semester})")
@@ -1695,6 +1702,8 @@ class SchedulingService:
             return await self.groups.from_private(telegram_id, data)
         if data.startswith("c:"):
             return await self.groups.confirm_attendance(telegram_id, data)
+        if data.startswith("m:"):
+            return await self.groups.manage_action(user, data)
         if data.startswith("ser:"):
             return await self.groups.series_action(user, data)
         if data.startswith(("at:", "ap:", "aa:")):

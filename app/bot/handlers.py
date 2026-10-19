@@ -16,14 +16,26 @@ from telegram.ext import (
 )
 
 from app.bot.delivery import webhook_delivery
-from app.bot.messages import Reply, send_reply
+from app.bot.keyboards import links_keyboard
+from app.bot.messages import GROUP_HELP, Reply, send_reply
+from app.services.app_links import group_links
 from app.services.image_reader import MAX_BYTES, PictureError
 from app.services.jobs import Notifier, Undeliverable
 from app.services.nusmods import ImportError
 from app.services.scheduling import SLOW_DOWN
 
 log = logging.getLogger(__name__)
-GROUP_COMMANDS = {"event", "plan", "whosfree", "stats", "export", "detect", "attendance", "pro"}
+GROUP_COMMANDS = {
+    "event",
+    "plan",
+    "whosfree",
+    "stats",
+    "export",
+    "detect",
+    "attendance",
+    "pro",
+    "app",
+}
 PRIVATE_ONLY = "Please use AmIFree in a private chat. Open the bot and send /start."
 NO_TEXT = (
     "I couldn't find any event details there. Forward the post or picture again, or type"
@@ -280,6 +292,14 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             name, args = split_command(message.text)
             if not addressed_to_me(message.text, context.bot.username):
                 return  # /stats@OtherBot belongs to another bot in this group
+            if name in ("help", "start", "app"):
+                links = links_keyboard(group_links(service.settings, update.effective_chat.id))
+                if name == "app" and links:
+                    text = "Open AmIFree for this group:"
+                else:
+                    text = GROUP_HELP + ("\n\nOr do it all in the app:" if links else "")
+                await send(update, [Reply(text, links)])
+                return
             if name not in GROUP_COMMANDS:
                 await send(update, [Reply(PRIVATE_ONLY)])
                 return
@@ -510,6 +530,22 @@ def register_handlers(application: Application, service):
     interval = service.settings.card_edit_interval_seconds
     refresher = CardRefresher(interval, edit_card)
     poll_refresher = CardRefresher(interval, edit_poll)
+
+    async def check_member(chat_id: int, telegram_id: int) -> bool:
+        """Whether Telegram lists this person in the group right now."""
+        try:
+            member = await application.bot.get_chat_member(chat_id, telegram_id)
+        except TelegramError:
+            return False
+        if member.status in ("creator", "administrator", "member"):
+            return True
+        return member.status == "restricted" and bool(getattr(member, "is_member", False))
+
+    async def chat_title(chat_id: int) -> str | None:
+        return (await application.bot.get_chat(chat_id)).title
+
+    service.check_chat_member = check_member
+    service.chat_title = chat_title
 
     async def refund_stars(telegram_id: int, charge_id: str):
         await application.bot.refund_star_payment(telegram_id, charge_id)

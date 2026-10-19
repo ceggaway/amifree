@@ -1,5 +1,5 @@
 // Development-only canned data. Never imported in production builds (see api.ts).
-import type { Availability, Plan, Rule } from "./types";
+import type { Availability, GroupEventDetail, Plan, Rule } from "./types";
 
 const free: Availability = {
   verdict: "UNKNOWN",
@@ -47,6 +47,35 @@ let plans: Plan[] = [
     },
   },
 ];
+let groupEvent: GroupEventDetail = {
+  id: "ge1",
+  chat: "n100500",
+  title: "CCA dinner",
+  start_at: at(2, 19),
+  end_at: at(2, 21),
+  location: "Vivo",
+  notes: "Bring your hall card",
+  status: "ACTIVE",
+  version: 1,
+  ended: false,
+  recurring: false,
+  counts: { GOING: 2, MAYBE: 1, DECLINED: 0 },
+  my_status: null,
+  availability: free,
+  going: ["Angel", "Rou Shuen"],
+  checked_in: false,
+  check_in_open: false,
+  organiser: true,
+  manage: {
+    summary: { going: 2, confirmed: 0, unsure: 0, dropped: 0, no_reply: 2 },
+    came: 0,
+    people: [
+      { id: "u1", name: "Angel", answer: "GOING", present: false },
+      { id: "u2", name: "Rou Shuen", answer: "GOING", present: false },
+      { id: "u3", name: "runezy", answer: "MAYBE", present: false },
+    ],
+  },
+};
 let rules: Rule[] = [
   { id: "r1", title: "Work", kind: "WEEKLY", description: "Work\nEvery Wednesday 18:00 → 22:00" },
 ];
@@ -54,7 +83,34 @@ let rules: Rule[] = [
 export async function mock<T>(method: string, path: string, body?: unknown): Promise<T> {
   const data = (body ?? {}) as Record<string, unknown>;
   let result: unknown;
-  if (path === "/api/me") {
+  if (path.startsWith("/api/groups/") && method === "GET") {
+    result = {
+      chat: "n100500",
+      title: "CS3216 group",
+      events: [{ ...groupEvent, recurring: false }],
+      polls: [{ id: "mock", title: "Project meeting", status: "COLLECTING", duration_minutes: 120, joined: 3, joined_by_me: false, deadline_at: at(1, 23), min_joined: 3 }],
+    };
+  } else if (path.startsWith("/api/groups/")) {
+    result = { id: path.endsWith("/polls") ? "mock" : groupEvent.id };
+  } else if (path.startsWith("/api/group-events/")) {
+    if (path.endsWith("/rsvp")) {
+      groupEvent = { ...groupEvent, my_status: data.status as GroupEventDetail["my_status"] };
+    } else if (path.endsWith("/attendance")) {
+      const people = groupEvent.manage!.people.map((p) =>
+        data.user_id === null || data.user_id === undefined ? { ...p, present: p.answer === "GOING" || p.present } : p.id === data.user_id ? { ...p, present: Boolean(data.present) } : p,
+      );
+      groupEvent = { ...groupEvent, manage: { ...groupEvent.manage!, people, came: people.filter((p) => p.present).length } };
+    } else if (path.endsWith("/nudge") || path.endsWith("/series")) {
+      return { message: "Nudging 1 member privately." } as T;
+    } else if (method === "PATCH") {
+      groupEvent = { ...groupEvent, ...data, version: groupEvent.version + 1 } as GroupEventDetail;
+      return { event: groupEvent, series_followup: false } as T;
+    } else if (path.endsWith("/cancel")) {
+      groupEvent = { ...groupEvent, status: "CANCELLED" };
+      return { event: groupEvent, series_followup: false } as T;
+    }
+    result = groupEvent;
+  } else if (path === "/api/me") {
     result = { telegram_user_id: 1, reminders_enabled: true, nusmods: { connected: false }, calendars: [], outside_calendars_connected: false };
   } else if (path.startsWith("/api/polls/") && path.endsWith("/availability")) {
     if (method === "PUT") {

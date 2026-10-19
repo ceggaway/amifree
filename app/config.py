@@ -101,13 +101,21 @@ class Settings(BaseSettings):
                 found.add(int(item))
         return found
 
-    def heatmap_link(self, poll_id: str) -> str | None:
+    def app_link(self, start: str) -> str | None:
+        """A t.me link that opens the Mini App on one page. Works from groups, unlike
+        web_app buttons, which Telegram only allows in private chats."""
         if not (self.bot_username and self.mini_app_short_name):
             return None
         return (
             f"https://t.me/{self.bot_username.lstrip('@')}/{self.mini_app_short_name}"
-            f"?startapp=poll_{poll_id}"
+            f"?startapp={start}"
         )
+
+    def event_link(self, group_event_id: str) -> str | None:
+        return self.app_link(f"ev_{group_event_id}")
+
+    def heatmap_link(self, poll_id: str) -> str | None:
+        return self.app_link(f"poll_{poll_id}")
 
     def availability_link(self, poll_id: str) -> str | None:
         link = self.heatmap_link(poll_id)

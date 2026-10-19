@@ -157,6 +157,8 @@ def create_app(
             )
             await bot_app.bot.set_my_commands(
                 [
+                    BotCommand("app", "Open AmIFree for this group"),
+                    BotCommand("help", "How to use AmIFree in this group"),
                     BotCommand("event", "Post an event card (reply to a plan, or add details)"),
                     BotCommand("whosfree", "Find a time: /whosfree project meeting 2h next week"),
                     BotCommand("stats", "Turnout for your events (sent privately)"),
@@ -234,7 +236,7 @@ def create_app(
         app.add_middleware(
             CORSMiddleware,
             allow_origins=[settings.mini_app_dev_origin.rstrip("/")],
-            allow_methods=["GET", "POST", "PATCH", "DELETE"],
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
             allow_headers=["Authorization", "Content-Type"],
         )
 

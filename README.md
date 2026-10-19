@@ -99,7 +99,7 @@ Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `
 2. Reply `/event` to a message containing a plan, or send `/event Dinner Fri 7-9pm at Vivo`. The bot posts a card.
 3. With two accounts, tap **Am I free?** on the same card. Each sees a private popup; nothing appears in the group.
 4. Tap Going / Maybe / Can't and watch the headcount. The plan appears in each member's `/plans`.
-5. As the organiser tap **Edit**. Telegram opens the private chat; send the correction and confirm. Members who kept the plan each receive one message stating what changed.
+5. As the organiser tap **⚙️ Manage**. Telegram opens the private chat with Edit, Cancel event, Nudge members, Who's confirmed and Mark who came. Choose Edit, send the correction and confirm. Members who kept the plan each receive one message stating what changed.
 6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **Count me in**. Slots are suggested when the reply-by time passes; the organiser can also tap **Suggest slots** earlier.
 7. Tap **Who's going?** for the Going names, and **I'm here** from 30 minutes before the start to check in.
 8. A card is redrawn as "ended · N went" once the event is over (or "N said Going" when nobody checked in).
@@ -108,7 +108,7 @@ Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `
 
 | Feature | How it works |
 | --- | --- |
-| **"Still coming?"** | 4–30 hours before an event starts, each member marked Going gets one private message: Still coming / Not sure / Can't anymore. Can't anymore also sets their RSVP to Can't. The organiser taps **Status** on the card for "18 confirmed · 4 unsure · 3 dropped · 2 no reply". Members with `/reminders off` are not asked. |
+| **"Still coming?"** | 4–30 hours before an event starts, each member marked Going gets one private message: Still coming / Not sure / Can't anymore. Can't anymore also sets their RSVP to Can't. The organiser sees, under **⚙️ Manage → Who's confirmed**, "18 confirmed · 4 unsure · 3 dropped · 2 no reply". Members with `/reminders off` are not asked. |
 | **Recurring events** | `/event Training every Tue/Thu 7-9pm at UTSRC until week 13` (also `until 30 Nov`, `for 8 weeks`). Every session is its own card, posted four days before it. Week numbers use the NUS calendar (recess between weeks 6 and 7). Editing a card changes that session only; the organiser is then offered **Apply to all future sessions** or **Cancel all future sessions**. **Going to all** RSVPs to every remaining session. A series is capped at 26 weeks / 60 sessions. |
 | **Auto-chase** | Up to two private nudges per card: a day after posting (or halfway to the deadline, if sooner) and three hours before the deadline. A person is nudged at most once per stage. A poll's deadline is its reply-by time; a card's is its start. |
 | **Heatmap** | The poll card's **📊 Who's free when** opens the Mini App grid of how many participants are free in each half hour. Counts only; shown to poll participants, and only once three schedules are known. Needs `BOT_USERNAME` and `MINI_APP_SHORT_NAME` (create the short name with `/newapp` in BotFather). |
@@ -130,6 +130,28 @@ npm run dev        # browser-only UI work with mock data, proxied to a local bac
 ```
 
 Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for example `https://your-service.onrender.com/app/`). On startup the bot sets its menu button to **Open AmIFree**. Telegram only opens HTTPS Mini Apps, so local testing inside Telegram needs a tunnel or a staging deploy. The Mini App sends Telegram's signed `initData` to `POST /api/auth/telegram`; the server verifies it and returns a one-hour session token. A normal browser has no signature and cannot sign in. Development builds fall back to mock data, which is compiled out of production builds.
+
+#### The Mini App in groups
+
+Groups can do everything from the Mini App. `/app` in a group, `/help`, and `/event` or
+`/whosfree` sent with nothing after them reply with buttons that open it: **Create an event**,
+**Find a time** and **This group's events**. Every event card has **📱 Open**, which shows the
+event with Going / Maybe / Can't, your private clash check, who's going and check-in. For the
+organiser it also has edit, cancel, nudge, "still coming?" and marking who came. A card made in
+the app is posted in the group like any other.
+
+Telegram doesn't allow Mini App buttons in groups, so these are `t.me/<bot>/<app>?startapp=…`
+links. A link names the group, and anyone can change a link, so the server asks Telegram
+(`getChatMember`) whether the person is in that group before it shows or posts anything.
+
+To switch it on (once, by whoever runs the bot):
+
+1. In BotFather, send `/newapp`, choose the bot, and give the URL
+   `https://<your-render-service>.onrender.com/app/` and a short name such as `app`.
+2. On Render, set `BOT_USERNAME` (without @), `MINI_APP_SHORT_NAME` (the short name from step 1)
+   and `MINI_APP_URL` (the same URL), then redeploy.
+
+Without these, the group commands and cards work exactly as before, with no app buttons.
 
 ### Weekly events and posters
 

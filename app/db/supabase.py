@@ -1304,6 +1304,37 @@ class SupabaseRepository:
         )
         return [GroupEvent.model_validate(r) for r in rows]
 
+    async def chat_events(
+        self, chat_id: int, ends_after: datetime, limit: int = 200
+    ) -> list[GroupEvent]:
+        """A group's active cards that have not finished, soonest first."""
+        rows = (
+            await self.client.table("group_events")
+            .select("*")
+            .eq("chat_id", chat_id)
+            .eq("status", "ACTIVE")
+            .gt("end_at", ends_after.isoformat())
+            .order("start_at", desc=False)
+            .order("id")
+            .limit(limit)
+            .execute()
+        ).data
+        return [GroupEvent.model_validate(r) for r in rows]
+
+    async def chat_polls(self, chat_id: int, now: datetime) -> list[Poll]:
+        """A group's polls that are still open and whose window has not passed."""
+        rows = (
+            await self.client.table("polls")
+            .select("*")
+            .eq("chat_id", chat_id)
+            .neq("status", "CLOSED")
+            .gt("window_end", now.isoformat())
+            .order("created_at", desc=True)
+            .limit(20)
+            .execute()
+        ).data
+        return [Poll.model_validate(r) for r in rows]
+
     async def group_tier(self, chat_id: int, now: datetime) -> str:
         rows = (
             await self.client.table("group_plans")

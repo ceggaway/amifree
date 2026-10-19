@@ -15,9 +15,16 @@ from uuid import UUID
 
 from telegram.error import BadRequest, Forbidden
 
-from app.bot.keyboards import attendance_keyboard, attendance_panel_keyboard, series_keyboard
+from app.bot.keyboards import (
+    attendance_keyboard,
+    attendance_panel_keyboard,
+    links_keyboard,
+    manage_keyboard,
+    series_keyboard,
+)
 from app.bot.messages import Reply, group_card, private_verdict, time_range
 from app.schemas.event import SG, EventDraft, GroupEvent, Status
+from app.services.app_links import group_link
 from app.services.chase import enqueue_nudges
 from app.services.date_resolution import Clarification, validate_extraction
 from app.services.recurrence import (
@@ -28,7 +35,8 @@ from app.services.recurrence import (
 )
 
 log = logging.getLogger(__name__)
-USAGE = "Reply /event to a message with the plan, or send /event Dinner Fri 7–9pm at Vivo."
+EXAMPLE = "/event Dinner Fri 7–9pm at Vivo"
+USAGE = f"Reply /event to a message with the plan, or send {EXAMPLE}."
 GONE = "This card is no longer available."
 ENDED = "This event has ended."
 CHECK_IN_OPENS = timedelta(minutes=30)
@@ -95,7 +103,7 @@ class GroupEventService:
         if ended:
             present = await self.repo.attendees(event.id)
             went = len(present) if present else None
-        return group_card(event, counts, went, ended)
+        return group_card(event, counts, went, ended, self.scheduling.settings.event_link(event.id))
 
     async def remember(self, chat_id: int, user_id: str, name: str | None, username: str | None):
         """Keep the Telegram name of someone who used the bot here, for "Who's going?" and exports."""
@@ -120,6 +128,14 @@ class GroupEventService:
     ) -> GroupResult:
         text = text.strip()
         if not text:
+            # Nothing to read: open the form in the app when it's set up.
+            form = links_keyboard(
+                [("📅 Create an event", group_link(self.scheduling.settings, chat_id, "new"))]
+            )
+            if form:
+                return GroupResult(
+                    post=Reply("Fill in the details in the app, or type them: " + EXAMPLE, form)
+                )
             return GroupResult(post=Reply(USAGE))
         if len(text) > 4000:
             return GroupResult(post=Reply("That message is too long for an event card."))
@@ -184,6 +200,35 @@ class GroupEventService:
             reference,
             default_minutes=self.scheduling.settings.default_event_duration_minutes,
         )
+        first_event, days = await self.build_series(
+            user, chat_id, message_id, draft, recurrence, reference
+        )
+        if first_event.message_id:
+            return GroupResult()  # a retried delivery
+        note = (
+            f"🔁 {len(days)} sessions, every {recurrence.label()} until {days[-1]:%a %-d %b}."
+            " Each session's card is posted a few days before it."
+        )
+        card = await self.render(first_event)
+        return GroupResult(
+            post=Reply(card.text + "\n\n" + note, card.keyboard),
+            group_event_id=first_event.id,
+        )
+
+    async def build_series(
+        self,
+        user,
+        chat_id: int,
+        message_id: int,
+        draft: EventDraft,
+        recurrence: Recurrence,
+        reference: datetime,
+    ) -> tuple[GroupEvent, list]:
+        """Store a series and every session of it, at the draft's time of day and length.
+
+        Repeating the call returns the same rows. Returns (first session, session dates)."""
+        if recurrence.until is None:
+            raise Clarification("How long does it run? Choose an end date.")
         start_time, length = (
             draft.start_at.timetz().replace(tzinfo=None),
             draft.end_at - draft.start_at,
@@ -223,17 +268,7 @@ class GroupEventService:
             )
             first_event = first_event or created
         await self.scheduling.safe_action(user.id, "group_series")
-        if first_event.message_id:
-            return GroupResult()  # a retried delivery
-        note = (
-            f"🔁 {len(days)} sessions, every {recurrence.label()} until {days[-1]:%a %-d %b}."
-            " Each session's card is posted a few days before it."
-        )
-        card = await self.render(first_event)
-        return GroupResult(
-            post=Reply(card.text + "\n\n" + note, card.keyboard),
-            group_event_id=first_event.id,
-        )
+        return first_event, days
 
     async def series_action(self, user, data: str) -> list[Reply]:
         """Organiser buttons sent after changing one session: apply to the rest, or stop."""
@@ -680,6 +715,40 @@ class GroupEventService:
             return [Reply("That event was already cancelled.")]
         return await self.scheduling.begin_change(user, event, cancel=action == "cancel")
 
+    async def manage_panel(self, user, payload: str) -> list[Reply]:
+        """Handle /start manage_<id>: the organiser's private menu for one card."""
+        event_id = parse_id(payload.partition("_")[2])
+        event = await self.repo.get_group_event(event_id) if event_id else None
+        if not event or event.creator_user_id != user.id:
+            return [Reply("Only the organiser can manage that event.")]
+        when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+        state = (
+            "This event was cancelled." if event.status != "ACTIVE" else "What do you want to do?"
+        )
+        return [Reply(f"⚙️ {event.title} · {when}\n{state}", manage_keyboard(event))]
+
+    async def manage_action(self, user, data: str) -> list[Reply]:
+        """m:<action>:<event> from the organiser's private menu."""
+        parts = data.split(":")
+        event_id = parse_id(parts[2]) if len(parts) == 3 else None
+        event = await self.repo.get_group_event(event_id) if event_id else None
+        if not event or event.creator_user_id != user.id:
+            return [Reply("Only the organiser can manage that event.")]
+        action = parts[1]
+        if event.status != "ACTIVE":
+            return [Reply("That event was cancelled.")]
+        if action in ("edit", "cancel"):
+            return await self.scheduling.begin_change(user, event, cancel=action == "cancel")
+        if action == "status":
+            return [Reply(await self.status_text(event))]
+        if action == "att":
+            return [await self.attendance_panel(event)]
+        if action == "nudge":
+            if self.is_ended(event):
+                return [Reply(ENDED)]
+            return [Reply(await self.nudge(event))]
+        return [Reply("That button isn't valid.")]
+
     async def nudge(self, card) -> str:
         queued = await enqueue_nudges(self.repo, card, self.scheduling.clock())
         await self.scheduling.flush_notifications()
@@ -730,6 +799,10 @@ class GroupEventService:
             return GroupResult(alert="This event was cancelled.", card=await self.render(event))
         action = parts[1]
         organiser = event.creator_user_id == user.id
+        if action == "manage":
+            if not organiser:
+                return GroupResult(alert="Only the organiser can manage this event.")
+            return GroupResult(start=f"manage_{event.id}")
         if action in ("edit", "cancel"):
             if not organiser:
                 return GroupResult(alert="Only the organiser can change this card.")

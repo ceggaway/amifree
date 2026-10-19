@@ -17,3 +17,10 @@ export const addDays = (date: Date, days: number) => new Date(date.getTime() + d
 /** Value for <input type="datetime-local">, in Singapore time. */
 export const toInput = (iso: string) => `${dayKey(iso)}T${time(iso)}`;
 export const fromInput = (value: string) => `${value}:00+08:00`;
+
+/** "2026-10-23" + "19:00" in Singapore time, as an ISO string with its offset. */
+export const at = (dateKey: string, clock: string) => `${dateKey}T${clock}:00+08:00`;
+/** Today's date key in Singapore, for date inputs. */
+export const todayKey = () => dayKey(new Date());
+/** The date key `days` after `key`. */
+export const shiftKey = (key: string, days: number) => dayKey(addDays(startOfDay(key), days));

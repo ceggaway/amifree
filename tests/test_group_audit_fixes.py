@@ -10,6 +10,7 @@ from telegram import Update
 from app.schemas.event import SG, Suggestion
 from app.services.detection import DetectionService
 from app.services.polls import STEP, PollService, parse_request
+from tests.conftest import extraction
 from tests.test_group_events import CHAT, alerts, buttons, group_tap, make_bot
 from tests.test_group_reports import PLAN, run
 from tests.test_group_series import SERIES, post_series, sessions
@@ -153,3 +154,53 @@ async def test_only_the_author_or_an_admin_decides_a_suggestion(service_factory)
 async def test_suggestions_from_before_the_migration_stay_open(service_factory):
     old = Suggestion(id="x", chat_id=CHAT, source_message_id=1, draft={})
     assert await DetectionService.may_decide(old, 3, None)
+
+
+async def test_manage_opens_a_private_menu_for_the_organiser_only(service_factory):
+    from tests.test_group_events import post_card
+
+    service, repo = service_factory(extraction())
+    bot, transport = make_bot(service)
+    async with bot:
+        card, taps, event = await post_card(bot, transport, repo)
+        # A member is refused in private; nothing opens for them.
+        await bot.process_update(Update.de_json(group_tap(taps["⚙️ Manage"], 2), bot.bot))
+        assert "Only the organiser" in alerts(transport)[-1]["text"]
+        # The organiser is sent to the private chat with a start parameter.
+        await bot.process_update(
+            Update.de_json(group_tap(taps["⚙️ Manage"], 1, update_id=5001), bot.bot)
+        )
+        assert alerts(transport)[-1]["url"].endswith(f"?start=manage_{event.id}")
+
+    panel = (await service.command(1, "start", f"manage_{event.id}"))[0]
+    labels = [b.text for row in panel.keyboard.inline_keyboard for b in row]
+    assert labels == [
+        "✏️ Edit",
+        "❌ Cancel event",
+        "📣 Nudge members",
+        "📊 Who's confirmed",
+        "📋 Mark who came",
+    ]
+    assert all(
+        len(b.callback_data.encode()) <= 64 for row in panel.keyboard.inline_keyboard for b in row
+    )
+    data = {b.text: b.callback_data for row in panel.keyboard.inline_keyboard for b in row}
+    assert "Going 0" in (await service.callback(1, data["📊 Who's confirmed"]))[0].text
+    assert "Nudging 1 member" in (await service.callback(1, data["📣 Nudge members"]))[0].text
+    asked = (await service.callback(1, data["✏️ Edit"]))[0]
+    assert asked.text.startswith("What do you want to change?")
+    # Someone else cannot open or use the menu, even with the button data.
+    assert "Only the organiser" in (await service.command(2, "start", f"manage_{event.id}"))[0].text
+    assert "Only the organiser" in (await service.callback(2, data["❌ Cancel event"]))[0].text
+
+
+async def test_help_works_inside_a_group(service_factory):
+    from tests.test_group_events import group_message
+
+    service, repo = service_factory()
+    bot, transport = make_bot(service)
+    async with bot:
+        for n, command in enumerate(("/help", "/start")):
+            await bot.process_update(Update.de_json(group_message(command, 60 + n, 1), bot.bot))
+            assert "AmIFree in this group" in transport.sent[-1]["text"]
+            assert "/event" in transport.sent[-1]["text"] and "Manage" in transport.sent[-1]["text"]

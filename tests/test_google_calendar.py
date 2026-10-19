@@ -440,7 +440,7 @@ async def test_losing_permission_is_shown_and_clears_stale_busy_times(with_googl
     service.clock = lambda: reference + timedelta(hours=2)
     await service.refresh_calendars()
     assert repo.calendar_blocks[calendar.id] == []
-    status = (await service.command(1, "calendar"))[1]
+    status = (await service.command(1, "calendar"))[0]
     assert "⚠️" in status.text and "Share it with AmIFree again" in status.text
 
 
@@ -448,7 +448,7 @@ async def test_removing_the_google_calendar_disconnects_it(with_google, referenc
     service, repo, google = with_google(extraction())
     await onboard(service, reference)
     await service.message(1, 9, "me@gmail.com", reference)
-    status = (await service.command(1, "calendar"))[1]
+    status = (await service.command(1, "calendar"))[0]
     assert "Plans you say Going to are added here" in status.text
 
     gone = (await service.callback(1, tap(status, "Remove Google Calendar")))[0]
@@ -478,3 +478,12 @@ async def test_cards_say_plans_sync_once_connected(with_google, reference):
     added = await add_dinner(service, reference)
     assert "Syncing to your calendar automatically" in added.text
     assert "/calendar puts every plan in your iPhone calendar" not in added.text
+
+
+async def test_the_steps_come_with_a_picture_of_the_sharing_box(with_google, reference):
+    service, _, _ = with_google()
+    await onboard(service, reference)
+    replies = await service.callback(1, "gcal:start")
+    assert replies[0].edit and "Part 1" in replies[0].text
+    assert replies[1].photo and replies[1].photo.startswith(b"\x89PNG")
+    assert len(replies[1].text) <= 1024  # Telegram's caption limit

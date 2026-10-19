@@ -392,3 +392,16 @@ def test_calendar_names_come_from_the_calendar_itself():
     assert calendar_label(ics(), ICLOUD_CCA) == "iPhone calendar"
     email = ics(extra="X-WR-CALNAME:angel@gmail.com\n")
     assert calendar_label(email, GOOGLE) == "Google Calendar"
+
+
+async def test_calendar_shows_what_is_connected_then_asks_which_to_add(with_calendar, reference):
+    service, _ = with_calendar(labels={ICLOUD_CCA: "CCA"})
+    first = await service.command(1, "calendar")
+    assert len(first) == 1 and "No calendar connected yet" in first[0].text
+    assert "Which calendar do you use?" in first[0].text
+    await service.message(1, 1, ICLOUD_CCA, reference)
+    status = (await service.command(1, "calendar"))[0]
+    assert "• CCA · refreshed" in status.text and "Plans in your phone's calendar" in status.text
+    # Adding another asks which one; the phone subscription steps are behind their own button.
+    pick = (await service.callback(1, tap(status, "➕ Add a calendar")))[0]
+    assert "📅 Google" in str(pick.keyboard)

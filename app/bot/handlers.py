@@ -158,7 +158,9 @@ def split_command(text: str) -> tuple[str, str]:
 
 async def send_private(bot, telegram_id: int, reply: Reply):
     """A direct message to one person. Raises Forbidden/BadRequest when they never opened the bot."""
-    if reply.document:
+    if reply.photo:
+        await bot.send_photo(telegram_id, reply.photo, caption=reply.text)
+    elif reply.document:
         from telegram import InputFile
 
         filename, content = reply.document

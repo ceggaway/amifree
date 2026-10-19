@@ -416,7 +416,7 @@ async def test_calendar_feed_in_postgresql():
             EventDraft(title="Hall supper", start_at=start, end_at=start + timedelta(hours=1)),
         )
         await repo.rsvp(user.id, event, Status.GOING)
-        reply = (await service.command(1, "calendar"))[0]
+        reply = (await service.callback(1, "cal:feed"))[0]
         token = reply.text.split("/cal/")[1].split(".ics")[0]
         assert (await repo.ensure_user(1)).calendar_feed_token == token
         assert "SUMMARY:Hall supper" in (await service.calendar_feed(token)).decode()

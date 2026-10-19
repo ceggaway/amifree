@@ -36,18 +36,18 @@ async def going(service, reference, telegram_id=1, message_id=2, text=TEXT):
 
 async def test_calendar_command_gives_a_private_link_and_iphone_steps(online):
     service, repo = online()
-    reply = (await service.command(1, "calendar"))[0]
+    reply = (await service.callback(1, "cal:feed"))[0]
     token = link_in(reply)[1]
     assert len(token) >= 32
     assert "Add Subscribed Calendar" in reply.text and "Not connected yet" in reply.text
     assert [b.text for b in reply.keyboard.inline_keyboard[0]] == ["New link", "Turn off"]
     # Asking again shows the same link rather than breaking an existing subscription.
-    assert link_in((await service.command(1, "calendar"))[0])[1] == token
+    assert link_in((await service.callback(1, "cal:feed"))[0])[1] == token
 
 
 async def test_without_a_public_address_it_explains_instead(service_factory):
     service, _ = service_factory()
-    reply = (await service.command(1, "calendar"))[0]
+    reply = (await service.callback(1, "cal:feed"))[0]
     assert "isn't set up yet" in reply.text and "cal/" not in reply.text
 
 
@@ -58,7 +58,7 @@ async def test_feed_has_only_your_going_and_saved_plans(online, reference):
         extraction(title="Badminton", date_text="Saturday"),
         extraction(title="Someone else's plan"),
     )
-    token = link_in((await service.command(1, "calendar"))[0])[1]
+    token = link_in((await service.callback(1, "cal:feed"))[0])[1]
     await going(service, reference)
     supper = (await service.message(1, 3, "Hall supper Friday 10pm-11pm", reference))[0]
     await service.callback(1, tap(supper, "Add to plans"))
@@ -74,7 +74,7 @@ async def test_feed_has_only_your_going_and_saved_plans(online, reference):
 
 async def test_dropping_a_plan_removes_it_from_the_feed(online, reference):
     service, _ = online(extraction())
-    token = link_in((await service.command(1, "calendar"))[0])[1]
+    token = link_in((await service.callback(1, "cal:feed"))[0])[1]
     card = await going(service, reference)
     assert "CCA dinner" in (await service.calendar_feed(token)).decode()
     await service.callback(1, tap(card, "Remove"))
@@ -91,13 +91,13 @@ async def test_first_real_fetch_switches_cards_to_synced(online, reference):
     assert any(
         b.text == "🍎 Apple Calendar" for row in before.keyboard.inline_keyboard for b in row
     )
-    token = link_in((await service.command(1, "calendar"))[0])[1]
+    token = link_in((await service.callback(1, "cal:feed"))[0])[1]
     # Telegram's link preview fetches the URL too: that is not the iPhone subscribing.
     await service.calendar_feed(token, "TelegramBot (like TwitterBot)")
     assert (await repo.ensure_user(1)).calendar_feed_seen_at is None
     await service.calendar_feed(token, "iOS/18.0 (22A3354) dataaccessd/1.0")
     assert (await repo.ensure_user(1)).calendar_feed_seen_at is not None
-    assert "✅ Connected" in (await service.command(1, "calendar"))[0].text
+    assert "✅ Connected" in (await service.callback(1, "cal:feed"))[0].text
     after = await going(service, reference, message_id=3, text="Hall supper Friday 10pm-11pm")
     assert "Syncing to your calendar automatically" in after.text and "Tip:" not in after.text
     labels = [b.text for row in after.keyboard.inline_keyboard for b in row]
@@ -106,7 +106,7 @@ async def test_first_real_fetch_switches_cards_to_synced(online, reference):
 
 async def test_seen_is_not_rewritten_on_every_fetch(online, reference):
     service, repo = online()
-    token = link_in((await service.command(1, "calendar"))[0])[1]
+    token = link_in((await service.callback(1, "cal:feed"))[0])[1]
     await service.calendar_feed(token)
     first = (await repo.ensure_user(1)).calendar_feed_seen_at
     await service.calendar_feed(token)
@@ -118,7 +118,7 @@ async def test_seen_is_not_rewritten_on_every_fetch(online, reference):
 
 async def test_new_link_and_turn_off_kill_the_old_link(online):
     service, _ = online()
-    first = (await service.command(1, "calendar"))[0]
+    first = (await service.callback(1, "cal:feed"))[0]
     old = link_in(first)[1]
     renewed = (await service.callback(1, tap(first, "New link")))[0]
     new = link_in(renewed)[1]
@@ -132,14 +132,14 @@ async def test_new_link_and_turn_off_kill_the_old_link(online):
 
 async def test_deleting_my_data_kills_the_link(online):
     service, repo = online()
-    token = link_in((await service.command(1, "calendar"))[0])[1]
+    token = link_in((await service.callback(1, "cal:feed"))[0])[1]
     await repo.delete_user((await repo.ensure_user(1)).id)
     assert await service.calendar_feed(token) is None
 
 
 async def test_feed_over_http(online, reference):
     service, _ = online(extraction())
-    token = link_in((await service.command(1, "calendar"))[0])[1]
+    token = link_in((await service.callback(1, "cal:feed"))[0])[1]
     await going(service, reference)
     app = create_app(Settings(_env_file=None, bot_mode="disabled"), service=service)
     async with (
@@ -170,8 +170,18 @@ def test_feed_tokens_never_reach_the_access_log():
 
 async def test_change_alert_says_synced_instead_of_buttons(online, reference):
     service, repo = online(extraction())
-    token = link_in((await service.command(1, "calendar"))[0])[1]
+    token = link_in((await service.callback(1, "cal:feed"))[0])[1]
     await service.calendar_feed(token)
     card = await going(service, reference)
     event = next(iter(repo.events.values()))
     assert event.status == Status.GOING and "Syncing" in card.text
+
+
+async def test_the_phone_steps_sit_behind_a_button_with_a_way_back(online):
+    service, _ = online()
+    status = (await service.command(1, "calendar"))[0]
+    assert "Plans in your phone's calendar: not set up" in status.text
+    feed = (await service.callback(1, tap(status, "📤 Plans in my calendar app")))[0]
+    assert "Add Subscribed Calendar" in feed.text
+    back = (await service.callback(1, tap(feed, "« Back to my calendars")))[0]
+    assert back.edit and "Your calendars" in back.text

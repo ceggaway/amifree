@@ -157,22 +157,31 @@ def welcome_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def pick_calendar_keyboard(google: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
-        [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
-    ]
-    if google:
-        # Sharing a calendar with AmIFree lets it add plans for the student, not only read.
-        rows.insert(
-            0,
-            [
-                InlineKeyboardButton(
-                    "🔗 Share Google Calendar (adds plans)", callback_data="gcal:start"
-                )
-            ],
-        )
-    return InlineKeyboardMarkup(rows)
+def pick_calendar_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
+            [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
+        ]
+    )
+
+
+GOOGLE_CHOOSE = (
+    "📅 Google Calendar\n\n"
+    "🔗 Share it with AmIFree (recommended): I add the plans you tap Going on to your "
+    "calendar, and I read when you're busy.\n\n"
+    "📋 Paste a link: I only read when you're busy. I can't add anything."
+)
+
+
+def google_choose_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🔗 Share it (adds plans)", callback_data="gcal:start")],
+            [_button("📋 Paste a link (read only)", "googlelink")],
+            [_button("« Other calendars", "calendar")],
+        ]
+    )
 
 
 def google_share_steps(email: str) -> str:
@@ -215,7 +224,11 @@ def screen(name: str, google: bool = False) -> tuple[str, InlineKeyboardMarkup |
     if name == "home":
         return WELCOME, welcome_keyboard()
     if name == "calendar":
-        return PICK_CALENDAR, pick_calendar_keyboard(google)
+        return PICK_CALENDAR, pick_calendar_keyboard()
+    if name == "google" and google:
+        return GOOGLE_CHOOSE, google_choose_keyboard()
+    if name == "googlelink":
+        return GUIDES["google"], guide_keyboard("google")
     if name == "skip":
         return SKIPPED, None
     if name in GUIDES:

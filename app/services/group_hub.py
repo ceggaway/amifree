@@ -59,8 +59,12 @@ class GroupHub:
         # From each person's signed Mini App sign-in: (first name, @username).
         self.profiles: dict[int, tuple[str | None, str | None]] = {}
         self._members: dict[tuple[int, int], tuple[bool, float]] = {}
+        self._admins: dict[tuple[int, int], tuple[bool, float]] = {}
         self._titles: dict[int, str | None] = {}
         self.create_limit = RateLimiter(10, 300)
+        # Reports read every answer of every event: bound how often one person can ask.
+        self.report_limit = RateLimiter(20, 60)
+        self.export_limit = RateLimiter(5, 600)
 
     @property
     def groups(self):
@@ -100,6 +104,32 @@ class GroupHub:
             await self.repo.touch_member(chat_id, user.id)
             await self.groups.remember(chat_id, user.id, name, username)
         return allowed
+
+    async def is_admin(self, user, chat_id: int, fresh: bool = False) -> bool:
+        """Whether Telegram lists this person as a group admin. Cached for showing the page;
+        `fresh` asks Telegram again, for changing a setting (someone may have been demoted)."""
+        key = (chat_id, user.telegram_user_id)
+        cached = self._admins.get(key)
+        if cached and cached[1] > monotonic.monotonic() and not fresh:
+            return cached[0]
+        check = getattr(self.scheduling, "check_chat_admin", None)
+        if check is None:
+            return False
+        try:
+            admin = await check(chat_id, user.telegram_user_id)
+        except TelegramError:
+            raise Refused("Telegram didn't answer just now. Try again in a moment.") from None
+        if len(self._admins) > 20_000:
+            self._admins.clear()
+        self._admins[key] = (admin, monotonic.monotonic() + (MEMBER_TTL if admin else OUTSIDER_TTL))
+        return admin
+
+    async def admin_or_not(self, user, chat_id: int) -> bool:
+        """For showing the page: a Telegram hiccup hides admin settings, never the page."""
+        try:
+            return await self.is_admin(user, chat_id)
+        except Refused:
+            return False
 
     async def require_member(self, user, chat_id: int):
         if not await self.is_member(user, chat_id):
@@ -169,6 +199,8 @@ class GroupHub:
             "title": await self.title(chat_id),
             "events": shown,
             "polls": polls,
+            "admin": await self.admin_or_not(user, chat_id),
+            "detection": await self.scheduling.detection.enabled(chat_id),
         }
 
     async def summary(self, user, event: GroupEvent) -> dict:
@@ -338,6 +370,70 @@ class GroupHub:
             raise Refused("That person hasn't answered this event.")
         await self.scheduling.group_changed(event.id)
         return await self.detail(user, event)
+
+    # ---- reports and group settings ----
+
+    async def stats(self, user, chat_id: int, days: int) -> dict:
+        """Turnout for the caller's own events in this group: the app's /stats."""
+        await self.require_member(user, chat_id)
+        if not self.report_limit.allow(user.id):
+            raise Refused("Too many refreshes. Wait a minute and try again.")
+        groups = self.groups
+        _, series, held, cancelled, going, came = await groups.report(user, chat_id, days)
+        detailed = await groups.can_export(chat_id)
+        return {
+            "days": days,
+            "held": held,
+            "cancelled": cancelled,
+            "going": going,
+            "came": came,
+            "turnout": groups.turnout(going, came),
+            "by_event": [
+                {"title": t, "sessions": n, "going": g, "came": c, "turnout": groups.turnout(g, c)}
+                for t, n, g, c in series.values()
+            ]
+            if detailed
+            else [],
+            "pro_required": not detailed,
+        }
+
+    async def export(self, user, chat_id: int, days: int) -> dict:
+        """The attendance CSV, sent to the caller's private chat (a Mini App can't save files)."""
+        await self.require_member(user, chat_id)
+        if not self.export_limit.allow(user.id):
+            raise Refused("You've sent a few files already. Try again in 10 minutes.")
+        result = await self.groups.export(user.telegram_user_id, chat_id, str(days))
+        if not result.dm:
+            raise Refused(result.post.text if result.post else "Nothing to export.")
+        send = getattr(self.scheduling, "send_private", None)
+        if send is None:
+            raise Refused("AmIFree can't send files right now. Try /export in the group.")
+        try:
+            await send(user.telegram_user_id, result.dm)
+        except (Forbidden, BadRequest):
+            raise Refused(
+                "I can't message you yet. Open a private chat with AmIFree, tap Start, then try"
+                " again."
+            ) from None
+        return {"message": "📬 Sent the attendance file to your chat with AmIFree."}
+
+    async def set_detection(self, user, chat_id: int, on: bool) -> dict:
+        """An admin switches event detection; the group is told, as with /detect."""
+        await self.require_member(user, chat_id)
+        if not await self.is_admin(user, chat_id, fresh=True):
+            raise Refused("Only a group admin can change event detection.")
+        detection = self.scheduling.detection
+        if await detection.enabled(chat_id) != on:
+            result = await detection.command(
+                user.telegram_user_id, chat_id, "on" if on else "off", True
+            )
+            post = getattr(self.scheduling, "post_group_card", None)
+            if post and result.post:
+                try:
+                    await post(chat_id, result.post)
+                except (Forbidden, BadRequest):
+                    pass  # switched anyway; the bot just can't post there
+        return {"detection": on}
 
     # ---- find-a-time polls ----
 

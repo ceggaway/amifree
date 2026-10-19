@@ -362,3 +362,103 @@ async def test_without_the_app_set_up_commands_work_as_before(service_factory):
         await bot.process_update(Update.de_json(group_message("/event", 90, 1), bot.bot))
         assert "Reply /event to a message" in transport.sent[-1]["text"]
         assert "reply_markup" not in transport.sent[-1]
+
+
+async def test_stats_export_and_detection_from_the_group_page(hub, reference):
+    client, service, repo, posted, members = hub
+    admins = {1}
+    sent = []
+
+    async def check_admin(chat_id, telegram_id):
+        return chat_id == CHAT and telegram_id in admins
+
+    async def dm(telegram_id, reply):
+        sent.append((telegram_id, reply))
+
+    service.check_chat_admin, service.send_private = check_admin, dm
+    organiser, member = await repo.ensure_user(1), await repo.ensure_user(2)
+    start = reference - timedelta(days=2)
+    past = EventDraft(title="Training", start_at=start, end_at=start + timedelta(hours=2))
+    event = await repo.create_group_event(organiser.id, CHAT, 500, past)
+    await repo.group_rsvp(member.id, event, Status.GOING)
+    await repo.mark_attendance(event.id, member.id, True, organiser.id)
+
+    stats = (await client.get(f"/api/groups/{CODE}/stats", headers=bearer(1))).json()
+    assert stats["held"] == 1 and stats["going"] == 1 and stats["came"] == 1
+    assert stats["turnout"] == "100%" and stats["by_event"][0]["title"] == "Training"
+    # Another member has no events of their own here; outsiders see nothing.
+    assert (await client.get(f"/api/groups/{CODE}/stats", headers=bearer(2))).json()["held"] == 0
+    assert (await client.get(f"/api/groups/{CODE}/stats", headers=bearer(9))).status_code == 404
+
+    exported = await client.post(f"/api/groups/{CODE}/export", headers=bearer(1), json={})
+    assert exported.status_code == 200 and "📬" in exported.json()["message"]
+    ((to, reply),) = sent
+    assert to == 1 and reply.document[0].endswith(".csv") and b"Training" in reply.document[1]
+    empty = await client.post(f"/api/groups/{CODE}/export", headers=bearer(2), json={})
+    assert empty.status_code == 409 and len(sent) == 1
+
+    # Only admins switch detection, and the group is told.
+    overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(2))).json()
+    assert overview["admin"] is False and overview["detection"] is False
+    no = await client.put(f"/api/groups/{CODE}/detection", headers=bearer(2), json={"on": True})
+    assert no.status_code == 409
+    on = await client.put(f"/api/groups/{CODE}/detection", headers=bearer(1), json={"on": True})
+    assert on.json() == {"detection": True} and "Event detection is on" in posted[-1][1].text
+    assert (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()["detection"]
+
+
+async def test_reminders_can_be_switched_from_the_app(hub):
+    client, service, repo, posted, members = hub
+    off = await client.patch("/api/me", headers=bearer(5), json={"reminders_enabled": False})
+    assert off.json() == {"reminders_enabled": False} and not repo.users[5].reminders_enabled
+    me = (await client.get("/api/me", headers=bearer(5))).json()
+    assert me["reminders_enabled"] is False
+    await client.patch("/api/me", headers=bearer(5), json={"reminders_enabled": True})
+    assert repo.users[5].reminders_enabled
+
+
+async def test_a_demoted_admin_cannot_switch_detection(hub):
+    client, service, repo, posted, members = hub
+    admins = {1}
+
+    async def check_admin(chat_id, telegram_id):
+        return telegram_id in admins
+
+    service.check_chat_admin = check_admin
+    assert (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()["admin"]
+    admins.clear()  # demoted while the page was open: the cached "admin" must not count
+    refused = await client.put(
+        f"/api/groups/{CODE}/detection", headers=bearer(1), json={"on": True}
+    )
+    assert refused.status_code == 409 and not await repo.detection_enabled(CHAT)
+
+
+async def test_a_telegram_hiccup_hides_admin_settings_but_not_the_page(hub):
+    client, service, repo, posted, members = hub
+
+    async def flaky(chat_id, telegram_id):
+        raise TimedOut()
+
+    service.check_chat_admin = flaky
+    page = await client.get(f"/api/groups/{CODE}", headers=bearer(1))
+    assert page.status_code == 200 and page.json()["admin"] is False
+
+
+async def test_the_attendance_file_cannot_be_spammed(hub, reference):
+    client, service, repo, posted, members = hub
+    sent = []
+
+    async def dm(telegram_id, reply):
+        sent.append(reply)
+
+    service.send_private = dm
+    organiser = await repo.ensure_user(1)
+    start = reference - timedelta(days=1)
+    past = EventDraft(title="Training", start_at=start, end_at=start + timedelta(hours=1))
+    event = await repo.create_group_event(organiser.id, CHAT, 501, past)
+    await repo.group_rsvp(organiser.id, event, Status.GOING)
+    codes = [
+        (await client.post(f"/api/groups/{CODE}/export", headers=bearer(1), json={})).status_code
+        for _ in range(6)
+    ]
+    assert codes == [200] * 5 + [409] and len(sent) == 5

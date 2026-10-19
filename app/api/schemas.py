@@ -111,3 +111,18 @@ class PollVoteRequest(BaseModel):
 class PollPickRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     slot: int = Field(ge=0, le=2)
+
+
+class ExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    days: int = Field(default=120, ge=1, le=365)
+
+
+class DetectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    on: bool
+
+
+class SettingsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reminders_enabled: bool

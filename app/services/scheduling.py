@@ -237,7 +237,10 @@ class SchedulingService:
         self.hub = GroupHub(self)
         # Set by the bot layer: is this person in that group (asks Telegram), and its name.
         self.check_chat_member = None
+        self.check_chat_admin = None
         self.chat_title = None
+        # Set by the bot layer: a private message or file to one person (the app's CSV export).
+        self.send_private = None
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.
         self.notifier = None
         # What was just removed, kept briefly so Undo can put it back: token -> (expires,
@@ -532,8 +535,8 @@ class SchedulingService:
         text = (
             "⚙️ Settings\n\n"
             f"Reminders: {'on' if on else 'off'}\n"
-            "The night-before summary, deadline reminders and nudges about plans you "
-            "haven't answered. Change alerts for plans you've added, and reminders you set with /remind, always arrive."
+            'The night-before summary, deadline reminders, "still coming?" checks and nudges '
+            "about plans you haven't answered. Change alerts for plans you've added, and reminders you set with /remind, always arrive."
         )
         return Reply(text, settings_keyboard(on))
 

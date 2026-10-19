@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../api";
+import { api, refusal } from "../api";
+import { Switch } from "../components/Switch";
+import { haptic } from "../telegram";
 import { day, span } from "../format";
 import type { GroupEventSummary, GroupPoll } from "../types";
 import { useLoad } from "../useLoad";
@@ -35,7 +38,46 @@ export function GroupHome() {
       {data.polls.map((poll) => (
         <PollRow key={poll.id} poll={poll} />
       ))}
+      <h2>For organisers</h2>
+      <Link className="card link" to={`/g/${code}/stats`}>
+        <h3>📊 Turnout and attendance</h3>
+        <p className="hint">How many came to your events, and the attendance spreadsheet ›</p>
+      </Link>
+      {data.admin && <Detection code={code} on={data.detection} />}
     </>
+  );
+}
+
+/** Admins only: let AmIFree spot plans in ordinary group messages. */
+function Detection({ code, on: initial }: { code: string; on: boolean }) {
+  const [on, setOn] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function change(next: boolean) {
+    setBusy(true);
+    setError("");
+    try {
+      setOn((await api.setDetection(code, next)).detection);
+      haptic("success");
+    } catch (err) {
+      haptic("error");
+      setError(refusal(err).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="card">
+      <Switch
+        label="Spot plans in chat"
+        hint="AmIFree reads messages that mention a day and a time, once, and offers to make an event card. Text isn't stored. The group is told when this changes."
+        on={on}
+        busy={busy}
+        onChange={change}
+      />
+      {on && <p className="hint">AmIFree must be an admin of the group to see messages.</p>}
+      {error && <p className="error">{error}</p>}
+    </section>
   );
 }
 

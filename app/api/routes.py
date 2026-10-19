@@ -24,6 +24,8 @@ from app.api.schemas import (
     AuthRequest,
     AvailabilityRequest,
     BlockRequest,
+    DetectionRequest,
+    ExportRequest,
     GroupEventForm,
     GroupEventPatch,
     PlanPatch,
@@ -32,6 +34,7 @@ from app.api.schemas import (
     PollVoteRequest,
     RsvpRequest,
     SeriesRequest,
+    SettingsPatch,
     VersionRequest,
 )
 from app.config import Settings
@@ -200,6 +203,12 @@ def build_router(settings: Settings) -> APIRouter:
             "outside_calendars_connected": any(c.synced_at and not c.error for c in calendars),
         }
 
+    @router.patch("/me")
+    async def update_settings(body: SettingsPatch, request: Request, user: CurrentUser):
+        service = service_of(request)
+        await service.repo.set_user_flags(user.id, reminders_enabled=body.reminders_enabled)
+        return {"reminders_enabled": body.reminders_enabled}
+
     async def plans_between(service, user, start, end):
         events = await service.repo.events_between(start, end, PLAN_STATUSES, user.id)
         events.sort(key=lambda e: (e.start_at, e.id))
@@ -340,6 +349,22 @@ def build_router(settings: Settings) -> APIRouter:
                 body.reply_by,
             )
         )
+
+    @router.get("/groups/{code}/stats")
+    async def group_stats(code: str, request: Request, user: CurrentUser, days: int = 120):
+        if not 1 <= days <= 365:
+            raise HTTPException(422, "Choose between 1 and 365 days")
+        return await hub_call(service_of(request).hub.stats(user, chat_of(code), days))
+
+    @router.post("/groups/{code}/export")
+    async def group_export(code: str, body: ExportRequest, request: Request, user: CurrentUser):
+        return await hub_call(service_of(request).hub.export(user, chat_of(code), body.days))
+
+    @router.put("/groups/{code}/detection")
+    async def group_detection(
+        code: str, body: DetectionRequest, request: Request, user: CurrentUser
+    ):
+        return await hub_call(service_of(request).hub.set_detection(user, chat_of(code), body.on))
 
     @router.get("/group-events/{event_id}")
     async def group_event(event_id: str, request: Request, user: CurrentUser):

@@ -545,7 +545,21 @@ def register_handlers(application: Application, service):
     async def chat_title(chat_id: int) -> str | None:
         return (await application.bot.get_chat(chat_id)).title
 
+    async def check_admin(chat_id: int, telegram_id: int) -> bool:
+        """Whether this person is an admin of the group. Network errors are raised."""
+        try:
+            member = await application.bot.get_chat_member(chat_id, telegram_id)
+        except (BadRequest, Forbidden):
+            return False
+        return member.status in ("creator", "administrator")
+
+    async def dm(telegram_id: int, reply: Reply):
+        """A private message or file; raises Forbidden/BadRequest if they never opened the bot."""
+        await send_private(application.bot, telegram_id, reply)
+
     service.check_chat_member = check_member
+    service.check_chat_admin = check_admin
+    service.send_private = dm
     service.chat_title = chat_title
 
     async def refund_stars(telegram_id: int, charge_id: str):

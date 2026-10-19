@@ -158,3 +158,6 @@ button.switch { flex: none; width: 50px; min-height: 30px; height: 30px; padding
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
+/* Back, where Telegram can't show its own arrow in the top bar. */
+.app-header:has(.back-button) { display: flex; align-items: center; gap: 12px; }
+button.back-button { min-height: 34px; padding: 6px 12px 6px 8px; font-weight: 600; color: var(--link); background: transparent; border-color: var(--border); }

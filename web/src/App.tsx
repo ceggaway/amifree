@@ -1,3 +1,4 @@
+import { BackButton } from "./components/BackButton";
 import { Icon } from "./components/Icon";
 import { useEffect, useRef } from "react";
 import { HashRouter, Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
@@ -48,6 +49,7 @@ export function App() {
       {mockMode && <div className="banner info">Development mock data. Open from Telegram for your real plans.</div>}
       <StartRoute />
       <header className="app-header">
+        <BackButton />
         <Link to="/" className="brand">
           <span className="brand-mark"><Icon name="calendar" size={19} /></span>
           AmIFree

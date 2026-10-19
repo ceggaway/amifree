@@ -8,6 +8,7 @@ type WebApp = {
   HapticFeedback?: { notificationOccurred: (kind: "success" | "error" | "warning") => void };
   showConfirm?: (message: string, callback: (ok: boolean) => void) => void;
   isVersionAtLeast?: (version: string) => boolean;
+  BackButton?: { show: () => void; hide: () => void; onClick: (cb: () => void) => void; offClick: (cb: () => void) => void };
 };
 
 declare global {
@@ -59,4 +60,11 @@ export function confirm(message: string): Promise<boolean> {
     }
   }
   return Promise.resolve(window.confirm(message));
+}
+
+/** Telegram's own back arrow in the Mini App's top bar (Telegram 6.1+), or null where it
+ * isn't available: a plain browser, or an old Telegram version. */
+export function telegramBackButton() {
+  const app = window.Telegram?.WebApp;
+  return app?.BackButton && app.isVersionAtLeast?.("6.1") ? app.BackButton : null;
 }

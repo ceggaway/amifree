@@ -106,7 +106,9 @@ async def test_poll_nudges_non_voters(service_factory, reference):
         taps = buttons(transport.sent[-1]["reply_markup"])
         for n, member in enumerate((2, 3)):
             await bot.process_update(
-                Update.de_json(group_tap(taps["Count me in"], member, update_id=9300 + n), bot.bot)
+                Update.de_json(
+                    group_tap(taps["✋ Count me in"], member, update_id=9300 + n), bot.bot
+                )
             )
         suggest = taps["Suggest slots (organiser)"]
         await bot.process_update(Update.de_json(group_tap(suggest, 1, update_id=9310), bot.bot))
@@ -123,5 +125,8 @@ async def test_poll_nudges_non_voters(service_factory, reference):
         )
     assert alerts(transport)[-1]["text"].startswith("Nudging 1 member privately")
     assert len(outbox.sent) == 1 and outbox.sent[0][0] == 3
-    assert "choosing a time for sync" in outbox.sent[0][1] and "Fill mine" in outbox.sent[0][1]
+    assert (
+        "choosing a time for sync" in outbox.sent[0][1]
+        and "times you can make" in outbox.sent[0][1]
+    )
     assert not repo.events

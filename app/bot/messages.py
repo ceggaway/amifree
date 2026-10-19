@@ -177,13 +177,13 @@ def private_verdict(availability: Availability, prefix: str = "") -> str:
 GROUP_HELP = """👋 AmIFree in this group
 
 /event Dinner Fri 7-9pm at Vivo: post an event card (or reply /event to a plan message)
-   Everyone taps Going / Maybe / Can't. Am I free? checks your own schedule, privately.
+   Everyone taps Going / Maybe / Can't, and can check privately whether they're free.
    "every Tue/Thu until week 13" makes a recurring event.
-/whosfree project meeting 2h next week: find a time that works for most people
+/whosfree project meeting 2h next week: find a time; members tap the times that work
 /attendance, /stats, /export: turnout for your events (sent to you privately)
 /detect on: admins only, suggests a card when someone posts a plan
 
-Organisers: tap 📱 Open (or ⚙️ Manage) on a card to edit, cancel, nudge or mark who came.
+Organisers: tap 📱 Details (or ⚙️ Manage) on a card to edit, cancel, nudge or mark who came.
 To use your schedule, open a private chat with me and send /start."""
 
 
@@ -202,14 +202,21 @@ def group_card(
         count = f"{counts.get('GOING', 0)} said Going" if went is None else f"{went} went"
         when = f"{event.start_at:%a %-d %b} · {time_range(event.start_at, event.end_at)}"
         return Reply(f"📣 {event.title} · ended\n{when} · {count}")
-    series = "\n🔁 Recurring event. Going to all adds every session." if event.series_id else ""
+    if app_url:
+        series = "\n🔁 Repeats. Details lets you say Going to every session." * bool(
+            event.series_id
+        )
+        tip = "\nDetails: check if you're free (only you see it) and who's going."
+    else:
+        series = "\n🔁 Recurring event. Going to all adds every session." * bool(event.series_id)
+        tip = "\nAm I free? shows a private check that only you can see."
     body = (
         "📅 "
         + details(event)
         + series
         + f"\n\nGoing {counts.get('GOING', 0)} · Maybe {counts.get('MAYBE', 0)}"
         + f" · Can't {counts.get('DECLINED', 0)}"
-        + "\nAm I free? shows a private check that only you can see."
+        + tip
     )
     return Reply(body, group_keyboard(event, app_url))
 

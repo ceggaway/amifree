@@ -6,10 +6,13 @@ import type {
   EventForm,
   GroupEventDetail,
   GroupOverview,
+  GroupStats,
   Heatmap,
   Me,
   MyGrid,
   Plan,
+  PollAnswer,
+  PollDetail,
   PollForm,
   Rule,
 } from "./types";
@@ -67,6 +70,8 @@ const range = (start: Date, end: Date) =>
 
 export const api = {
   me: () => request<Me>("GET", "/api/me"),
+  setReminders: (on: boolean) =>
+    request<{ reminders_enabled: boolean }>("PATCH", "/api/me", { reminders_enabled: on }),
   plans: () => request<{ plans: Plan[] }>("GET", "/api/plans"),
   calendar: (start: Date, end: Date) =>
     request<{ plans: Plan[]; blocks: Block[] }>("GET", `/api/calendar?${range(start, end)}`),
@@ -76,6 +81,13 @@ export const api = {
   block: (text: string, confirm: boolean) =>
     request<{ saved: boolean; block: Rule }>("POST", "/api/blocks", { text, confirm }),
   removeBlock: (id: string) => request<void>("DELETE", `/api/blocks/${id}`),
+  poll: (id: string) => request<PollDetail>("GET", `/api/polls/${id}`),
+  joinPoll: (id: string) => request<PollDetail>("POST", `/api/polls/${id}/join`),
+  vote: (id: string, slot: number, answer: PollAnswer) =>
+    request<PollDetail>("POST", `/api/polls/${id}/vote`, { slot, answer }),
+  suggest: (id: string) => request<{ message: string }>("POST", `/api/polls/${id}/suggest`),
+  pick: (id: string, slot: number) => request<{ event_id: string }>("POST", `/api/polls/${id}/pick`, { slot }),
+  nudgePoll: (id: string) => request<{ message: string }>("POST", `/api/polls/${id}/nudge`),
   pollHeatmap: (id: string) => request<Heatmap>("GET", `/api/polls/${id}/heatmap`),
   myGrid: (id: string) => request<MyGrid>("GET", `/api/polls/${id}/availability`),
   saveGrid: (id: string, free: string[]) =>
@@ -85,6 +97,11 @@ export const api = {
 
   // A group, opened from a link in it. The server checks with Telegram that you're in it.
   group: (code: string) => request<GroupOverview>("GET", `/api/groups/${code}`),
+  groupStats: (code: string, days: number) => request<GroupStats>("GET", `/api/groups/${code}/stats?days=${days}`),
+  exportAttendance: (code: string, days: number) =>
+    request<{ message: string }>("POST", `/api/groups/${code}/export`, { days }),
+  setDetection: (code: string, on: boolean) =>
+    request<{ detection: boolean }>("PUT", `/api/groups/${code}/detection`, { on }),
   createEvent: (code: string, form: EventForm) =>
     request<{ id: string }>("POST", `/api/groups/${code}/events`, form),
   createPoll: (code: string, form: PollForm) =>

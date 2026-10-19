@@ -97,11 +97,11 @@ Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `
 
 1. In BotFather leave **Group Privacy** turned on (the default). Add the bot to a test group.
 2. Reply `/event` to a message containing a plan, or send `/event Dinner Fri 7-9pm at Vivo`. The bot posts a card.
-3. With two accounts, tap **Am I free?** on the same card. Each sees a private popup; nothing appears in the group.
+3. With two accounts, tap **📱 Details** on the same card. Each sees their own private "Am I free?" check at the top; nothing appears in the group. (Without the Mini App set up, the card has an **Am I free?** button that shows a private popup instead.)
 4. Tap Going / Maybe / Can't and watch the headcount. The plan appears in each member's `/plans`.
-5. As the organiser tap **⚙️ Manage**. Telegram opens the private chat with Edit, Cancel event, Nudge members, Who's confirmed and Mark who came. Choose Edit, send the correction and confirm. Members who kept the plan each receive one message stating what changed.
-6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **Count me in**. Slots are suggested when the reply-by time passes; the organiser can also tap **Suggest slots** earlier.
-7. Tap **Who's going?** for the Going names, and **I'm here** from 30 minutes before the start to check in.
+5. As the organiser tap **📱 Details** (or **⚙️ Manage** without the Mini App, which opens the private chat). Edit, cancel, nudge, "still coming?" and marking who came are there. Edit the time and save: members who kept the plan each receive one message stating what changed.
+6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **✋ Count me in**. Times are suggested when the reply-by time passes; the organiser can also suggest them earlier from **📱 Open**. Members then tap **✅ 1 / ✅ 2 / ✅ 3** for the times they can make (tap again to undo); Maybe is in the app. The organiser picks a time in **📱 Open**, which posts the event card.
+7. In **📱 Details**, see who's going, and check in with **I'm here** from 30 minutes before the start.
 8. A card is redrawn as "ended · N went" once the event is over (or "N said Going" when nobody checked in).
 
 #### Group features
@@ -134,11 +134,20 @@ Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for
 #### The Mini App in groups
 
 Groups can do everything from the Mini App. `/app` in a group, `/help`, and `/event` or
-`/whosfree` sent with nothing after them reply with buttons that open it: **Create an event**,
-**Find a time** and **This group's events**. Every event card has **📱 Open**, which shows the
-event with Going / Maybe / Can't, your private clash check, who's going and check-in. For the
-organiser it also has edit, cancel, nudge, "still coming?" and marking who came. A card made in
+`/whosfree` sent with nothing after them reply with one button that opens it (the group page
+leads with **Create an event** and **Find a time**). Cards stay small: an event card is Going /
+Maybe / Can't plus **📱 Details**, which shows your private clash check, who's going and
+check-in, and for the organiser edit, cancel, nudge, "still coming?" and marking who came. A poll
+card is **✋ Count me in** (or **✅ 1 / ✅ 2 / ✅ 3** once times are suggested) plus **📱 Open**,
+where members answer Yes / Maybe / No and the organiser suggests times, nudges and picks one.
+Without the Mini App set up, the cards fall back to the full set of chat buttons. A card made in
 the app is posted in the group like any other.
+
+The group page also has **📊 Turnout and attendance** (turnout for your own events over 30 days,
+4 months or a year, and **Send CSV to my chat**, which sends the attendance file privately, as
+`/export` does), and, for group admins only, a **Spot plans in chat** switch that does what
+`/detect on|off` does, including telling the group. The home page has a **🔔 Reminders** switch,
+the same setting as `/settings` in the bot.
 
 Telegram doesn't allow Mini App buttons in groups, so these are `t.me/<bot>/<app>?startapp=…`
 links. A link names the group, and anyone can change a link, so the server asks Telegram
@@ -182,7 +191,7 @@ Sending the bot a private iCal link (Google "Secret address in iCal format", an 
 
 ### Share a Google calendar (adds plans for you)
 
-A link can only be read. If `GOOGLE_SERVICE_ACCOUNT` is set, `/calendar` also offers **Share Google Calendar**: the student shares their calendar with AmIFree's own Google account, chooses *Make changes*, and sends their Google email. Then plans they tap Going on are added to that calendar, updated when the plan changes, and removed when they remove or skip it. It also reads their busy times (like a link, refreshed hourly). Migration `015` adds `google_connections` and `google_event_links`.
+A link can only be read. If `GOOGLE_SERVICE_ACCOUNT` is set, `/calendar` also offers **Share Google Calendar**: the student shares their calendar with AmIFree's own Google account, chooses *Make changes*, and sends their Google email. AmIFree then puts a one-time code event in that calendar (marked free, deleted afterwards), and the student sends the code back, which proves they can open it: without this, anyone who knew the email could claim a calendar shared with AmIFree. One calendar connects to one AmIFree account. Then plans they tap Going on are added to that calendar, updated when the plan changes, and removed when they remove or skip it. It also reads their busy times (like a link, refreshed hourly). Migration `015` adds `google_connections` and `google_event_links`.
 
 - **No Google sign-in screen for students**, so Google's app review and the 100-user limit for apps in testing don't apply. Students stop it any time by removing AmIFree from *Shared with*, or **Remove** in `/calendar`.
 - **One sync routine, not a hook per action.** `google_sync.py` compares the student's Going and Saved plans with what was last written (`google_event_links`) and fixes the difference. It runs in the background after the student's own messages and taps, and every 10 minutes from the jobs tick (to catch a group organiser moving the time, and to retry failures).

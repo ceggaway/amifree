@@ -336,6 +336,9 @@ class MemoryRepository:
         c = self.google.get(user_id)
         return c.model_copy() if c else None
 
+    async def google_calendar_owner(self, calendar_email):
+        return next((u for u, c in self.google.items() if c.calendar_email == calendar_email), None)
+
     async def save_google_connection(self, user_id, calendar_email, calendar_id):
         await self.remove_google_connection(user_id, keep_flag=True)
         self.google[user_id] = GoogleConnection(
@@ -519,6 +522,13 @@ class MemoryRepository:
             self.poll_votes[(poll_id, user_id, int(slot))] = answer
         return True
 
+    async def poll_my_votes(self, poll_id, user_id):
+        return {
+            slot: answer
+            for (pid, uid, slot), answer in self.poll_votes.items()
+            if pid == poll_id and uid == user_id
+        }
+
     async def poll_tally(self, poll_id):
         tally = {}
         for (pid, _, slot), answer in self.poll_votes.items():
@@ -630,6 +640,9 @@ class MemoryRepository:
 
     async def poll_availability(self, poll_id):
         return {u: list(v) for (p, u), v in self.availability.items() if p == poll_id}
+
+    async def payment_recorded(self, charge_id):
+        return charge_id in self.payments
 
     async def record_payment(self, charge_id, chat_id, telegram_id, stars, days):
         if charge_id in self.payments:

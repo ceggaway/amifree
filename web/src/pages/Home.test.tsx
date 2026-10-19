@@ -1,14 +1,18 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Me } from "../types";
 
-const state: { me: Me | Error } = { me: {} as Me };
+const state: { me: Me | Error; saved: boolean[] } = { me: {} as Me, saved: [] };
 
 vi.mock("../api", () => ({
   api: {
     me: () => (state.me instanceof Error ? Promise.reject(state.me) : Promise.resolve(state.me)),
     plans: () => Promise.resolve({ plans: [] }),
+    setReminders: (on: boolean) => {
+      state.saved.push(on);
+      return Promise.resolve({ reminders_enabled: on });
+    },
   },
 }));
 
@@ -79,5 +83,24 @@ describe("Home source summary", () => {
   it("asks to connect NUSMods when no timetable is imported", async () => {
     const text = await summary({ ...base, nusmods: { ...base.nusmods, connected: false } });
     expect(text).toContain("no NUSMods timetable");
+  });
+});
+
+describe("Reminders setting", () => {
+  it("turns reminders off and on from the home page", async () => {
+    state.me = base;
+    state.saved = [];
+    render(
+      <MemoryRouter>
+        <Home />
+      </MemoryRouter>,
+    );
+    const toggle = await screen.findByRole("switch", { name: "🔔 Reminders" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+    expect(screen.getByText(/Off: none of those/)).toBeTruthy();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(state.saved).toEqual([false, true]));
   });
 });

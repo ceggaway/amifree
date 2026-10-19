@@ -534,10 +534,11 @@ def register_handlers(application: Application, service):
     poll_refresher = CardRefresher(interval, edit_poll)
 
     async def check_member(chat_id: int, telegram_id: int) -> bool:
-        """Whether Telegram lists this person in the group right now."""
+        """Whether Telegram lists this person in the group right now. A network error is
+        raised, so a hiccup isn't remembered as "not a member"."""
         try:
             member = await application.bot.get_chat_member(chat_id, telegram_id)
-        except TelegramError:
+        except (BadRequest, Forbidden):
             return False
         if member.status in ("creator", "administrator", "member"):
             return True
@@ -546,7 +547,21 @@ def register_handlers(application: Application, service):
     async def chat_title(chat_id: int) -> str | None:
         return (await application.bot.get_chat(chat_id)).title
 
+    async def check_admin(chat_id: int, telegram_id: int) -> bool:
+        """Whether this person is an admin of the group. Network errors are raised."""
+        try:
+            member = await application.bot.get_chat_member(chat_id, telegram_id)
+        except (BadRequest, Forbidden):
+            return False
+        return member.status in ("creator", "administrator")
+
+    async def dm(telegram_id: int, reply: Reply):
+        """A private message or file; raises Forbidden/BadRequest if they never opened the bot."""
+        await send_private(application.bot, telegram_id, reply)
+
     service.check_chat_member = check_member
+    service.check_chat_admin = check_admin
+    service.send_private = dm
     service.chat_title = chat_title
 
     async def refund_stars(telegram_id: int, charge_id: str):

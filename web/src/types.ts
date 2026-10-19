@@ -99,6 +99,19 @@ export type GroupOverview = {
   title: string | null;
   events: GroupEventSummary[];
   polls: GroupPoll[];
+  admin: boolean;
+  detection: boolean;
+};
+
+export type GroupStats = {
+  days: number;
+  held: number;
+  cancelled: number;
+  going: number;
+  came: number;
+  turnout: string;
+  by_event: { title: string; sessions: number; going: number; came: number; turnout: string }[];
+  pro_required: boolean;
 };
 
 export type Person = { id: string; name: string; answer: string | null; present: boolean };
@@ -147,4 +160,23 @@ export type PollForm = {
   first: string;
   last: string;
   reply_by: string | null;
+};
+
+export type PollAnswer = "FREE" | "MAYBE" | "BUSY";
+
+export type PollSlot = { start_at: string; end_at: string; free: number; of: number; yes: number; maybe: number };
+
+export type PollDetail = {
+  id: string;
+  chat: string;
+  title: string;
+  status: "COLLECTING" | "OPEN" | "CLOSED";
+  duration_minutes: number;
+  deadline_at: string | null;
+  joined: number;
+  joined_by_me: boolean;
+  min_joined: number;
+  slots: PollSlot[];
+  mine: Record<string, PollAnswer>;
+  organiser: boolean;
 };

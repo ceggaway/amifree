@@ -142,7 +142,7 @@ class Notifier:
             if user.id in answered:
                 return None
             ask = (
-                "tap Fill mine to answer from your schedule"
+                "tap the times you can make"
                 if poll.status == "OPEN"
                 else "tap Count me in so your free time is counted"
             )

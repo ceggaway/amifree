@@ -39,7 +39,8 @@ def google_link(event: Event) -> str:
 
 def _escape(text: str) -> str:
     text = text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
-    return text.replace("\r\n", "\n").replace("\n", "\\n")
+    # A lone \r ends a line for some calendar apps too: it must not start a new property.
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
 
 
 def _fold(line: str) -> str:

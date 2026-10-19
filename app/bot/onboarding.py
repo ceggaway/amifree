@@ -210,7 +210,8 @@ def google_share_steps(email: str) -> str:
         "free/busy)</b>. If you don't see that, choose <b>Make changes to events</b>.\n"
         "6. Click <b>Send</b>.\n\n"
         "<b>Part 3 · Tell me your email</b>\n"
-        "7. Send me your own Google email here, like you@gmail.com.\n\n"
+        "7. Send me your own Google email here, like you@gmail.com. I'll put a code in that "
+        "calendar. Send the code back to show the calendar is yours.\n\n"
         "I only change events I added myself. To stop, remove AmIFree from Shared with, or tap "
         "Remove in /calendar."
     )

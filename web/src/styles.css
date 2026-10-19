@@ -7,10 +7,20 @@
   --accent: #5274c4;
   --accent-text: #ffffff;
   --danger: var(--tg-theme-destructive-text-color, #c0392b);
-  --border: color-mix(in srgb, var(--text) 13%, var(--panel));
-  --muted: color-mix(in srgb, var(--text) 4%, var(--panel));
-  --link: color-mix(in srgb, var(--accent) 65%, var(--text));
-  --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  /* Plain fallbacks for older phones (before iOS 16.2 / Chrome 111), which have no
+     color-mix(): semi-transparent greys read on both light and dark Telegram themes. */
+  --border: rgba(127, 127, 127, 0.28);
+  --muted: rgba(127, 127, 127, 0.08);
+  --link: var(--accent);
+  --accent-soft: rgba(82, 116, 196, 0.14);
+}
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  :root {
+    --border: color-mix(in srgb, var(--text) 13%, var(--panel));
+    --muted: color-mix(in srgb, var(--text) 4%, var(--panel));
+    --link: color-mix(in srgb, var(--accent) 65%, var(--text));
+    --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  }
 }
 * { box-sizing: border-box; }
 .hint { color: var(--hint); font-size: 13px; }
@@ -87,7 +97,7 @@ p { margin: 5px 0; }
 .card, .summary, .day { border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 20px; margin: 10px 0; }
 .summary { display: flex; flex-direction: column; border-left: 3px solid var(--accent); gap: 6px; }
 a.card.link { overflow-wrap: anywhere; display: block; color: inherit; text-decoration: none; transition: border-color 150ms, background 150ms; }
-a.card.link:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: var(--muted); }
+a.card.link:hover { border-color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: var(--muted); }
 a.card.event-row { display: flex; align-items: center; gap: 18px; padding: 20px; }
 .date-tile { flex: 0 0 54px; width: 54px; text-align: center; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; align-self: flex-start; }
 .date-tile span { display: block; padding: 3px; background: var(--muted); border-bottom: 1px solid var(--border); color: var(--hint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 650; }
@@ -105,8 +115,8 @@ a.card.organiser-link { display: flex; align-items: center; gap: 15px; }
 .icon-tile { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
 .icon-label { display: flex; gap: 8px; align-items: center; }
 .chip { border-radius: 999px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 550; padding: 3px 9px; background: var(--muted); border: 1px solid var(--border); }
-.chip.going { background: color-mix(in srgb, #319a74 12%, var(--panel)); color: color-mix(in srgb, #319a74 30%, var(--text)); border-color: color-mix(in srgb, #319a74 25%, var(--panel)); }
-.chip.maybe { background: color-mix(in srgb, #ba892f 12%, var(--panel)); color: color-mix(in srgb, #ba892f 30%, var(--text)); }
+.chip.going { background: rgba(49, 154, 116, 0.14); color: #2a8a66; border-color: rgba(49, 154, 116, 0.3); background: color-mix(in srgb, #319a74 12%, var(--panel)); color: color-mix(in srgb, #319a74 30%, var(--text)); border-color: color-mix(in srgb, #319a74 25%, var(--panel)); }
+.chip.maybe { background: rgba(186, 137, 47, 0.14); color: #9a7020; background: color-mix(in srgb, #ba892f 12%, var(--panel)); color: color-mix(in srgb, #ba892f 30%, var(--text)); }
 nav { position: fixed; inset: auto 0 0 0; display: flex; z-index: 10; justify-content: center; gap: 4px; border-top: 1px solid var(--border); background: var(--panel); padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); }
 nav a { text-align: center; color: var(--hint); text-decoration: none; flex: 0 1 160px; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 12px; font-size: 12px; border-radius: 7px; }
 nav a.active { font-weight: 600; background: var(--accent-soft); color: var(--link); }

@@ -20,11 +20,10 @@ def event_keyboard(
         return calendar_keyboard(event, google_link(event)).inline_keyboard[0]
 
     if event.group_event_id:
-        # A member's RSVP to a shared group plan: keep Going / Maybe / Can't, edited
+        # A member's RSVP to a shared group plan: Going or Can't (no Maybe), edited
         # once by the organiser from the group, never per member.
         answers = [
             (Status.GOING, button("Going anyway" if clash else "Going", add_action)),
-            (Status.MAYBE, button("Maybe", "maybe")),
             (Status.DECLINED, button("Can't make it", "decline")),
         ]
         if event.status == Status.PREVIEW:
@@ -61,10 +60,11 @@ def group_keyboard(event: GroupEvent, app_url: str | None = None) -> InlineKeybo
     def button(label, action):
         return InlineKeyboardButton(label, callback_data=f"g:{action}:{event.id}")
 
-    answer = [button("Going", "go"), button("Maybe", "maybe"), button("Can't", "no")]
+    # Two answers only: everyone is counted once, Going or Can't. A second tap switches it.
+    answer = [button("Going", "go"), button("Can't", "no")]
     if app_url:
         # Everything else (Am I free?, who's going, check-in, every session, organiser tools)
-        # is on the event's page in the Mini App, so the card stays four buttons.
+        # is on the event's page in the Mini App, so the card stays three buttons.
         return InlineKeyboardMarkup([answer, [InlineKeyboardButton("📱 Details", url=app_url)]])
     # Without the app: the same tools as buttons. Manage opens the organiser's private menu.
     rows = [

@@ -63,7 +63,6 @@ export function PlanCard({ plan, onChange, compact }: { plan: Plan; onChange?: (
       {!compact && onChange && !editing && (
         <div className="row">
           <button className={plan.status === "GOING" ? "on" : ""} onClick={choose("GOING")}>Going</button>
-          <button className={plan.status === "MAYBE" ? "on" : ""} onClick={choose("MAYBE")}>Maybe</button>
           <button className={plan.status === "DECLINED" ? "on" : ""} onClick={choose("DECLINED")}>Can't</button>
           {/* Group plans are edited once by the organiser, from the card in the group. */}
           {!plan.shared && <button onClick={() => setEditing(true)}>Edit</button>}

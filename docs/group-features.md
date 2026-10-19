@@ -22,8 +22,8 @@ the Group features table in the README.
 
 ## The card's buttons
 
-With the Mini App set up: Going / Maybe / Can't and **📱 Details**; everything else is on the
-event's page in the app. Without it: Going / Maybe / Can't, Am I free?, Who's going?, I'm here,
+With the Mini App set up: Going / Can't and **📱 Details**; everything else is on the
+event's page in the app. Without it: Going / Can't, Am I free?, Who's going?, I'm here,
 and **⚙️ Manage**. Manage opens the organiser's private menu (`manage_keyboard`: Edit, Cancel event, Nudge members, Who's confirmed,
 Mark who came); anyone else is refused privately. Cards posted before this change still carry
 the old Edit / Cancel event / Nudge / Status / Save buttons, and those keep working. `/help`
@@ -78,15 +78,17 @@ Each step is isolated: one failing is logged and the rest still run.
 
 ## Decisions worth knowing
 
-- **RSVP buttons stay Going / Maybe / Can't.** The UX doc proposes Going / Not going; the
-  existing flows and tests use Maybe, so it was kept.
+- **RSVP buttons are Going / Can't.** Maybe was removed (October 2026): each person is counted
+  once, and a second tap on the other button switches their answer. Old cards' Maybe button
+  now explains it's gone; Maybe answers already given stay in the data.
 - **Poll auto-suggest happens at the reply-by time, not at the third join.** Suggesting the
   moment three people join would fix the slots before the rest of the group has had a chance.
   The organiser's Suggest button still works at any time.
-- **Poll voting is one tap per time.** Members tap ✅ 1 / ✅ 2 / ✅ 3 for the times they can
-  make; a second tap takes it back. Maybe, the heatmap and the organiser's Suggest, Nudge and
-  Pick are in the app (or on the card when the app isn't set up). Cards posted before this
-  change keep their Fill mine and ✅ / 🤔 / ❌ buttons, which still work.
+- **One vote per person in a poll.** Members tap ✅ 1, ✅ 2 or ✅ 3 for the time that works best.
+  Tapping another time moves the vote; tapping theirs again takes it back. Every slot is written
+  in one call, so fast repeated taps can never leave two votes. The heatmap and the organiser's
+  Suggest, Nudge and Pick are in the app (or on the card when the app isn't set up). Old cards'
+  Fill mine votes for the first time the schedule leaves free; their ✅ / 🤔 / ❌ still work.
 - **A series is materialised.** Every session is a normal card row, so RSVPs, chase,
   "still coming?", attendance and export need no special cases. Sessions without a posted
   card are never chased or asked about.

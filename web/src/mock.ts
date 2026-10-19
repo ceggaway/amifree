@@ -27,7 +27,7 @@ let mockPoll: PollDetail = {
   joined: 5,
   joined_by_me: true,
   min_joined: 3,
-  slots: [2, 3, 4].map((offset, i) => ({ start_at: at(offset, 14), end_at: at(offset, 16), free: 5 - i, of: 5, yes: 3 - i, maybe: i })),
+  slots: [2, 3, 4].map((offset, i) => ({ start_at: at(offset, 14), end_at: at(offset, 16), free: 5 - i, of: 5, yes: 3 - i })),
   mine: {},
   organiser: true,
 };
@@ -75,7 +75,7 @@ let groupEvent: GroupEventDetail = {
   version: 1,
   ended: false,
   recurring: false,
-  counts: { GOING: 2, MAYBE: 1, DECLINED: 0 },
+  counts: { GOING: 2, DECLINED: 0 },
   my_status: null,
   availability: free,
   going: ["Angel", "Rou Shuen"],
@@ -88,7 +88,7 @@ let groupEvent: GroupEventDetail = {
     people: [
       { id: "u1", name: "Angel", answer: "GOING", present: false },
       { id: "u2", name: "Rou Shuen", answer: "GOING", present: false },
-      { id: "u3", name: "runezy", answer: "MAYBE", present: false },
+      { id: "u3", name: "runezy", answer: "DECLINED", present: false },
     ],
   },
 };
@@ -141,7 +141,8 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
   } else if (path === "/api/me") {
     result = { telegram_user_id: 1, reminders_enabled: reminders, nusmods: { connected: false }, calendars: [], outside_calendars_connected: false };
   } else if (/^\/api\/polls\/[^/]+(\/(join|vote))?$/.test(path)) {
-    if (path.endsWith("/vote")) mockPoll = { ...mockPoll, mine: { ...mockPoll.mine, [String(data.slot)]: data.answer as PollAnswer } };
+    // One vote each: voting for a time clears the others.
+    if (path.endsWith("/vote")) mockPoll = { ...mockPoll, mine: (data.answer as PollAnswer) === "FREE" ? { [String(data.slot)]: "FREE" } : {} };
     result = mockPoll;
   } else if (/^\/api\/polls\/[^/]+\/(suggest|nudge)$/.test(path)) {
     result = { message: "Nudging 2 members privately." };

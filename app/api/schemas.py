@@ -21,7 +21,7 @@ class PlanPatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     version: int
-    status: Literal["SAVED", "GOING", "MAYBE", "DECLINED"] | None = None
+    status: Literal["SAVED", "GOING", "DECLINED"] | None = None
     # Going over a definite clash must be acknowledged, as with the bot's "Going anyway".
     force: bool = False
     cancel: bool = False
@@ -69,7 +69,7 @@ class PollForm(BaseModel):
 
 class RsvpRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    status: Literal["GOING", "MAYBE", "DECLINED"]
+    status: Literal["GOING", "DECLINED"]
     # Going over a definite clash must be acknowledged, as with the bot's "Going anyway".
     force: bool = False
 
@@ -105,7 +105,7 @@ class AttendanceRequest(BaseModel):
 class PollVoteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     slot: int = Field(ge=0, le=2)
-    answer: Literal["FREE", "MAYBE", "BUSY"]
+    answer: Literal["FREE", "BUSY"]  # vote for this time, or take the vote back
 
 
 class PollPickRequest(BaseModel):

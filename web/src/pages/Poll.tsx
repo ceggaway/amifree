@@ -7,12 +7,6 @@ import type { PollAnswer, PollDetail } from "../types";
 import { useLoad } from "../useLoad";
 import { Heatmap } from "./Heatmap";
 
-const ANSWERS: [PollAnswer, string][] = [
-  ["FREE", "Yes"],
-  ["MAYBE", "Maybe"],
-  ["BUSY", "No"],
-];
-
 /** A find-a-time poll: join, answer each suggested time, and (organisers) settle it. */
 export function Poll() {
   const { id = "" } = useParams();
@@ -108,26 +102,24 @@ export function Poll() {
               </h3>
             </div>
             <p className="hint">
-              {slot.yes} can make it{slot.maybe ? ` · ${slot.maybe} maybe` : ""} · {slot.free} of {slot.of} have no
-              known clash
+              {slot.yes} vote{slot.yes === 1 ? "" : "s"} · {slot.free} of {slot.of} have no known clash
             </p>
-            <div className="segmented" role="group" aria-label={`Time ${index + 1}`}>
-              {ANSWERS.map(([answer, label]) => {
-                const on = p.mine[String(index)] === answer;
-                return (
-                  <button
-                    key={answer}
-                    type="button"
-                    className={on ? "on" : ""}
-                    aria-pressed={on}
-                    disabled={busy}
-                    onClick={() => run(() => api.vote(p.id, index, answer))}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
+            {(() => {
+              // One vote each: voting here moves it from any other time; tapping again takes it back.
+              const mine = p.mine[String(index)] === "FREE";
+              const answer: PollAnswer = mine ? "BUSY" : "FREE";
+              return (
+                <button
+                  type="button"
+                  className={`big${mine ? " on" : ""}`}
+                  aria-pressed={mine}
+                  disabled={busy}
+                  onClick={() => run(() => api.vote(p.id, index, answer))}
+                >
+                  {mine ? "✓ Your vote" : "Vote for this time"}
+                </button>
+              );
+            })()}
             {p.organiser && (
               <button type="button" disabled={busy} onClick={() => pick(index)}>
                 Pick this time

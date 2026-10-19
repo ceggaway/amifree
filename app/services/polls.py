@@ -217,10 +217,8 @@ def poll_card(
     lines = []
     for index, slot in enumerate(poll.slots):
         draft = slot_draft(poll, index)
-        maybe = tally.get((index, "MAYBE"), 0)
-        votes = f"✅ {tally.get((index, 'FREE'), 0)} can make it" + (
-            f" · 🤔 {maybe} maybe" if maybe else ""
-        )
+        count = tally.get((index, "FREE"), 0)
+        votes = f"✅ {count} vote{'s' if count != 1 else ''}"
         lines.append(
             f"{index + 1}. {draft.start_at:%a %-d %b %H:%M}–{draft.end_at:%H:%M}"
             f" · {slot['free']} of {slot.get('of', joined)} with no known clash\n    {votes}"
@@ -240,7 +238,8 @@ def poll_card(
         + "\n".join(lines)
         + coverage
         + deadline
-        + "\n\nTap the numbers of the times you can make. Tap again to undo.",
+        + "\n\nTap the time that works best for you. One vote each: tapping another time"
+        " moves your vote, and tapping yours again takes it back.",
         poll_keyboard(poll, app_url),
     )
 
@@ -495,6 +494,17 @@ class PollService:
         days = heatmap_cells(poll.window_start, poll.window_end, busy, self.scheduling.clock())
         return base | {"ready": True, "days": days, "max_free": len(busy)}
 
+    async def choose(self, poll: Poll, user_id: str, index: int | None) -> int | None:
+        """One vote per person: `index` gets their vote and every other time is cleared.
+        Tapping the time they already chose (or None) takes the vote back. Every slot is
+        written in one call, so fast repeated taps can never leave two votes."""
+        mine = await self.repo.poll_my_votes(poll.id, user_id)
+        if index is not None and mine.get(index) == "FREE":
+            index = None
+        votes = {str(i): "FREE" if i == index else "BUSY" for i in range(len(poll.slots))}
+        await self.repo.poll_vote(poll.id, user_id, votes)
+        return index
+
     async def pick(self, user, poll: Poll, index: int) -> tuple[Poll, object] | None:
         """Close the poll on one slot and make its event (not yet posted). None if closed."""
         closed = await self.repo.poll_close(poll.id, user.id)
@@ -531,7 +541,7 @@ class PollService:
         if action == "join":
             await self.repo.poll_join(poll.id, user.id)
             note = (
-                "You're in. Slots are already suggested: tap the times you can make."
+                "You're in. Times are already suggested: tap the one that works best."
                 if poll.status == "OPEN"
                 else "You're in. Your schedule is only used to count who is free."
             )
@@ -557,45 +567,47 @@ class PollService:
                     alert="I have no schedule for you yet, so I can't fill this in. Send your"
                     " NUSMods or calendar link to the bot privately, or answer by hand."
                 )
-            votes, summary = {}, []
+            # Cards from before one-vote polls: vote for the first time the schedule leaves free.
+            best = None
             for index in range(len(poll.slots)):
                 draft = slot_draft(poll, index)
                 availability = await self.scheduling.availability(user, draft)
                 # The spans also hold the cells left unticked in "Set my times" and the time
                 # outside their usual times, which the schedule check alone does not know.
-                if availability.conflicts or clashes(spans, draft.start_at, draft.end_at):
-                    answer = "BUSY"
-                else:
-                    answer = "MAYBE" if availability.possible else "FREE"
-                votes[str(index)] = answer
-                summary.append(f"{index + 1} {answer.capitalize()}")
-            await self.repo.poll_vote(poll.id, user.id, votes)
+                if not availability.conflicts and not clashes(spans, draft.start_at, draft.end_at):
+                    best = index
+                    break
+            if best is None:
+                return GroupResult(
+                    alert="Your schedule clashes with every time. Only you see this."
+                )
+            mine = await self.repo.poll_my_votes(poll.id, user.id)
+            if mine.get(best) != "FREE":
+                await self.choose(poll, user.id, best)
             return GroupResult(
-                alert="Filled from your schedule: "
-                + " · ".join(summary)
-                + ".\nTap a button to change an answer. Only you can see this.",
+                alert=f"Voted for time {best + 1}, the first one your schedule leaves free."
+                " Only you see this.",
                 card=await self.render(poll),
             )
         index = int(extra[:1]) if extra[:1].isdigit() else -1
         if not 0 <= index < len(poll.slots):
             return GroupResult(alert="That button isn't valid.")
-        if action == "t":
-            mine = await self.repo.poll_my_votes(poll.id, user.id)
-            answer = "BUSY" if mine.get(index) == "FREE" else "FREE"
-            await self.repo.poll_vote(poll.id, user.id, {str(index): answer})
+        # "t" is today's card; "v…F" is a ✅ on cards from before one-vote polls.
+        if action == "t" or (action == "v" and extra[1:] == "F"):
+            chosen = await self.choose(poll, user.id, index)
             return GroupResult(
-                alert=f"Slot {index + 1}: "
-                + (
-                    "you can make it ✅"
-                    if answer == "FREE"
-                    else "removed. Tap again to add it back."
-                ),
+                alert=f"Your vote: time {index + 1} ✅. Tap another time to move it."
+                if chosen is not None
+                else "Vote taken back. Tap a time to vote again.",
                 card=await self.render(poll),
             )
         if action == "v" and extra[1:] in ANSWERS:
-            await self.repo.poll_vote(poll.id, user.id, {str(index): ANSWERS[extra[1:]]})
+            # 🤔 / ❌ on an old card: that time doesn't get their vote.
+            mine = await self.repo.poll_my_votes(poll.id, user.id)
+            if mine.get(index) == "FREE":
+                await self.choose(poll, user.id, None)
             return GroupResult(
-                alert=f"Slot {index + 1}: {ANSWERS[extra[1:]].capitalize()}.",
+                alert="Noted. Tap the time that works best to vote for it.",
                 card=await self.render(poll),
             )
         if action == "pick":

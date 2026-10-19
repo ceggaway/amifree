@@ -26,7 +26,7 @@ from app.services.recurrence import Recurrence
 log = logging.getLogger(__name__)
 MEMBER_TTL, OUTSIDER_TTL = 300, 30  # seconds a Telegram membership answer is reused
 POLL_DAYS = 14
-STATUSES = {"GOING": Status.GOING, "MAYBE": Status.MAYBE, "DECLINED": Status.DECLINED}
+STATUSES = {"GOING": Status.GOING, "DECLINED": Status.DECLINED}
 
 
 class NotFound(Exception):
@@ -212,7 +212,7 @@ class GroupHub:
             "start_at": event.start_at.isoformat(),
             "end_at": event.end_at.isoformat(),
             "location": event.location,
-            "counts": {s: counts.get(s, 0) for s in ("GOING", "MAYBE", "DECLINED")},
+            "counts": {s: counts.get(s, 0) for s in ("GOING", "DECLINED")},
             "my_status": linked.status.value if linked else None,
             "recurring": bool(event.series_id),
             "organiser": event.creator_user_id == user.id,
@@ -244,7 +244,7 @@ class GroupHub:
             "version": event.version,
             "ended": event.status == "ACTIVE" and event.end_at <= now,
             "recurring": bool(event.series_id),
-            "counts": {s: counts.get(s, 0) for s in ("GOING", "MAYBE", "DECLINED")},
+            "counts": {s: counts.get(s, 0) for s in ("GOING", "DECLINED")},
             "my_status": linked.status.value if linked else None,
             "availability": found,
             "going": going,
@@ -278,7 +278,7 @@ class GroupHub:
             raise Refused("This event has ended.")
         wanted = STATUSES.get(status)
         if wanted is None:
-            raise Refused("Choose Going, Maybe or Can't.")
+            raise Refused("Choose Going or Can't.")
         if wanted == Status.GOING and not force:
             linked = await self.repo.linked_event(user.id, event.id)
             found = await self.scheduling.availability(user, event, linked.id if linked else None)
@@ -472,7 +472,6 @@ class GroupHub:
                     "free": slot.get("free", 0),
                     "of": slot.get("of", len(people)),
                     "yes": tally.get((index, "FREE"), 0),
-                    "maybe": tally.get((index, "MAYBE"), 0),
                 }
                 for index, slot in enumerate(poll.slots or [])
             ],
@@ -496,7 +495,13 @@ class GroupHub:
             )
         if slot >= len(poll.slots):
             raise Refused("That time isn't in this poll.")
-        await self.repo.poll_vote(poll.id, user.id, {str(slot): answer})
+        # One vote each. FREE puts it on this time (a repeated request changes nothing);
+        # BUSY takes it back if this time has it.
+        mine = await self.repo.poll_my_votes(poll.id, user.id)
+        if answer == "FREE" and mine.get(slot) != "FREE":
+            await self.scheduling.polls.choose(poll, user.id, slot)
+        elif answer == "BUSY" and mine.get(slot) == "FREE":
+            await self.scheduling.polls.choose(poll, user.id, None)
         await self.scheduling.poll_changed(poll.id)
         return await self.poll_detail(user, poll)
 

@@ -19,7 +19,9 @@ vi.mock("../api", async () => {
       },
       vote: (_id: string, slot: number, answer: string) => {
         calls.push(["vote", slot, answer]);
-        return Promise.resolve({ ...state.poll, mine: { [String(slot)]: answer } });
+        // The server keeps one vote each: voting for a time clears the others.
+        state.poll = { ...state.poll, mine: answer === "FREE" ? { [String(slot)]: "FREE" } : {} };
+        return Promise.resolve(state.poll);
       },
       pick: (_id: string, slot: number) => {
         calls.push(["pick", slot]);
@@ -38,7 +40,6 @@ const slot = (day: number) => ({
   free: 4,
   of: 5,
   yes: 2,
-  maybe: 0,
 });
 const base: PollDetail = {
   id: "p1",
@@ -73,12 +74,20 @@ afterEach(() => {
 });
 
 describe("poll page", () => {
-  it("answers each time with Yes, Maybe or No", async () => {
+  it("gives one vote that moves between times, and comes back on a second tap", async () => {
     show(base);
-    const [, second] = await screen.findAllByRole("group");
-    fireEvent.click(second.querySelector("button:nth-child(2)")!);
-    await waitFor(() => expect(calls).toEqual([["vote", 1, "MAYBE"]]));
-    expect(second.querySelector("button:nth-child(2)")!.getAttribute("aria-pressed")).toBe("true");
+    const votes = await screen.findAllByRole("button", { name: "Vote for this time" });
+    expect(votes).toHaveLength(3);
+    fireEvent.click(votes[1]);
+    expect(await screen.findByRole("button", { name: "✓ Your vote" })).toBeTruthy();
+    // Times 1 and 3 are left to vote for; moving the vote to time 3 (index 2).
+    fireEvent.click(screen.getAllByRole("button", { name: "Vote for this time" })[1]);
+    await waitFor(() => expect(calls).toEqual([["vote", 1, "FREE"], ["vote", 2, "FREE"]]));
+    // Only one time shows as voted.
+    expect(screen.getAllByRole("button", { name: "✓ Your vote" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "✓ Your vote" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "✓ Your vote" })).toBeNull());
+    expect(calls[calls.length - 1]).toEqual(["vote", 2, "BUSY"]);
     expect(screen.queryByText("Pick this time")).toBeNull();
   });
 

@@ -532,10 +532,11 @@ def register_handlers(application: Application, service):
     poll_refresher = CardRefresher(interval, edit_poll)
 
     async def check_member(chat_id: int, telegram_id: int) -> bool:
-        """Whether Telegram lists this person in the group right now."""
+        """Whether Telegram lists this person in the group right now. A network error is
+        raised, so a hiccup isn't remembered as "not a member"."""
         try:
             member = await application.bot.get_chat_member(chat_id, telegram_id)
-        except TelegramError:
+        except (BadRequest, Forbidden):
             return False
         if member.status in ("creator", "administrator", "member"):
             return True

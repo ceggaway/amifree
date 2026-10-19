@@ -337,6 +337,7 @@ class SchedulingService:
                 ]
             return [Reply(onboarding.WELCOME, onboarding.welcome_keyboard(), parse_mode="HTML")]
         if command == "cancel":
+            await self.google_sync.discard(user.pending)
             await self.repo.set_pending(user.id, None)
             return [Reply("Pending action cleared. Forward an event when you're ready.")]
         if command in ("delete", "deletemydata"):
@@ -512,7 +513,10 @@ class SchedulingService:
             keep = {
                 k: getattr(event, k) for k in ("title", "start_at", "end_at", "location", "notes")
             }
-            draft = EventDraft(**(keep | {fields["key"]: fields["value"]}))
+            draft = EventDraft(
+                **(keep | {fields["key"]: fields["value"]}),
+                assumed_duration=event.assumed_duration,
+            )
             result = await self.repo.update_event(user.id, event, draft)
             if not result:
                 return [Reply("That plan changed since, so I left it as it is.", edit=True)]
@@ -877,9 +881,14 @@ class SchedulingService:
         if CALENDAR_URL.fullmatch(text.strip()):
             # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
             return [Reply(onboarding.NOT_A_SCHEDULE_LINK)]
+        pending = user.pending
+        if pending and pending["stage"] == "gcal_code":
+            if re.fullmatch(r"\s*\d{4,8}\s*", text):
+                return await self.google_sync.verify(user, pending, text)
+            # Anything else is an ordinary message; the code stays valid until it expires.
+            pending = None
         if quick_reminders.is_reminder(text):
             return await self.add_reminder(user, text, reference)
-        pending = user.pending
         if pending and pending["stage"] == "free":
             # /free asked "when?": a day or time answers it; anything else is a new message.
             try:

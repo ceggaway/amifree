@@ -10,8 +10,11 @@ few minutes in the background, so a change made by someone else catches up as we
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
-from datetime import timedelta
+import secrets
+from datetime import datetime, timedelta
 
 from app.bot import onboarding
 from app.bot.keyboards import google_help_keyboard
@@ -30,6 +33,7 @@ from app.services.personal_calendar import MAX_CALENDARS, WINDOW_AHEAD, WINDOW_P
 log = logging.getLogger(__name__)
 
 SYNC_EVERY = timedelta(minutes=10)
+CODE_TTL, MAX_TRIES = timedelta(minutes=30), 5  # the one-time code that proves ownership
 PLAN_PAST, PLAN_AHEAD = timedelta(days=30), timedelta(days=400)  # the same range as the feed
 KEEP = (Status.GOING, Status.SAVED)
 LOST = (
@@ -60,8 +64,93 @@ class GoogleSyncService:
         return Reply(text, onboarding.google_steps_keyboard(), edit=True, parse_mode="HTML")
 
     async def connect(self, user, email: str) -> list[Reply]:
+        """Step 1 of 2: check the calendar is shared, then put a one-time code in it.
+
+        Sharing is with AmIFree, not with one person, so anyone who knows the email could
+        otherwise claim it. Only someone who can open the calendar can read the code back."""
         s, now = self.s, self.s.clock()
         email = email.strip().lower()
+        refused = await self.refused(user, email)
+        if refused:
+            return [refused]
+        try:
+            try:
+                access = await self.client.probe(email)
+                code = f"{secrets.randbelow(10**6):06d}"
+                event_id = (
+                    await self.client.add_code(email, code, now) if access is Access.WRITE else None
+                )
+            except GoogleAccessLost:
+                access = Access.NONE
+        except GoogleCalendarError:
+            return [Reply("Google didn't answer just now. Try again in a minute.")]
+        if access is not Access.WRITE:
+            return [self.not_ready(access)]
+        await self.discard(user.pending)  # an earlier code that was never used
+        await s.repo.set_pending(
+            user.id,
+            {
+                "stage": "gcal_code",
+                "email": email,
+                "code": self.digest(code),
+                "event": event_id,
+                "expires": (now + CODE_TTL).isoformat(),
+                "tries": 0,
+            },
+        )
+        return [
+            Reply(
+                f"One last step, to check {email} is yours.\n\nI've put an event called"
+                ' "AmIFree code" in that calendar today. Open Google Calendar and send me the'
+                " 6-digit number in it.\n\n/cancel to stop."
+            )
+        ]
+
+    async def verify(self, user, pending: dict, text: str) -> list[Reply]:
+        """Step 2 of 2: the code sent back. Connects on a match."""
+        s, now = self.s, self.s.clock()
+        if datetime.fromisoformat(pending["expires"]) <= now:
+            await s.repo.set_pending(user.id, None)
+            await self.discard(pending)
+            return [Reply("That code has expired. Send your email again for a new one.")]
+        if not hmac.compare_digest(self.digest(text.strip()), pending["code"]):
+            tries = pending.get("tries", 0) + 1
+            if tries >= MAX_TRIES:
+                await s.repo.set_pending(user.id, None)
+                await self.discard(pending)
+                return [Reply("That's not it, and that was the last try. Send your email again.")]
+            await s.repo.set_pending(user.id, pending | {"tries": tries})
+            return [
+                Reply(
+                    'That\'s not the code. Look for the event "AmIFree code" in your Google'
+                    " Calendar today and send me its 6-digit number. /cancel to stop."
+                )
+            ]
+        await s.repo.set_pending(user.id, None)
+        await self.discard(pending)
+        return await self.finish(user, pending["email"])
+
+    async def discard(self, pending: dict | None):
+        """Remove an unused code event from the calendar. Best effort: it is harmless."""
+        if not pending or pending.get("stage") != "gcal_code" or not pending.get("event"):
+            return
+        try:
+            await self.client.delete_event(pending["email"], pending["event"])
+        except GoogleCalendarError as exc:
+            log.warning("google_code_cleanup_failed error_type=%s", type(exc).__name__)
+
+    def digest(self, code: str) -> str:
+        return hmac.new(self.s.link_secret.encode(), code.encode(), hashlib.sha256).hexdigest()
+
+    async def refused(self, user, email: str) -> Reply | None:
+        """Why this calendar can't be connected to this person, or None."""
+        s = self.s
+        owner = await s.repo.google_calendar_owner(email)
+        if owner and owner != user.id:
+            return Reply(
+                "That calendar is already connected to another AmIFree account. If it's yours,"
+                " remove it there first."
+            )
         digest = gcal_hash(email, s.link_secret)
         calendars = await s.repo.list_calendars(user.id)
         old = await s.repo.get_google_connection(user.id)
@@ -69,26 +158,27 @@ class GoogleSyncService:
         if not any(c.url_hash == digest for c in calendars) and (
             len(calendars) - (1 if replacing else 0) >= MAX_CALENDARS
         ):
-            return [
-                Reply(
-                    f"You've connected {MAX_CALENDARS} calendars, the most I check. Remove one "
-                    "in /calendar first."
-                )
-            ]
+            return Reply(
+                f"You've connected {MAX_CALENDARS} calendars, the most I check. Remove one in"
+                " /calendar first."
+            )
+        return None
+
+    async def finish(self, user, email: str) -> list[Reply]:
+        """Connect a calendar whose owner has been checked."""
+        s, now = self.s, self.s.clock()
+        refused = await self.refused(user, email)  # checked again: time passed since step 1
+        if refused:
+            return [refused]
+        digest = gcal_hash(email, s.link_secret)
+        old = await s.repo.get_google_connection(user.id)
+        replacing = old and old.calendar_email != email and old.calendar_id
         try:
-            try:
-                access = await self.client.probe(email)
-                busy = (
-                    await self.client.busy(email, now - WINDOW_PAST, now + WINDOW_AHEAD)
-                    if access is Access.WRITE
-                    else None
-                )
-            except GoogleAccessLost:
-                access, busy = Access.NONE, None
+            busy = await self.client.busy(email, now - WINDOW_PAST, now + WINDOW_AHEAD)
+        except GoogleAccessLost:
+            return [self.not_ready(Access.NONE)]
         except GoogleCalendarError:
-            return [Reply("Google didn't answer just now. Try again in a minute.")]
-        if access is not Access.WRITE:
-            return [self.not_ready(access)]
+            return [Reply("Google didn't answer just now. Send your email again in a minute.")]
         if replacing:
             await s.repo.remove_calendar(user.id, old.calendar_id)  # its connection goes with it
         calendar, _ = await s.repo.add_calendar(

@@ -7,7 +7,7 @@ import { FindTime } from "./pages/FindTime";
 import { GroupEvent } from "./pages/GroupEvent";
 import { GroupHome } from "./pages/GroupHome";
 import { NewEvent } from "./pages/NewEvent";
-import { Heatmap } from "./pages/Heatmap";
+import { Poll } from "./pages/Poll";
 import { MyTimes } from "./pages/MyTimes";
 import { Home } from "./pages/Home";
 import { Plans } from "./pages/Plans";
@@ -45,7 +45,7 @@ export function App() {
           <Route path="/week" element={<Calendar />} />
           <Route path="/plans" element={<Plans />} />
           <Route path="/busy" element={<Blocks />} />
-          <Route path="/poll/:id" element={<Heatmap />} />
+          <Route path="/poll/:id" element={<Poll />} />
           <Route path="/poll/:id/mine" element={<MyTimes />} />
           <Route path="/g/:code" element={<GroupHome />} />
           <Route path="/g/:code/new" element={<NewEvent />} />

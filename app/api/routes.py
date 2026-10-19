@@ -28,6 +28,8 @@ from app.api.schemas import (
     GroupEventPatch,
     PlanPatch,
     PollForm,
+    PollPickRequest,
+    PollVoteRequest,
     RsvpRequest,
     SeriesRequest,
     VersionRequest,
@@ -391,6 +393,44 @@ def build_router(settings: Settings) -> APIRouter:
         hub, event = await group_card(request, user, event_id, organiser=True)
         person = valid_id(body.user_id) if body.user_id else None
         return await hub_call(hub.mark(user, event, person, body.present))
+
+    # ---- polls: the page behind a poll card's 📱 Open ----
+
+    @router.get("/polls/{poll_id}")
+    async def poll_page(poll_id: str, request: Request, user: CurrentUser):
+        hub = service_of(request).hub
+        poll = await hub_call(hub.poll_for(user, valid_id(poll_id)))
+        return await hub_call(hub.poll_detail(user, poll))
+
+    @router.post("/polls/{poll_id}/join")
+    async def poll_join(poll_id: str, request: Request, user: CurrentUser):
+        hub = service_of(request).hub
+        poll = await hub_call(hub.poll_for(user, valid_id(poll_id)))
+        return await hub_call(hub.poll_join(user, poll))
+
+    @router.post("/polls/{poll_id}/vote")
+    async def poll_vote(poll_id: str, body: PollVoteRequest, request: Request, user: CurrentUser):
+        hub = service_of(request).hub
+        poll = await hub_call(hub.poll_for(user, valid_id(poll_id)))
+        return await hub_call(hub.poll_vote(user, poll, body.slot, body.answer))
+
+    @router.post("/polls/{poll_id}/suggest")
+    async def poll_suggest(poll_id: str, request: Request, user: CurrentUser):
+        hub = service_of(request).hub
+        poll = await hub_call(hub.organised_poll(user, valid_id(poll_id)))
+        return await hub_call(hub.poll_suggest(user, poll))
+
+    @router.post("/polls/{poll_id}/pick")
+    async def poll_pick(poll_id: str, body: PollPickRequest, request: Request, user: CurrentUser):
+        hub = service_of(request).hub
+        poll = await hub_call(hub.organised_poll(user, valid_id(poll_id)))
+        return await hub_call(hub.poll_pick(user, poll, body.slot))
+
+    @router.post("/polls/{poll_id}/nudge")
+    async def poll_nudge(poll_id: str, request: Request, user: CurrentUser):
+        hub = service_of(request).hub
+        poll = await hub_call(hub.organised_poll(user, valid_id(poll_id)))
+        return await hub_call(hub.poll_nudge(user, poll))
 
     # Each heatmap reads every participant's schedule: bound how often one person can ask.
     heatmap_limit = RateLimiter(20, 60)

@@ -100,3 +100,14 @@ class AttendanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_id: str | None = Field(default=None, max_length=36)
     present: bool = True
+
+
+class PollVoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    slot: int = Field(ge=0, le=2)
+    answer: Literal["FREE", "MAYBE", "BUSY"]
+
+
+class PollPickRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    slot: int = Field(ge=0, le=2)

@@ -303,6 +303,24 @@ async def test_buying_pro_with_stars(service_factory):
         )
 
 
+async def test_a_payment_interrupted_midway_still_gives_pro(service_factory):
+    service, repo = service_factory(export_requires_pro=True, pro_price_stars=250)
+    record = repo.record_payment
+
+    async def database_blip(*args):
+        raise ConnectionError("database blip")
+
+    repo.record_payment = database_blip
+    with pytest.raises(ConnectionError):
+        await service.pro.complete(1, f"pro:{CHAT}", "charge-9", "XTR", 250)
+    # Telegram retries the payment update: the buyer must end up with Pro, not "already applied".
+    repo.record_payment = record
+    text, refund = await service.pro.complete(1, f"pro:{CHAT}", "charge-9", "XTR", 250)
+    assert "Clubs Pro is active" in text and not refund
+    assert await repo.group_tier(CHAT, service.clock()) == "PRO"
+    assert await repo.payment_recorded("charge-9")
+
+
 # ---- monitoring ----
 
 

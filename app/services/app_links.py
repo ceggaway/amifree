@@ -28,8 +28,5 @@ def group_link(settings, chat_id: int, page: str = "g") -> str | None:
 
 
 def group_links(settings, chat_id: int) -> list[tuple[str, str | None]]:
-    return [
-        ("📅 Create an event", group_link(settings, chat_id, "new")),
-        ("🗳 Find a time that works", group_link(settings, chat_id, "find")),
-        ("📋 This group's events", group_link(settings, chat_id)),
-    ]
+    """One button: the group's page already leads with Create an event and Find a time."""
+    return [("📱 Open AmIFree", group_link(settings, chat_id))]

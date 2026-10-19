@@ -16,7 +16,8 @@ export const addDays = (date: Date, days: number) => new Date(date.getTime() + d
 
 /** Value for <input type="datetime-local">, in Singapore time. */
 export const toInput = (iso: string) => `${dayKey(iso)}T${time(iso)}`;
-export const fromInput = (value: string) => `${value}:00+08:00`;
+// Some browsers include seconds ("…T19:00:00"); keep exactly hours, minutes and seconds.
+export const fromInput = (value: string) => `${value.slice(0, 16)}:00+08:00`;
 
 /** "2026-10-23" + "19:00" in Singapore time, as an ISO string with its offset. */
 export const at = (dateKey: string, clock: string) => `${dateKey}T${clock}:00+08:00`;

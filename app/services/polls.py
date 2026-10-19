@@ -175,8 +175,7 @@ def poll_card(
     poll: Poll,
     joined: int,
     tally: dict[tuple[int, str], int],
-    heatmap_url: str | None = None,
-    mine_url: str | None = None,
+    app_url: str | None = None,
     now: datetime | None = None,
 ) -> Reply:
     hours = poll.duration_minutes / 60
@@ -191,18 +190,20 @@ def poll_card(
     )
     if poll.status == "COLLECTING":
         last = poll.window_end - timedelta(days=1)
+        suggest = "suggests them in 📱 Open" if app_url else "taps Suggest"
         if now and poll.deadline_at and poll.deadline_at <= now:
             # The automatic suggestion ran and could not open the poll: say why, not "soon".
             when = (
                 f"\n\nJoined: {joined}. The reply time has passed, but slots need at least"
                 f" {MIN_PARTICIPANTS} members whose schedule AmIFree can read. Members can send"
-                " their NUSMods or calendar link to the bot, or use Set my times; the organiser"
-                " can then tap Suggest."
+                " their NUSMods or calendar link to the bot"
+                + (", or set their times in 📱 Open" if app_url else "")
+                + f". Then the organiser {suggest}."
             )
         else:
             when = (
-                f"\n\nJoined: {joined}. Slots are suggested when the reply time passes,"
-                f" or when the organiser taps Suggest ({MIN_PARTICIPANTS} must have joined)."
+                f"\n\nJoined: {joined}. Slots are suggested when the reply time passes, or"
+                f" sooner if the organiser {suggest} ({MIN_PARTICIPANTS} must have joined)."
             )
         return Reply(
             head
@@ -211,14 +212,14 @@ def poll_card(
             + "\n\nTap Count me in to let AmIFree use your schedule for this poll. The group only"
             + " sees how many people are free in each slot, never who is busy or why."
             + when,
-            poll_keyboard(poll, heatmap_url, mine_url),
+            poll_keyboard(poll, app_url),
         )
     lines = []
     for index, slot in enumerate(poll.slots):
         draft = slot_draft(poll, index)
-        votes = " · ".join(
-            f"{label} {tally.get((index, answer), 0)}"
-            for label, answer in (("✅", "FREE"), ("🤔", "MAYBE"), ("❌", "BUSY"))
+        maybe = tally.get((index, "MAYBE"), 0)
+        votes = f"✅ {tally.get((index, 'FREE'), 0)} can make it" + (
+            f" · 🤔 {maybe} maybe" if maybe else ""
         )
         lines.append(
             f"{index + 1}. {draft.start_at:%a %-d %b %H:%M}–{draft.end_at:%H:%M}"
@@ -239,8 +240,8 @@ def poll_card(
         + "\n".join(lines)
         + coverage
         + deadline
-        + "\n\nTap Fill mine to answer from your schedule (only you see the result), or answer by hand.",
-        poll_keyboard(poll, heatmap_url, mine_url),
+        + "\n\nTap the numbers of the times you can make. Tap again to undo.",
+        poll_keyboard(poll, app_url),
     )
 
 
@@ -259,7 +260,6 @@ class PollService:
             joined,
             await self.repo.poll_tally(poll.id),
             s.heatmap_link(poll.id),
-            s.availability_link(poll.id),
             self.scheduling.clock(),
         )
 
@@ -495,6 +495,20 @@ class PollService:
         days = heatmap_cells(poll.window_start, poll.window_end, busy, self.scheduling.clock())
         return base | {"ready": True, "days": days, "max_free": len(busy)}
 
+    async def pick(self, user, poll: Poll, index: int) -> tuple[Poll, object] | None:
+        """Close the poll on one slot and make its event (not yet posted). None if closed."""
+        closed = await self.repo.poll_close(poll.id, user.id)
+        if not closed:
+            return None
+        # The poll card's own message id keeps event creation idempotent in this chat.
+        event = await self.repo.create_group_event(
+            user.id,
+            poll.chat_id,
+            poll.message_id or poll.source_message_id,
+            slot_draft(poll, index),
+        )
+        return closed, event
+
     async def callback(
         self,
         telegram_id: int,
@@ -517,7 +531,7 @@ class PollService:
         if action == "join":
             await self.repo.poll_join(poll.id, user.id)
             note = (
-                "You're in. Slots are already suggested, so tap Fill mine."
+                "You're in. Slots are already suggested: tap the times you can make."
                 if poll.status == "OPEN"
                 else "You're in. Your schedule is only used to count who is free."
             )
@@ -565,6 +579,19 @@ class PollService:
         index = int(extra[:1]) if extra[:1].isdigit() else -1
         if not 0 <= index < len(poll.slots):
             return GroupResult(alert="That button isn't valid.")
+        if action == "t":
+            mine = await self.repo.poll_my_votes(poll.id, user.id)
+            answer = "BUSY" if mine.get(index) == "FREE" else "FREE"
+            await self.repo.poll_vote(poll.id, user.id, {str(index): answer})
+            return GroupResult(
+                alert=f"Slot {index + 1}: "
+                + (
+                    "you can make it ✅"
+                    if answer == "FREE"
+                    else "removed. Tap again to add it back."
+                ),
+                card=await self.render(poll),
+            )
         if action == "v" and extra[1:] in ANSWERS:
             await self.repo.poll_vote(poll.id, user.id, {str(index): ANSWERS[extra[1:]]})
             return GroupResult(
@@ -574,13 +601,10 @@ class PollService:
         if action == "pick":
             if not organiser:
                 return GroupResult(alert="Only the organiser can pick the slot.")
-            closed = await self.repo.poll_close(poll.id, user.id)
-            if not closed:
+            picked = await self.pick(user, poll, index)
+            if not picked:
                 return GroupResult(alert="This poll is closed.")
-            # The poll card's own message id keeps event creation idempotent in this chat.
-            event = await self.repo.create_group_event(
-                user.id, chat_id, poll.message_id or poll.source_message_id, slot_draft(poll, index)
-            )
+            closed, event = picked
             return GroupResult(
                 alert="Event card posted.",
                 card=await self.render(closed),

@@ -77,13 +77,15 @@ class ProService:
             log.warning("payment_unexpected currency=%s amount=%s", currency, amount)
             return "I couldn't match that payment, so I'm refunding it.", True
         chat_id = int(payload[len(PAYLOAD) :])
-        fresh = await self.repo.record_payment(
-            charge_id, chat_id, telegram_id, amount, self.settings.pro_days
-        )
-        if not fresh:
+        if await self.repo.payment_recorded(charge_id):
             return "That payment was already applied. Thank you!", False
+        # Extend first, record second: if anything fails in between, Telegram retries and the
+        # group gets the days again. Recording first could keep the Stars and give nothing.
         until = await self.repo.extend_group_pro(
             chat_id, self.settings.pro_days, self.scheduling.clock()
+        )
+        await self.repo.record_payment(
+            charge_id, chat_id, telegram_id, amount, self.settings.pro_days
         )
         return (
             f"✅ Clubs Pro is active for your group until {until:%a %-d %b %Y}. Thank you!"

@@ -78,7 +78,7 @@ export function GroupEvent() {
 
       {live && (
         <section className="card">
-          <p className="hint">Your schedule (only you see this)</p>
+          <p className="hint">🕒 Am I free? Only you see this.</p>
           <ClashBanner availability={e.availability} />
           <div className="segmented" role="group" aria-label="Your answer">
             {ANSWERS.map(([status, label]) => (

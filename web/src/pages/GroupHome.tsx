@@ -62,14 +62,14 @@ function EventRow({ event }: { event: GroupEventSummary }) {
 
 function PollRow({ poll }: { poll: GroupPoll }) {
   return (
-    <Link className="card link" to={`/poll/${poll.id}/mine`}>
+    <Link className="card link" to={`/poll/${poll.id}`}>
       <h3>🗳 {poll.title}</h3>
       <p className="hint">
         {poll.joined} joined
         {poll.deadline_at ? ` · reply by ${day(poll.deadline_at)}` : ""}
-        {poll.status === "OPEN" ? " · slots suggested" : ""}
+        {poll.status === "OPEN" ? " · times suggested" : ""}
       </p>
-      <p>{poll.joined_by_me ? "Update your times ›" : "Add your free times ›"}</p>
+      <p>{poll.status === "OPEN" ? "Answer ›" : poll.joined_by_me ? "You're in ›" : "Count me in ›"}</p>
     </Link>
   );
 }

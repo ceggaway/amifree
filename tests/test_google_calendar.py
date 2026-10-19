@@ -213,6 +213,22 @@ async def test_adding_an_event_that_exists_updates_it():
     assert calls == ["POST", "PUT"]
 
 
+async def test_the_code_event_is_marked_free_and_never_counted_as_busy():
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "abc123"})
+
+    now = datetime(2026, 10, 12, 9, tzinfo=SG)
+    assert await client(handler).add_code("me@gmail.com", "482913", now) == "abc123"
+    body = sent[0]
+    assert body["summary"] == "AmIFree code 482913" and body["transparency"] == "transparent"
+    assert busy_from_items([body]) == []
+    with pytest.raises(GoogleAccessLost):
+        await client(lambda r: httpx.Response(403)).add_code("me@gmail.com", "1", now)
+
+
 async def test_an_event_the_student_deleted_is_left_deleted():
     google = client(lambda r: httpx.Response(404))
     assert await google.upsert_event("me@gmail.com", event(), existing=True) is False
@@ -261,9 +277,17 @@ class FakeGoogle:
         self.events[event.id] = event
         return True
 
+    async def add_code(self, email, code, now):
+        self.code = code
+        self.calls.append(("code", email))
+        return "code-event"
+
     async def delete_event(self, email, event_id):
         if self.lost:
             raise GoogleAccessLost("lost")
+        if event_id == "code-event":
+            self.code = None
+            return
         self.calls.append(("delete", event_id))
         self.events = {k: v for k, v in self.events.items() if k.replace("-", "") != event_id}
 
@@ -276,6 +300,15 @@ def with_google(service_factory):
         return service, repo, service.google
 
     return make
+
+
+async def connect(service, telegram_id, email, reference, message_id=9):
+    """Send the email, then the code AmIFree put in that calendar. Returns the last reply."""
+    asked = (await service.message(telegram_id, message_id, email, reference))[0]
+    code = getattr(service.google, "code", None)
+    if not code or "6-digit" not in asked.text:
+        return asked
+    return (await service.message(telegram_id, message_id + 100, code, reference))[0]
 
 
 async def add_dinner(service, reference):
@@ -320,10 +353,10 @@ async def test_connecting_adds_current_plans_and_counts_busy_time(with_google, r
     await add_dinner(service, reference)
     google.busy_times = [(reference + timedelta(days=1), reference + timedelta(days=1, hours=2))]
 
-    reply = (await service.message(1, 9, "Me@Gmail.com", reference))[0]
+    reply = await connect(service, 1, "Me@Gmail.com", reference, 9)
 
     assert "Connected to me@gmail.com" in reply.text and "added your 1 current plan" in reply.text
-    assert google.calls == [("upsert", "CCA dinner", False)]
+    assert google.calls == [("code", "me@gmail.com"), ("upsert", "CCA dinner", False)]
     connection = repo.google[repo.users[1].id]
     assert connection.calendar_email == "me@gmail.com" and repo.users[1].google_connected
     (calendar,) = await repo.list_calendars(repo.users[1].id)
@@ -333,7 +366,7 @@ async def test_connecting_adds_current_plans_and_counts_busy_time(with_google, r
 async def test_a_calendar_that_is_not_shared_yet(with_google, reference):
     service, repo, _ = with_google(access=Access.NONE)
     await onboard(service, reference)
-    reply = (await service.message(1, 9, "me@gmail.com", reference))[0]
+    reply = await connect(service, 1, "me@gmail.com", reference, 9)
     assert "can't see that calendar yet" in reply.text and "Show the steps again" in labels(reply)
     assert not repo.google and not repo.users[1].google_connected
 
@@ -348,7 +381,7 @@ async def test_a_calendar_that_is_not_shared_yet(with_google, reference):
 async def test_view_only_permission_asks_for_make_changes(with_google, reference, access, words):
     service, repo, _ = with_google(access=access)
     await onboard(service, reference)
-    reply = (await service.message(1, 9, "me@gmail.com", reference))[0]
+    reply = await connect(service, 1, "me@gmail.com", reference, 9)
     assert words in reply.text and "Make changes" in reply.text
     assert not repo.google
 
@@ -356,14 +389,14 @@ async def test_view_only_permission_asks_for_make_changes(with_google, reference
 async def test_an_email_is_just_a_message_when_google_is_off(service_factory, reference):
     service, repo = service_factory(extraction(kind="unknown"))
     await onboard(service, reference)
-    await service.message(1, 9, "me@gmail.com", reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
     assert not repo.google
 
 
 async def test_new_plans_edits_and_removals_follow_the_student(with_google, reference):
     service, repo, google = with_google(extraction())
     await onboard(service, reference)
-    await service.message(1, 9, "me@gmail.com", reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
     user_id = repo.users[1].id
 
     await add_dinner(service, reference)
@@ -392,11 +425,11 @@ async def test_new_plans_edits_and_removals_follow_the_student(with_google, refe
 async def test_a_tap_updates_google_in_the_background(with_google, reference):
     service, repo, google = with_google(extraction())
     await onboard(service, reference)
-    await service.message(1, 9, "me@gmail.com", reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
     await add_dinner(service, reference)
     service.google_sync_soon(1)
     await service.google_sync.drain()
-    assert google.calls == [("upsert", "CCA dinner", False)]
+    assert google.calls == [("code", "me@gmail.com"), ("upsert", "CCA dinner", False)]
 
 
 async def test_people_who_did_not_connect_cost_nothing(service_factory, reference):
@@ -413,7 +446,7 @@ async def test_the_background_check_catches_changes_made_by_someone_else(with_go
     service, repo, google = with_google(extraction())
     await onboard(service, reference)
     await add_dinner(service, reference)
-    await service.message(1, 9, "me@gmail.com", reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
     google.calls.clear()
     stored = next(iter(repo.events.values()))
     # An organiser moves the plan: the student did nothing, so only the tick can notice.
@@ -427,7 +460,7 @@ async def test_the_background_check_catches_changes_made_by_someone_else(with_go
 async def test_losing_permission_is_shown_and_clears_stale_busy_times(with_google, reference):
     service, repo, google = with_google(extraction())
     await onboard(service, reference)
-    await service.message(1, 9, "me@gmail.com", reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
     user_id = repo.users[1].id
     (calendar,) = await repo.list_calendars(user_id)
     google.busy_times = [(reference, reference + timedelta(hours=1))]
@@ -447,7 +480,7 @@ async def test_losing_permission_is_shown_and_clears_stale_busy_times(with_googl
 async def test_removing_the_google_calendar_disconnects_it(with_google, reference):
     service, repo, google = with_google(extraction())
     await onboard(service, reference)
-    await service.message(1, 9, "me@gmail.com", reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
     status = (await service.command(1, "calendar"))[1]
     assert "Plans you say Going to are added here" in status.text
 
@@ -458,23 +491,68 @@ async def test_removing_the_google_calendar_disconnects_it(with_google, referenc
     await add_dinner(service, reference)
     service.google_sync_soon(1)
     await service.google_sync.drain()
-    assert google.calls == []
+    assert [c for c in google.calls if c[0] != "code"] == []
 
 
 async def test_connecting_a_different_email_replaces_the_old_one(with_google, reference):
     service, repo, _ = with_google()
     await onboard(service, reference)
-    await service.message(1, 9, "me@gmail.com", reference)
-    await service.message(1, 10, "other@gmail.com", reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
+    await connect(service, 1, "other@gmail.com", reference, 10)
     user_id = repo.users[1].id
     assert repo.google[user_id].calendar_email == "other@gmail.com"
     assert len(await repo.list_calendars(user_id)) == 1
 
 
+async def test_connecting_needs_the_code_from_that_calendar(with_google, reference):
+    service, repo, google = with_google()
+    await onboard(service, reference)
+    asked = (await service.message(1, 9, "me@gmail.com", reference))[0]
+    assert "6-digit" in asked.text and google.code and repo.users[1].id not in repo.google
+    # Someone who can't open the calendar can only guess: five wrong tries end it.
+    wrong = "000000" if google.code != "000000" else "111111"
+    for n in range(4):
+        reply = (await service.message(1, 20 + n, wrong, reference))[0]
+        assert "not the code" in reply.text
+    reply = (await service.message(1, 30, wrong, reference))[0]
+    assert "last try" in reply.text and google.code is None  # the code event is removed
+    assert repo.users[1].id not in repo.google
+    # The real owner reads the code in their calendar and sends it back.
+    await service.message(1, 31, "me@gmail.com", reference)
+    done = (await service.message(1, 32, f" {google.code} ", reference))[0]
+    assert "Connected to me@gmail.com" in done.text and repo.users[1].id in repo.google
+    assert google.code is None
+
+
+async def test_a_code_expires_and_cancel_removes_it(with_google, reference):
+    service, repo, google = with_google()
+    await onboard(service, reference)
+    await service.message(1, 9, "me@gmail.com", reference)
+    code = google.code
+    service.clock = lambda: reference + timedelta(minutes=31)
+    late = (await service.message(1, 10, code, reference))[0]
+    assert "expired" in late.text and repo.users[1].id not in repo.google
+    await service.message(1, 11, "me@gmail.com", reference)
+    await service.command(1, "cancel")
+    assert google.code is None and repo.users[1].pending is None
+
+
+async def test_someone_elses_connected_calendar_cannot_be_claimed(with_google, reference):
+    service, repo, google = with_google()
+    await onboard(service, reference)
+    await onboard(service, reference, telegram_id=2)
+    await connect(service, 1, "me@gmail.com", reference, 9)
+    calls = len(google.calls)
+    reply = (await service.message(2, 9, "Me@gmail.com", reference))[0]
+    assert "another AmIFree account" in reply.text
+    assert repo.users[2].id not in repo.google and len(google.calls) == calls
+    assert not await repo.list_calendars(repo.users[2].id)
+
+
 async def test_cards_say_plans_sync_once_connected(with_google, reference):
     service, repo, _ = with_google(extraction())
     await onboard(service, reference)
-    await service.message(1, 9, "me@gmail.com", reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
     added = await add_dinner(service, reference)
     assert "Syncing to your calendar automatically" in added.text
     assert "/calendar puts every plan in your iPhone calendar" not in added.text

@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, refusal } from "../api";
@@ -20,7 +21,7 @@ export function GroupEvent() {
   const [params] = useSearchParams();
   const loaded = useLoad(() => api.groupEvent(id), [id]);
   const [event, setEvent] = useState<GroupEventDetail | null>(null);
-  const [note, setNote] = useState(params.get("posted") ? "✅ Posted in the group." : "");
+  const [note, setNote] = useState(params.get("posted") ? "Posted in the group." : "");
   const [error, setError] = useState("");
   const [clash, setClash] = useState(false);
   const current = event ?? loaded.data;
@@ -61,14 +62,14 @@ export function GroupEvent() {
       <p>
         {day(e.start_at)} · {span(e.start_at, e.end_at)}
       </p>
-      {e.location && <p>📍 {e.location}</p>}
+      {e.location && <p className="icon-label"><Icon name="pin" size={16} />{e.location}</p>}
       {e.notes && <p className="pre hint">{e.notes}</p>}
-      {e.status === "CANCELLED" && <p className="banner clash">❌ This event was cancelled.</p>}
+      {e.status === "CANCELLED" && <p className="banner clash">This event was cancelled.</p>}
       {e.ended && <p className="banner info">This event has ended.</p>}
       {note && (
         <p className="banner ok">
           {note}{" "}
-          {note.startsWith("✅ Posted") && (
+          {note.startsWith("Posted") && (
             <button type="button" className="link-button" onClick={closeApp}>
               Back to the chat
             </button>
@@ -78,7 +79,7 @@ export function GroupEvent() {
 
       {live && (
         <section className="card">
-          <p className="hint">🕒 Am I free? Only you see this.</p>
+          <p className="hint">Am I free? Only you see this.</p>
           <ClashBanner availability={e.availability} />
           <div className="segmented" role="group" aria-label="Your answer">
             {ANSWERS.map(([status, label]) => (
@@ -97,12 +98,12 @@ export function GroupEvent() {
           )}
           {e.recurring && (
             <button type="button" onClick={() => run(() => api.goingToAll(e.id))}>
-              🔁 Going to every session
+              Going to every session
             </button>
           )}
           {e.check_in_open && (
-            <button type="button" className={e.checked_in ? "on" : ""} disabled={e.checked_in} onClick={() => run(() => api.checkIn(e.id), "Checked in ✅ Thanks for coming.")}>
-              {e.checked_in ? "Checked in ✅" : "I'm here"}
+            <button type="button" className={e.checked_in ? "on" : ""} disabled={e.checked_in} onClick={() => run(() => api.checkIn(e.id), "Checked in. Thanks for coming.")}>
+              {e.checked_in ? "Checked in" : "I'm here"}
             </button>
           )}
         </section>
@@ -143,8 +144,8 @@ function Organiser({ event: e, run }: { event: GroupEventDetail; run: Run }) {
       <h2>You're the organiser</h2>
       {live && !editing && (
         <div className="row">
-          <button type="button" onClick={() => setEditing(true)}>✏️ Edit</button>
-          <button type="button" onClick={() => message(() => api.nudge(e.id))}>📣 Nudge</button>
+          <button type="button" onClick={() => setEditing(true)}>Edit</button>
+          <button type="button" onClick={() => message(() => api.nudge(e.id))}>Nudge</button>
           <button
             type="button"
             className="danger"

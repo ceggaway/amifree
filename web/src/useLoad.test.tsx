@@ -1,6 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useLoad } from "./useLoad";
 

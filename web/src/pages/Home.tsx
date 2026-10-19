@@ -28,6 +28,7 @@ export function Home() {
   const clashes = plans.data.plans.filter((p) => p.availability.conflicts.length > 0).length;
   return (
     <>
+      <header className="group-head"><p className="eyebrow">Your workspace</p><h1>A little more organised.</h1><p className="hint">Everything on your calendar, in one place.</p></header>
       <section className="summary">
         <strong>{clashes === 0 ? "No clashes in your upcoming plans" : `${clashes} plan${clashes > 1 ? "s" : ""} with a clash`}</strong>
         <span className="hint">
@@ -75,7 +76,7 @@ function Reminders({ initial }: { initial: boolean }) {
       <h2>Settings</h2>
       <div className="card">
         <Switch
-          label="🔔 Reminders"
+          label="Reminders"
           hint={
             on
               ? "On: the night-before summary, deadline reminders, \"still coming?\" checks and nudges about group plans you haven't answered."

@@ -55,7 +55,7 @@ describe("turnout page", () => {
     expect(await screen.findByText("Training")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "1 year" }));
     await waitFor(() => expect(calls).toContainEqual(["stats", 365]));
-    fireEvent.click(screen.getByRole("button", { name: "📄 Send CSV to my chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send CSV to my chat" }));
     expect(await screen.findByText(/Sent the attendance file/)).toBeTruthy();
     expect(calls).toContainEqual(["export", 365]);
   });
@@ -63,6 +63,6 @@ describe("turnout page", () => {
   it("locks the CSV when Clubs Pro is required", async () => {
     show({ ...stats, by_event: [], pro_required: true });
     expect(await screen.findByText(/part of Clubs Pro/)).toBeTruthy();
-    expect((screen.getByRole("button", { name: "📄 Send CSV to my chat" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Send CSV to my chat" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

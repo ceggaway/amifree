@@ -480,7 +480,7 @@ async def test_losing_permission_is_shown_and_clears_stale_busy_times(with_googl
 async def test_removing_the_google_calendar_disconnects_it(with_google, reference):
     service, repo, google = with_google(extraction())
     await onboard(service, reference)
-    await connect(service, 1, "me@gmail.com", reference, 9)
+    await connect(service, 1, "me@gmail.com", reference)
     status = (await service.command(1, "calendar"))[0]
     assert "Plans you say Going to are added here" in status.text
 

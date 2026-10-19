@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
+import { Icon } from "../components/Icon";
 import { Switch } from "../components/Switch";
 import { haptic } from "../telegram";
-import { day, span } from "../format";
+import { dateNumber, day, month, span } from "../format";
 import type { GroupEventSummary, GroupPoll } from "../types";
 import { useLoad } from "../useLoad";
 
@@ -18,18 +19,22 @@ export function GroupHome() {
   return (
     <>
       <header className="group-head">
-        <p className="hint">Group</p>
+        <p className="eyebrow"><Icon name="users" size={14} /> Group workspace</p>
         <h1>{data.title ?? "This group"}</h1>
+        <p className="hint">Your plans, people and time together.</p>
       </header>
       <div className="actions">
         <Link className="action" to={`/g/${code}/new`}>
-          <span aria-hidden>📅</span> Create an event
+          <Icon name="plus" size={18} /> Create an event
         </Link>
-        <Link className="action" to={`/g/${code}/find`}>
-          <span aria-hidden>🗳</span> Find a time
+        <Link className="action secondary" to={`/g/${code}/find`}>
+          <Icon name="clock" size={18} /> Find a time
         </Link>
       </div>
-      <h2>Coming up</h2>
+      <div className="section-heading">
+        <h2>Coming up</h2>
+        <span className="hint">{data.events.length} {data.events.length === 1 ? "event" : "events"}</span>
+      </div>
       {data.events.length === 0 && <p className="hint">No events yet. Create the first one above.</p>}
       {data.events.map((event) => (
         <EventRow key={event.id} event={event} />
@@ -39,9 +44,13 @@ export function GroupHome() {
         <PollRow key={poll.id} poll={poll} />
       ))}
       <h2>For organisers</h2>
-      <Link className="card link" to={`/g/${code}/stats`}>
-        <h3>📊 Turnout and attendance</h3>
-        <p className="hint">How many came to your events, and the attendance spreadsheet ›</p>
+      <Link className="card link organiser-link" to={`/g/${code}/stats`}>
+        <span className="icon-tile"><Icon name="chart" /></span>
+        <div>
+          <h3>Turnout and attendance</h3>
+          <p className="hint">View event insights and export attendance.</p>
+        </div>
+        <Icon name="arrow" size={18} />
       </Link>
       {data.admin && <Detection code={code} on={data.detection} />}
     </>
@@ -84,20 +93,27 @@ function Detection({ code, on: initial }: { code: string; on: boolean }) {
 function EventRow({ event }: { event: GroupEventSummary }) {
   const { GOING, MAYBE } = event.counts;
   return (
-    <Link className="card link" to={`/e/${event.id}`}>
-      <div className="row between">
-        <h3>{event.title}</h3>
-        {event.my_status && <span className={`chip ${event.my_status.toLowerCase()}`}>{MINE[event.my_status]}</span>}
+    <Link className="card link event-row" to={`/e/${event.id}`}>
+      <div className="date-tile" aria-hidden="true">
+        <span>{month(event.start_at)}</span>
+        <strong>{dateNumber(event.start_at)}</strong>
       </div>
-      <p>
-        {day(event.start_at)} · {span(event.start_at, event.end_at)}
-        {event.location ? ` · ${event.location}` : ""}
-      </p>
-      <p className="hint">
-        {GOING} going{MAYBE ? ` · ${MAYBE} maybe` : ""}
-        {event.recurring ? " · 🔁 repeats" : ""}
-        {event.organiser ? " · you organise this" : ""}
-      </p>
+      <div className="event-content">
+        <div className="row between">
+          <h3>{event.title}</h3>
+          {event.my_status && <span className={`chip ${event.my_status.toLowerCase()}`}>{MINE[event.my_status]}</span>}
+        </div>
+        <p>
+          {day(event.start_at)} · {span(event.start_at, event.end_at)}
+          {event.location ? ` · ${event.location}` : ""}
+        </p>
+        <p className="hint">
+          {GOING} going{MAYBE ? ` · ${MAYBE} maybe` : ""}
+          {event.recurring ? " · repeats" : ""}
+          {event.organiser ? " · you organise this" : ""}
+        </p>
+      </div>
+      <Icon name="arrow" size={16} />
     </Link>
   );
 }
@@ -105,7 +121,7 @@ function EventRow({ event }: { event: GroupEventSummary }) {
 function PollRow({ poll }: { poll: GroupPoll }) {
   return (
     <Link className="card link" to={`/poll/${poll.id}`}>
-      <h3>🗳 {poll.title}</h3>
+      <h3 className="icon-label"><Icon name="clock" size={18} />{poll.title}</h3>
       <p className="hint">
         {poll.joined} joined
         {poll.deadline_at ? ` · reply by ${day(poll.deadline_at)}` : ""}

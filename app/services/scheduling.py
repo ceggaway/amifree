@@ -1453,7 +1453,7 @@ class SchedulingService:
 
     async def calendar_setup(self, user: User, intro: str = "") -> list[Reply]:
         """/calendar: AmIFree → your calendar (feed), then your calendar → AmIFree (busy)."""
-        return [await self.feed_setup(user, intro), await self.personal_calendar_status(user)]
+        return [await self.personal_calendar_status(user, intro)]
 
     async def feed_setup(self, user: User, intro: str = "") -> Reply:
         if not self.settings.app_base_url:
@@ -1498,16 +1498,24 @@ class SchedulingService:
             or "amifree-development-only"
         )
 
-    async def personal_calendar_status(self, user: User) -> Reply:
+    def feed_line(self, user: User) -> str:
+        if user.calendar_feed_token and user.calendar_feed_seen_at:
+            seen = user.calendar_feed_seen_at.astimezone(SG)
+            return f"📤 Plans in your phone's calendar: ✅ on, last synced {seen:%-d %b, %-I:%M%p}"
+        return "📤 Plans in your phone's calendar: not set up"
+
+    async def personal_calendar_status(self, user: User, intro: str = "") -> Reply:
         calendars = await self.repo.list_calendars(user.id)
+        lead = intro + "\n\n" if intro else ""
         if not calendars:
             return Reply(
-                "📥 Let AmIFree see when you're busy\n"
-                "Send me your calendar's private link and its busy times will count when I "
-                "check your plans and /free. Use several calendars? Send each link. I keep "
-                "only start and end times, never titles, places or notes.\n\n"
-                "Not sure where to find it? Pick your calendar and I'll show you step by step.",
-                onboarding.pick_calendar_keyboard(),
+                lead + "📅 Your calendars\n\n"
+                "No calendar connected yet. Connect the one you use and its busy times count "
+                "when I check your plans and /free. I keep only start and end times, never "
+                "titles, places or notes.\n\n"
+                f"{self.feed_line(user)}\n\n"
+                "Which calendar do you use?",
+                onboarding.first_calendar_keyboard(),
             )
         lines = []
         google = (
@@ -1533,10 +1541,11 @@ class SchedulingService:
             else f"That's the most I check ({MAX_CALENDARS}). Remove one to add another."
         )
         return Reply(
-            "📥 Calendars I check for busy times\n"
+            lead
+            + "📅 Your calendars\n\nI check these for busy times:\n"
             + "\n".join(lines)
-            + f"\n\n{more} I refresh them every hour and keep only when you're busy, never "
-            "what your events are.",
+            + f"\n\n{self.feed_line(user)}\n\n{more} I refresh them every hour and keep only "
+            "when you're busy, never what your events are.",
             personal_calendars_keyboard(calendars),
         )
 
@@ -1777,11 +1786,16 @@ class SchedulingService:
         if data == "gcal:start":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            return [self.google_sync.steps()]
+            return self.google_sync.steps()
         if data == "pcal:off":
             return await self.disconnect_calendar(user)
         if data.startswith("pcal:rm:"):
             return await self.remove_calendar(user, data.removeprefix("pcal:rm:"))
+        if data == "cal:feed":
+            return [await self.feed_setup(user)]
+        if data == "cal:home":
+            reply = await self.personal_calendar_status(user)
+            return [Reply(reply.text, reply.keyboard, edit=True)]
         if action == "cal" and len(parts) == 2 and parts[1] in ("reset", "off"):
             return await self.calendar_change(user, parts[1])
         if action == "ics" and len(parts) == 2:

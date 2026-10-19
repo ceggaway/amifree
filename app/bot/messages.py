@@ -21,8 +21,8 @@ only covers what AmIFree knows about.
 
 /usual tue evenings, sat all day tells group polls when you're usually free.
 
-/calendar puts every plan you've added in your iPhone calendar automatically, and lets
-you connect your own calendar so its busy times count too.
+/calendar shows the calendars you've connected and lets you add another (Google, iPhone,
+Outlook) so its busy times count. It can also put your plans in your phone's calendar.
 
 In a group: reply /event to a plan message to post a card with Going / Maybe / Can't,
 a private "Am I free?" check and a headcount. Say "every Tue/Thu until week 13" to make a
@@ -67,6 +67,8 @@ class Reply:
     keyboard: InlineKeyboardMarkup | None = None
     # (filename, content) sent as a Telegram document with text as its caption.
     document: tuple[str, bytes] | None = None
+    # A picture sent with text as its caption (Telegram allows 1024 characters).
+    photo: bytes | None = None
     # Replace the card whose button was tapped instead of sending a new message.
     edit: bool = False
     parse_mode: str | None = None
@@ -265,7 +267,14 @@ async def send_reply(update, reply: Reply):
             if "not modified" in str(exc).lower():
                 return  # tapped twice: the card already shows this state
             # Too old to edit, or deleted: fall through and send it as a new message.
-    if reply.document:
+    if reply.photo:
+        await update.effective_message.reply_photo(
+            reply.photo,
+            caption=reply.text,
+            reply_markup=reply.keyboard,
+            parse_mode=reply.parse_mode,
+        )
+    elif reply.document:
         from telegram import InputFile
 
         filename, content = reply.document

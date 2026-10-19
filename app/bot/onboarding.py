@@ -4,6 +4,7 @@ Every screen edits the same message, so setup never floods the chat (ux-flows.md
 """
 
 import html
+from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -166,6 +167,15 @@ def pick_calendar_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def first_calendar_keyboard() -> InlineKeyboardMarkup:
+    """/calendar with nothing connected yet: which calendar, or plans into a phone's calendar."""
+    from app.bot.keyboards import calendar_home_rows
+
+    return InlineKeyboardMarkup(
+        [*pick_calendar_keyboard().inline_keyboard[:-1], calendar_home_rows()[1]]
+    )
+
+
 GOOGLE_CHOOSE = (
     "📅 Google Calendar\n\n"
     "🔗 Share it with AmIFree (recommended): I add the plans you tap Going on to your "
@@ -186,21 +196,36 @@ def google_choose_keyboard() -> InlineKeyboardMarkup:
 
 def google_share_steps(email: str) -> str:
     return (
-        "🔗 Share your Google Calendar with AmIFree\n\n"
-        "I'll add the plans you tap Going on to your calendar, and update or remove them when "
-        "they change. I only change events I added myself.\n\n"
-        "This needs a computer, or your phone's browser in desktop mode.\n\n"
-        "1. Go to calendar.google.com and sign in.\n"
-        "2. On the left, hover over your calendar, tap ⋮, then Settings and sharing.\n"
-        "3. Under Share with specific people or groups, click Add people and groups.\n"
+        "🔗 <b>Share your Google Calendar with AmIFree</b>\n\n"
+        "This lets me add your Going plans to your calendar. It takes about 1 minute, and you "
+        "can stop any time.\n"
+        "You need a computer, or your phone's browser in desktop mode.\n\n"
+        "<b>Part 1 · Open your calendar settings</b>\n"
+        "1. Go to calendar.google.com.\n"
+        "2. On the left, hover over your calendar's name, tap ⋮, then <b>Settings and sharing</b>.\n\n"
+        "<b>Part 2 · Add AmIFree</b>\n"
+        "3. Find <b>Share with specific people or groups</b> and click <b>Add people and groups</b>.\n"
         f"4. Paste this email (tap it to copy): <code>{html.escape(email)}</code>\n"
-        "5. Choose Make changes (see private events as free/busy). If you don't see that, "
-        "choose Make changes to events.\n"
-        "6. Click Send.\n\n"
-        "Then send me your own Google email, like you@gmail.com. I'll put a code in that"
-        " calendar; send it back to show the calendar is yours.\n\n"
-        "Stop any time: remove AmIFree from Shared with, or tap Remove in /calendar."
+        "5. Open the permission menu and choose <b>Make changes (see private events as "
+        "free/busy)</b>. If you don't see that, choose <b>Make changes to events</b>.\n"
+        "6. Click <b>Send</b>.\n\n"
+        "<b>Part 3 · Tell me your email</b>\n"
+        "7. Send me your own Google email here, like you@gmail.com.\n\n"
+        "I only change events I added myself. To stop, remove AmIFree from Shared with, or tap "
+        "Remove in /calendar."
     )
+
+
+GOOGLE_PHOTO_CAPTION = (
+    "This is how step 6 should look: ① is AmIFree's email, ② is the permission to choose."
+)
+
+
+def google_share_photo() -> bytes | None:
+    try:
+        return (Path(__file__).resolve().parent.parent / "assets" / "google_share.png").read_bytes()
+    except OSError:
+        return None  # the steps still work without the picture
 
 
 def google_steps_keyboard() -> InlineKeyboardMarkup:

@@ -253,7 +253,8 @@ def calendar_settings_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("New link", callback_data="cal:reset"),
                 InlineKeyboardButton("Turn off", callback_data="cal:off"),
-            ]
+            ],
+            [InlineKeyboardButton("« Back to my calendars", callback_data="cal:home")],
         ]
     )
 
@@ -290,8 +291,16 @@ def personal_calendars_keyboard(calendars) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(f"Remove {c.label[:30]}", callback_data=f"pcal:rm:{c.id}")]
         for c in calendars
     ]
-    rows.append([InlineKeyboardButton("How do I add another?", callback_data="setup:calendar")])
+    rows += calendar_home_rows()
     return InlineKeyboardMarkup(rows)
+
+
+def calendar_home_rows():
+    """The two things /calendar always offers: connect a calendar, or send plans to a phone."""
+    return [
+        [InlineKeyboardButton("➕ Add a calendar", callback_data="setup:calendar")],
+        [InlineKeyboardButton("📤 Plans in my calendar app", callback_data="cal:feed")],
+    ]
 
 
 def calendar_keyboard(event: Event, google_url: str) -> InlineKeyboardMarkup:

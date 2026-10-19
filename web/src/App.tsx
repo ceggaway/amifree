@@ -7,6 +7,7 @@ import { FindTime } from "./pages/FindTime";
 import { GroupEvent } from "./pages/GroupEvent";
 import { GroupHome } from "./pages/GroupHome";
 import { NewEvent } from "./pages/NewEvent";
+import { GroupStats } from "./pages/GroupStats";
 import { Poll } from "./pages/Poll";
 import { MyTimes } from "./pages/MyTimes";
 import { Home } from "./pages/Home";
@@ -50,6 +51,7 @@ export function App() {
           <Route path="/g/:code" element={<GroupHome />} />
           <Route path="/g/:code/new" element={<NewEvent />} />
           <Route path="/g/:code/find" element={<FindTime />} />
+          <Route path="/g/:code/stats" element={<GroupStats />} />
           <Route path="/e/:id" element={<GroupEvent />} />
         </Routes>
       </main>

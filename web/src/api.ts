@@ -6,6 +6,7 @@ import type {
   EventForm,
   GroupEventDetail,
   GroupOverview,
+  GroupStats,
   Heatmap,
   Me,
   MyGrid,
@@ -69,6 +70,8 @@ const range = (start: Date, end: Date) =>
 
 export const api = {
   me: () => request<Me>("GET", "/api/me"),
+  setReminders: (on: boolean) =>
+    request<{ reminders_enabled: boolean }>("PATCH", "/api/me", { reminders_enabled: on }),
   plans: () => request<{ plans: Plan[] }>("GET", "/api/plans"),
   calendar: (start: Date, end: Date) =>
     request<{ plans: Plan[]; blocks: Block[] }>("GET", `/api/calendar?${range(start, end)}`),
@@ -94,6 +97,11 @@ export const api = {
 
   // A group, opened from a link in it. The server checks with Telegram that you're in it.
   group: (code: string) => request<GroupOverview>("GET", `/api/groups/${code}`),
+  groupStats: (code: string, days: number) => request<GroupStats>("GET", `/api/groups/${code}/stats?days=${days}`),
+  exportAttendance: (code: string, days: number) =>
+    request<{ message: string }>("POST", `/api/groups/${code}/export`, { days }),
+  setDetection: (code: string, on: boolean) =>
+    request<{ detection: boolean }>("PUT", `/api/groups/${code}/detection`, { on }),
   createEvent: (code: string, form: EventForm) =>
     request<{ id: string }>("POST", `/api/groups/${code}/events`, form),
   createPoll: (code: string, form: PollForm) =>

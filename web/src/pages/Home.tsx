@@ -1,4 +1,7 @@
-import { api } from "../api";
+import { useEffect, useState } from "react";
+import { api, refusal } from "../api";
+import { Switch } from "../components/Switch";
+import { haptic } from "../telegram";
 import { PlanCard } from "../components/PlanCard";
 import { addDays, dayKey } from "../format";
 import { useLoad } from "../useLoad";
@@ -42,6 +45,48 @@ export function Home() {
           ))}
         </section>
       ))}
+      {me.data && <Reminders initial={me.data.reminders_enabled} />}
     </>
+  );
+}
+
+function Reminders({ initial }: { initial: boolean }) {
+  const [on, setOn] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => setOn(initial), [initial]);
+  async function change(next: boolean) {
+    setBusy(true);
+    setError("");
+    setOn(next); // feels instant; put back if the server says no
+    try {
+      setOn((await api.setReminders(next)).reminders_enabled);
+      haptic("success");
+    } catch (err) {
+      setOn(!next);
+      haptic("error");
+      setError(refusal(err).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section>
+      <h2>Settings</h2>
+      <div className="card">
+        <Switch
+          label="🔔 Reminders"
+          hint={
+            on
+              ? "On: the night-before summary, deadline reminders, \"still coming?\" checks and nudges about group plans you haven't answered."
+              : "Off: none of those. Alerts when a plan you saved changes, and reminders you set with /remind, still arrive."
+          }
+          on={on}
+          busy={busy}
+          onChange={change}
+        />
+        {error && <p className="error">{error}</p>}
+      </div>
+    </section>
   );
 }

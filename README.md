@@ -143,6 +143,12 @@ where members answer Yes / Maybe / No and the organiser suggests times, nudges a
 Without the Mini App set up, the cards fall back to the full set of chat buttons. A card made in
 the app is posted in the group like any other.
 
+The group page also has **📊 Turnout and attendance** (turnout for your own events over 30 days,
+4 months or a year, and **Send CSV to my chat**, which sends the attendance file privately, as
+`/export` does), and, for group admins only, a **Spot plans in chat** switch that does what
+`/detect on|off` does, including telling the group. The home page has a **🔔 Reminders** switch,
+the same setting as `/settings` in the bot.
+
 Telegram doesn't allow Mini App buttons in groups, so these are `t.me/<bot>/<app>?startapp=…`
 links. A link names the group, and anyone can change a link, so the server asks Telegram
 (`getChatMember`) whether the person is in that group before it shows or posts anything.

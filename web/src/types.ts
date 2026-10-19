@@ -99,6 +99,19 @@ export type GroupOverview = {
   title: string | null;
   events: GroupEventSummary[];
   polls: GroupPoll[];
+  admin: boolean;
+  detection: boolean;
+};
+
+export type GroupStats = {
+  days: number;
+  held: number;
+  cancelled: number;
+  going: number;
+  came: number;
+  turnout: string;
+  by_event: { title: string; sessions: number; going: number; came: number; turnout: string }[];
+  pro_required: boolean;
 };
 
 export type Person = { id: string; name: string; answer: string | null; present: boolean };

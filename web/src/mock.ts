@@ -15,6 +15,8 @@ const at = (days: number, hour: number) => {
   d.setHours(hour, 0, 0, 0);
   return d.toISOString();
 };
+let detection = false;
+let reminders = true;
 let mockPoll: PollDetail = {
   id: "mock",
   chat: "n100500",
@@ -97,12 +99,24 @@ let rules: Rule[] = [
 export async function mock<T>(method: string, path: string, body?: unknown): Promise<T> {
   const data = (body ?? {}) as Record<string, unknown>;
   let result: unknown;
-  if (path.startsWith("/api/groups/") && method === "GET") {
+  if (path.includes("/stats")) {
+    result = { days: 120, held: 6, cancelled: 1, going: 48, came: 39, turnout: "81%", pro_required: false, by_event: [{ title: "Training", sessions: 5, going: 40, came: 33, turnout: "82%" }, { title: "Welcome tea", sessions: 1, going: 8, came: 6, turnout: "75%" }] };
+  } else if (path.endsWith("/export")) {
+    result = { message: "📬 Sent the attendance file to your chat with AmIFree." };
+  } else if (path.endsWith("/detection")) {
+    detection = Boolean(data.on);
+    result = { detection };
+  } else if (path === "/api/me" && method === "PATCH") {
+    reminders = Boolean(data.reminders_enabled);
+    result = { reminders_enabled: reminders };
+  } else if (path.startsWith("/api/groups/") && method === "GET") {
     result = {
       chat: "n100500",
       title: "CS3216 group",
       events: [{ ...groupEvent, recurring: false }],
       polls: [{ id: "mock", title: "Project meeting", status: "COLLECTING", duration_minutes: 120, joined: 3, joined_by_me: false, deadline_at: at(1, 23), min_joined: 3 }],
+      admin: true,
+      detection,
     };
   } else if (path.startsWith("/api/groups/")) {
     result = { id: path.endsWith("/polls") ? "mock" : groupEvent.id };
@@ -125,7 +139,7 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
     }
     result = groupEvent;
   } else if (path === "/api/me") {
-    result = { telegram_user_id: 1, reminders_enabled: true, nusmods: { connected: false }, calendars: [], outside_calendars_connected: false };
+    result = { telegram_user_id: 1, reminders_enabled: reminders, nusmods: { connected: false }, calendars: [], outside_calendars_connected: false };
   } else if (/^\/api\/polls\/[^/]+(\/(join|vote))?$/.test(path)) {
     if (path.endsWith("/vote")) mockPoll = { ...mockPoll, mine: { ...mockPoll.mine, [String(data.slot)]: data.answer as PollAnswer } };
     result = mockPoll;

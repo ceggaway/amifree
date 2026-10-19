@@ -62,9 +62,9 @@ class GoogleSyncService:
     def steps(self) -> list[Reply]:
         text = onboarding.google_share_steps(self.client.email)
         replies = [Reply(text, onboarding.google_steps_keyboard(), edit=True, parse_mode="HTML")]
-        photo = onboarding.google_share_photo()
-        if photo:
-            replies.append(Reply(onboarding.GOOGLE_PHOTO_CAPTION, photo=photo))
+        photos = onboarding.google_share_photos()
+        if photos:
+            replies.append(Reply(onboarding.GOOGLE_PHOTOS_CAPTION, photos=photos))
         return replies
 
     async def connect(self, user, email: str) -> list[Reply]:

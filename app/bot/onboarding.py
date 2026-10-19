@@ -200,32 +200,44 @@ def google_share_steps(email: str) -> str:
         "This lets me add your Going plans to your calendar. It takes about 1 minute, and you "
         "can stop any time.\n"
         "You need a computer, or your phone's browser in desktop mode.\n\n"
-        "<b>Part 1 · Open your calendar settings</b>\n"
+        "<b>Part 1 · Open your calendar's settings</b>\n"
         "1. Go to calendar.google.com.\n"
-        "2. On the left, hover over your calendar's name, tap ⋮, then <b>Settings and sharing</b>.\n\n"
+        "2. Click the ⚙️ gear at the top right, then <b>Settings</b>.\n"
+        "3. On the left, under <b>Settings for my calendars</b>, click the calendar you want to "
+        "connect.\n\n"
         "<b>Part 2 · Add AmIFree</b>\n"
-        "3. Find <b>Share with specific people or groups</b> and click <b>Add people and groups</b>.\n"
-        f"4. Paste this email (tap it to copy): <code>{html.escape(email)}</code>\n"
-        "5. Open the permission menu and choose <b>Make changes (see private events as "
+        "4. Scroll down to <b>Share with specific people or groups</b> and click "
+        "<b>Add people and groups</b>.\n"
+        f"5. Paste this email (tap it to copy): <code>{html.escape(email)}</code>\n"
+        "6. Open the <b>Permission</b> menu and choose <b>Make changes (see private events as "
         "free/busy)</b>. If you don't see that, choose <b>Make changes to events</b>.\n"
-        "6. Click <b>Send</b>.\n\n"
+        "7. Click <b>Send</b>.\n\n"
         "<b>Part 3 · Tell me your email</b>\n"
-        "7. Send me your own Google email here, like you@gmail.com.\n\n"
+        "8. Send me your own Google email here, like you@gmail.com. I'll put a code in that "
+        "calendar. Send the code back to show the calendar is yours.\n\n"
         "I only change events I added myself. To stop, remove AmIFree from Shared with, or tap "
         "Remove in /calendar."
     )
 
 
-GOOGLE_PHOTO_CAPTION = (
-    "This is how step 6 should look: ① is AmIFree's email, ② is the permission to choose."
+GOOGLE_PHOTOS_CAPTION = "Swipe through the pictures: the red box shows what to click in each step."
+
+GOOGLE_PHOTO_FILES = (
+    "step1_gear.png",
+    "step2_settings.png",
+    "step3_calendar.png",
+    "step4_add.png",
+    "step5_dialog.png",
 )
 
 
-def google_share_photo() -> bytes | None:
+def google_share_photos() -> tuple[bytes, ...]:
+    """The annotated screenshots, in order. Empty if they can't be read: the steps still work."""
+    folder = Path(__file__).resolve().parent.parent / "assets" / "google"
     try:
-        return (Path(__file__).resolve().parent.parent / "assets" / "google_share.png").read_bytes()
+        return tuple((folder / name).read_bytes() for name in GOOGLE_PHOTO_FILES)
     except OSError:
-        return None  # the steps still work without the picture
+        return ()
 
 
 def google_steps_keyboard() -> InlineKeyboardMarkup:

@@ -67,8 +67,8 @@ class Reply:
     keyboard: InlineKeyboardMarkup | None = None
     # (filename, content) sent as a Telegram document with text as its caption.
     document: tuple[str, bytes] | None = None
-    # A picture sent with text as its caption (Telegram allows 1024 characters).
-    photo: bytes | None = None
+    # Pictures sent together as one swipeable album, with text as the caption of the first.
+    photos: tuple[bytes, ...] = ()
     # Replace the card whose button was tapped instead of sending a new message.
     edit: bool = False
     parse_mode: str | None = None
@@ -266,12 +266,14 @@ async def send_reply(update, reply: Reply):
             if "not modified" in str(exc).lower():
                 return  # tapped twice: the card already shows this state
             # Too old to edit, or deleted: fall through and send it as a new message.
-    if reply.photo:
-        await update.effective_message.reply_photo(
-            reply.photo,
-            caption=reply.text,
-            reply_markup=reply.keyboard,
-            parse_mode=reply.parse_mode,
+    if reply.photos:
+        from telegram import InputMediaPhoto
+
+        await update.effective_message.reply_media_group(
+            [
+                InputMediaPhoto(photo, caption=reply.text if i == 0 else None)
+                for i, photo in enumerate(reply.photos)
+            ]
         )
     elif reply.document:
         from telegram import InputFile

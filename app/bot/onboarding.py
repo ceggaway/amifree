@@ -3,20 +3,23 @@
 Every screen edits the same message, so setup never floods the chat (ux-flows.md, /start A).
 """
 
+import html
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 NUSMODS_URL = "https://nusmods.com/timetable"
 
 WELCOME = (
     "👋 <b>Hi! I’m AmIFree, your personal planning assistant.</b>\n\n"
-    "📩 <b>Forward a plan.</b> I’ll check if you’re free and flag any clashes with your schedule.\n"
-    "📌 <b>Keep track of your plans.</b> Save plans and see what’s coming up, all in one place.\n"
+    "📩 <b>Start here: forward me a plan.</b> I’ll check if you’re free and flag any clashes "
+    "with your schedule.\n"
+    "📌 <b>Keep track of your plans.</b> Add plans and deadlines and see what’s coming up, "
+    "all in one place.\n"
     "👥 <b>Find a time together.</b> Add me to a group to find when everyone’s free.\n\n"
-    "📅 <b>Connect your Google or Apple Calendar</b> so I can check your schedule.\n"
-    "📚 <b>Classes missing from your calendar?</b> I’ll show you how to add your NUSMods timetable.\n"
-    "💡 Prefer to skip? You can connect your schedule anytime.\n\n"
-    "🔒 <b>Your privacy matters.</b> I never read your group chats.\n\n"
-    "<b>Choose an option below to get started!</b>"
+    "<b>Optional:</b> connect your schedule so I can check it too.\n"
+    "📅 Your Google or Apple Calendar\n"
+    "📚 Your NUSMods timetable, if classes are missing from your calendar\n\n"
+    "🔒 <b>Your privacy matters.</b> I never read your group chats."
 )
 
 PICK_CALENDAR = (
@@ -26,6 +29,13 @@ PICK_CALENDAR = (
 )
 
 GUIDES = {
+    "export": (
+        "📆 Classes in your own calendar\n\n"
+        "NUSMods can export your timetable to your calendar app itself: open your timetable "
+        "on nusmods.com and look for its Export option next to Share/Sync.\n\n"
+        "AmIFree's calendar sync is for your plans, not your classes, so I don't copy classes "
+        "there. To have me check your classes, paste your NUSMods Share/Sync link instead."
+    ),
     "nusmods": (
         "📚 Your NUSMods link\n\n"
         "1. Open NUSMods (button below) and go to your timetable.\n"
@@ -128,42 +138,84 @@ def nusmods_added(academic_year: str, semester: int) -> str:
     )
 
 
+def _menu(label: str, name: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(label, callback_data=f"menu:{name}")
+
+
 def _button(label: str, screen: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(label, callback_data=f"setup:{screen}")
 
 
 def welcome_keyboard() -> InlineKeyboardMarkup:
+    """Setup is optional, so the four everyday buttons are on the first screen too."""
     return InlineKeyboardMarkup(
         [
             [_button("📚 NUSMods link?", "nusmods"), _button("📅 Calendar link?", "calendar")],
-            [_button("Skip", "skip")],
+            [_menu("📋 My plans", "plans"), _menu("🕒 Am I free?", "free")],
+            [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
         ]
     )
 
 
-def pick_calendar_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
-            [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
-        ]
+def pick_calendar_keyboard(google: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
+        [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
+    ]
+    if google:
+        # Sharing a calendar with AmIFree lets it add plans for the student, not only read.
+        rows.insert(
+            0,
+            [
+                InlineKeyboardButton(
+                    "🔗 Share Google Calendar (adds plans)", callback_data="gcal:start"
+                )
+            ],
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def google_share_steps(email: str) -> str:
+    return (
+        "🔗 Share your Google Calendar with AmIFree\n\n"
+        "I'll add the plans you tap Going on to your calendar, and update or remove them when "
+        "they change. I only change events I added myself.\n\n"
+        "This needs a computer, or your phone's browser in desktop mode.\n\n"
+        "1. Go to calendar.google.com and sign in.\n"
+        "2. On the left, hover over your calendar, tap ⋮, then Settings and sharing.\n"
+        "3. Under Share with specific people or groups, click Add people and groups.\n"
+        f"4. Paste this email (tap it to copy): <code>{html.escape(email)}</code>\n"
+        "5. Choose Make changes (see private events as free/busy). If you don't see that, "
+        "choose Make changes to events.\n"
+        "6. Click Send.\n\n"
+        "Then send me your own Google email, like you@gmail.com, so I know which calendar to use.\n\n"
+        "Stop any time: remove AmIFree from Shared with, or tap Remove in /calendar."
     )
+
+
+def google_steps_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
 
 
 def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     if screen == "nusmods":
         return InlineKeyboardMarkup(
-            [[InlineKeyboardButton("Open NUSMods ↗", url=NUSMODS_URL), _button("« Back", "home")]]
+            [
+                [InlineKeyboardButton("Open NUSMods ↗", url=NUSMODS_URL)],
+                [_button("Classes in my own calendar?", "export"), _button("« Back", "home")],
+            ]
         )
+    if screen == "export":
+        return InlineKeyboardMarkup([[_button("« NUSMods link", "nusmods")]])
     return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
 
 
-def screen(name: str) -> tuple[str, InlineKeyboardMarkup | None] | None:
+def screen(name: str, google: bool = False) -> tuple[str, InlineKeyboardMarkup | None] | None:
     """The text and buttons for one setup screen, or None for an unknown name."""
     if name == "home":
         return WELCOME, welcome_keyboard()
     if name == "calendar":
-        return PICK_CALENDAR, pick_calendar_keyboard()
+        return PICK_CALENDAR, pick_calendar_keyboard(google)
     if name == "skip":
         return SKIPPED, None
     if name in GUIDES:

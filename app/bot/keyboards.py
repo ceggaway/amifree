@@ -210,13 +210,18 @@ def deadline_keyboard(deadline_id: str) -> InlineKeyboardMarkup:
     )
 
 
-def agenda_keyboard(items: list[tuple[str, str, str]]) -> InlineKeyboardMarkup:
-    """One numbered button per agenda item; callback_data is "<kind>:<id>". Rows of six."""
+def agenda_keyboard(
+    items: list[tuple[str, str, str]], page: int = 0, pages: int = 1
+) -> InlineKeyboardMarkup:
+    """One numbered button per agenda item (callback_data "<kind>:<id>"), then Previous/Next."""
     btns = [
         InlineKeyboardButton(label, callback_data=f"{kind}:{item_id}")
         for label, kind, item_id in items
     ]
-    return InlineKeyboardMarkup([btns[i : i + 6] for i in range(0, len(btns), 6)])
+    rows = [btns[i : i + 6] for i in range(0, len(btns), 6)]
+    if pages > 1:
+        rows.extend(page_keyboard(page, pages, "plans").inline_keyboard)
+    return InlineKeyboardMarkup(rows)
 
 
 def remove_block_keyboard(block_id: str) -> InlineKeyboardMarkup:
@@ -246,6 +251,12 @@ def page_keyboard(page: int, pages: int, prefix: str = "events") -> InlineKeyboa
     if page + 1 < pages:
         buttons.append(InlineKeyboardButton("Next", callback_data=f"{prefix}:{page + 1}"))
     return InlineKeyboardMarkup([buttons])
+
+
+def google_help_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Show the steps again", callback_data="gcal:start")]]
+    )
 
 
 def calendar_settings_keyboard() -> InlineKeyboardMarkup:

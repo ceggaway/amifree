@@ -208,7 +208,7 @@ await check('user deletion cascades to all personal data', async () => {
   await q('delete from events');
 });
 await check('migration ledger and durable update claims behave', async () => {
-  assert.equal((await one('select max(version)::int v from schema_migrations')).v,14);
+  assert.equal((await one('select max(version)::int v from schema_migrations')).v,15);
   const claim = async (id, stale = 120) =>
     (await one('select amifree_claim_update($1,$2) claimed',[id,stale])).claimed;
   assert.equal(await claim(5001),true);

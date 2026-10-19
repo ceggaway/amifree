@@ -201,6 +201,13 @@ class Notifier:
             calendars = 0
         if calendars:
             extra["calendars"] = calendars
+        try:
+            google = await self.scheduling.google_sync.sync_due()
+        except Exception as exc:  # Google must never stop reminders going out either
+            log.warning("google_sync_tick_failed error_type=%s", type(exc).__name__)
+            google = 0
+        if google:
+            extra["google"] = google
         result = {"queued": queued} | extra | await self.deliver()
         await self.report_backlog()
         return result

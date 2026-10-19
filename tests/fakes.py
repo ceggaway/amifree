@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from app.models.user import User
+from app.models.user import GoogleConnection, User
 from app.schemas.event import (
     Deadline,
     Event,
@@ -38,6 +38,8 @@ class MemoryRepository:
         self.available = True
         self.calendar_blocks = {}  # calendar id -> [(start, end)]
         self.calendars = {}
+        self.google = {}  # user id -> GoogleConnection
+        self.google_link = {}  # (user id, event id) -> synced version
         self.names = {}  # (chat id, user id) -> (display name, username)
         self.series = {}
         self.checks = {}  # (group event id, user id) -> answer
@@ -300,6 +302,8 @@ class MemoryRepository:
             return False
         del self.calendars[calendar_id]
         self.calendar_blocks.pop(calendar_id, None)
+        if user_id in self.google and self.google[user_id].calendar_id == calendar_id:
+            await self.remove_google_connection(user_id, keep_flag=True)  # on delete cascade
         return True
 
     async def replace_calendar(self, calendar_id, blocks, synced_at):
@@ -327,6 +331,42 @@ class MemoryRepository:
             for a, b in self.calendar_blocks.get(c.id, [])
             if a < end and b > start
         ]
+
+    async def get_google_connection(self, user_id):
+        c = self.google.get(user_id)
+        return c.model_copy() if c else None
+
+    async def save_google_connection(self, user_id, calendar_email, calendar_id):
+        await self.remove_google_connection(user_id, keep_flag=True)
+        self.google[user_id] = GoogleConnection(
+            user_id=user_id, calendar_email=calendar_email, calendar_id=calendar_id
+        )
+        self.user(user_id).google_connected = True
+        return self.google[user_id].model_copy()
+
+    async def remove_google_connection(self, user_id, keep_flag=False):
+        self.google.pop(user_id, None)
+        self.google_link = {k: v for k, v in self.google_link.items() if k[0] != user_id}
+        if not keep_flag:
+            self.user(user_id).google_connected = False
+
+    async def google_connections_due(self, before, limit=20):
+        due = [c for c in self.google.values() if not c.synced_at or c.synced_at < before]
+        return [c.model_copy() for c in due[:limit]]
+
+    async def mark_google_synced(self, user_id, when, error=None):
+        if user_id in self.google:
+            self.google[user_id].synced_at = when
+            self.google[user_id].error = error[:300] if error else None
+
+    async def google_links(self, user_id):
+        return {k[1]: v for k, v in self.google_link.items() if k[0] == user_id}
+
+    async def save_google_link(self, user_id, event_id, version):
+        self.google_link[(user_id, event_id)] = version
+
+    async def delete_google_link(self, user_id, event_id):
+        self.google_link.pop((user_id, event_id), None)
 
     async def set_feed_token(self, user_id, token):
         user = self.user(user_id)
@@ -850,6 +890,8 @@ class MemoryRepository:
         return True
 
     async def delete_user(self, user_id):
+        self.google.pop(user_id, None)
+        self.google_link = {k: v for k, v in self.google_link.items() if k[0] != user_id}
         self.reminders = {k: r for k, r in self.reminders.items() if r.user_id != user_id}
         self.deadlines = {k: d for k, d in self.deadlines.items() if d.user_id != user_id}
         self.users = {t: u for t, u in self.users.items() if u.id != user_id}

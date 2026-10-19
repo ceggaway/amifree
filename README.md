@@ -180,6 +180,16 @@ Sending the bot a private iCal link (Google "Secret address in iCal format", an 
 - **Only Google, iCloud and Outlook hosts over HTTPS are fetched**, every redirect is re-checked, and responses are capped at 5 MB, so a pasted link can't make the server reach anything else.
 - **Refreshed hourly** by the jobs tick, each calendar on its own. A revoked link clears only that calendar's busy times and `/calendar` marks it ⚠️; a temporary failure keeps the last good copy and retries an hour later. Migration `007` moves a link connected under `006` into the new `personal_calendars` table.
 
+### Share a Google calendar (adds plans for you)
+
+A link can only be read. If `GOOGLE_SERVICE_ACCOUNT` is set, `/calendar` also offers **Share Google Calendar**: the student shares their calendar with AmIFree's own Google account, chooses *Make changes*, and sends their Google email. Then plans they tap Going on are added to that calendar, updated when the plan changes, and removed when they remove or skip it. It also reads their busy times (like a link, refreshed hourly). Migration `015` adds `google_connections` and `google_event_links`.
+
+- **No Google sign-in screen for students**, so Google's app review and the 100-user limit for apps in testing don't apply. Students stop it any time by removing AmIFree from *Shared with*, or **Remove** in `/calendar`.
+- **One sync routine, not a hook per action.** `google_sync.py` compares the student's Going and Saved plans with what was last written (`google_event_links`) and fixes the difference. It runs in the background after the student's own messages and taps, and every 10 minutes from the jobs tick (to catch a group organiser moving the time, and to retry failures).
+- **Only AmIFree's own events are touched.** Each plan gets a fixed Google event id derived from its id, so it can never be added twice, and events are marked so they aren't counted as busy time.
+- **Busy times only are read**: the request asks Google for start and end times, never titles, places or notes.
+- **Setup:** create a Google Cloud project, turn on the Google Calendar API, create a service account and a JSON key, then set `GOOGLE_SERVICE_ACCOUNT` to that JSON (or its base64). Students share with the service account's email, shown in the bot's steps.
+
 ### Reminders and alerts
 
 Night-before summaries, change alerts and nudges are rows in `notification_logs`, sent by an idempotent job. The server runs that job every minute while it is awake. Hosts that sleep or restart will miss runs, so also schedule it externally: set `JOBS_SECRET` and call it every ten minutes, for example from Render Cron:

@@ -97,6 +97,7 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
                     update.effective_user.id, message.message_id, text, reference
                 )
         await send(update, replies)
+        service.google_sync_soon(update.effective_user.id)
     except ImportError as exc:
         await send(update, [Reply(str(exc))])
     except Exception as exc:

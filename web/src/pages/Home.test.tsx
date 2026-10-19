@@ -95,7 +95,7 @@ describe("Reminders setting", () => {
         <Home />
       </MemoryRouter>,
     );
-    const toggle = await screen.findByRole("switch", { name: "🔔 Reminders" });
+    const toggle = await screen.findByRole("switch", { name: "Reminders" });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));

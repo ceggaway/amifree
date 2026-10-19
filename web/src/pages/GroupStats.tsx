@@ -41,7 +41,7 @@ export function GroupStats() {
       <p>
         <Link to={`/g/${code}`}>‹ All events</Link>
       </p>
-      <h1>📊 Turnout</h1>
+      <h1>Turnout</h1>
       <p className="hint">Events you organised in this group.</p>
       <div className="segmented" role="group" aria-label="Period">
         {PERIODS.map(([value, label]) => (
@@ -92,7 +92,7 @@ export function GroupStats() {
       <h2>Attendance file</h2>
       <p className="hint">A spreadsheet of everyone who answered: RSVP, still coming?, and whether they came.</p>
       <button type="button" className="on big" disabled={sending || data?.pro_required} onClick={send}>
-        📄 Send CSV to my chat
+        Send CSV to my chat
       </button>
       {note && <p className="banner ok">{note}</p>}
       {problem && <p className="banner clash">{problem}</p>}

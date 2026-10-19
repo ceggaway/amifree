@@ -1,5 +1,6 @@
+import { Icon } from "./components/Icon";
 import { useEffect } from "react";
-import { HashRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { HashRouter, Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { mockMode } from "./api";
 import { Blocks } from "./pages/Blocks";
 import { Calendar } from "./pages/Calendar";
@@ -40,6 +41,13 @@ export function App() {
     <HashRouter>
       {mockMode && <div className="banner info">Development mock data. Open from Telegram for your real plans.</div>}
       <StartRoute />
+      <header className="app-header">
+        <Link to="/" className="brand">
+          <span className="brand-mark"><Icon name="calendar" size={19} /></span>
+          AmIFree
+          <span className="brand-caption">Make time together</span>
+        </Link>
+      </header>
       <main>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -55,11 +63,11 @@ export function App() {
           <Route path="/e/:id" element={<GroupEvent />} />
         </Routes>
       </main>
-      <nav>
-        <NavLink to="/" end>Home</NavLink>
-        <NavLink to="/week">Week</NavLink>
-        <NavLink to="/plans">Plans</NavLink>
-        <NavLink to="/busy">Busy</NavLink>
+      <nav aria-label="Main navigation">
+        <NavLink to="/" end><Icon name="home" size={19} /><span>Home</span></NavLink>
+        <NavLink to="/week"><Icon name="calendar" size={19} /><span>Week</span></NavLink>
+        <NavLink to="/plans"><Icon name="plans" size={19} /><span>Plans</span></NavLink>
+        <NavLink to="/busy"><Icon name="block" size={19} /><span>Busy</span></NavLink>
       </nav>
     </HashRouter>
   );

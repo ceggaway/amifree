@@ -37,7 +37,7 @@ afterEach(cleanup);
 describe("group page", () => {
   it("links to turnout for everyone, and hides detection from non-admins", async () => {
     show(base);
-    expect(await screen.findByText("📊 Turnout and attendance")).toBeTruthy();
+    expect(await screen.findByText("Turnout and attendance")).toBeTruthy();
     expect(screen.queryByRole("switch")).toBeNull();
   });
 

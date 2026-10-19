@@ -868,7 +868,7 @@ class SchedulingService:
         try:
             calendar_link = find_link(text, self.settings.app_base_url)
         except CalendarLinkError as exc:
-            return [Reply(str(exc))]
+            return [Reply(str(exc), onboarding.link_help_keyboard())]
         if calendar_link:
             return await self.connect_calendar(user, calendar_link)
         if self.google_sync.enabled and GOOGLE_EMAIL.fullmatch(text.strip()):
@@ -880,10 +880,15 @@ class SchedulingService:
                 return [Reply(SLOW_DOWN)]
             result = await self.importer.import_link(text.strip(), reference)
             await self.repo.import_timetable(user.id, result)
-            return [Reply(onboarding.nusmods_added(result.academic_year, result.semester))]
+            return [
+                Reply(
+                    onboarding.nusmods_added(result.academic_year, result.semester),
+                    onboarding.try_it_keyboard(),
+                )
+            ]
         if CALENDAR_URL.fullmatch(text.strip()):
             # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
-            return [Reply(onboarding.NOT_A_SCHEDULE_LINK)]
+            return [Reply(onboarding.NOT_A_SCHEDULE_LINK, onboarding.link_help_keyboard())]
         pending = user.pending
         if pending and pending["stage"] == "gcal_code":
             if re.fullmatch(r"\s*\d{4,8}\s*", text):
@@ -1582,7 +1587,10 @@ class SchedulingService:
             ]
         total = len(calendars) + 1
         if total == 1:
-            return [Reply(onboarding.calendar_added(calendar.label, len(data.busy)))]
+            keyboard = (
+                onboarding.try_it_keyboard() if data.busy else onboarding.link_help_keyboard()
+            )
+            return [Reply(onboarding.calendar_added(calendar.label, len(data.busy)), keyboard)]
         return [Reply(onboarding.another_calendar_added(calendar.label, total))]
 
     async def remove_calendar(self, user: User, calendar_id: str) -> list[Reply]:

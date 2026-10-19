@@ -488,7 +488,13 @@ def validate_extraction(
     )
     start_raw = extraction.start_time_text
     # "7-9pm", "6.30 to 8pm", "730-9pm": the start borrows the end's am/pm.
-    shared_suffix = bool(start_raw and re.fullmatch(r"\d{1,2}(?:\.?\d{2})?", start_raw.strip()))
+    shared_suffix = bool(
+        start_raw
+        and re.fullmatch(r"\d{1,2}(?:[:.]?\d{2})?", start_raw.strip())
+        # "07:00" and "00:30" are 24-hour; "7:30" is not.
+        and 1 <= int(re.match(r"\d{1,2}", start_raw.strip())[0]) <= 12
+        and not re.match(r"0\d[:.]", start_raw.strip())
+    )
     start_time = (
         resolve_time(
             start_raw, end_meridiem_match[1] if shared_suffix and end_meridiem_match else None

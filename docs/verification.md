@@ -1,5 +1,24 @@
 # Verification report
 
+## UI and release audit: 19 October 2026
+
+Audited the Mini App redesign against `origin/main` at `9e6cea9`, including the latest calendar changes. Consolidated duplicate styling, strengthened status/link contrast, preserved mobile safe-area spacing, and prevented mobile form zoom. Replaced decorative emoji with SVG icons or plain labels. Updated React Router, Vite, Vitest, and the React plugin to patched releases; the frontend requires Node.js 22.12+ (22.x), 24.x, or 26+.
+
+Fixed a stale Google Calendar removal test: it now completes the existing ownership-code verification before checking disconnection. Production calendar behaviour was unchanged.
+
+| Check | Result |
+| --- | --- |
+| Python syntax, lint, formatting, dependency consistency | Pass |
+| Backend HTTP smoke test | Pass |
+| Python tests | 679 passed; 92% statement coverage |
+| PostgreSQL schema and migrations | 28 checks passed |
+| Frontend tests | 45 passed |
+| TypeScript and production build | Pass |
+| npm dependency audit, including development tools | Zero known vulnerabilities |
+| Browser layout audit | Production bundle: all 11 routes at 320px, 390px and 1280px, plus create-event/find-time navigation; no horizontal overflow or runtime errors (simulated API responses) |
+
+The automated development-server preview encountered a React refresh preamble startup error; the production bundle passed the browser audit and does not contain the refresh runtime. Production bundles contain no development mock fixtures. These checks use simulated services and browser mock data; they do not verify hosted Supabase, real Telegram flows, or a live deployment. No migration was added by this release. The locally configured bot has no menu website or webhook URL, and GitHub has no deployment records, so a hosted release cannot be confirmed from this environment.
+
 ## Audit fixes: 13 October 2026
 
 Local checks only, on `main` plus uncommitted changes, using Python 3.12.1 and Node.js 24.8.0. **Not run against live Telegram, OpenAI or a hosted Supabase project**, and migrations `005`–`008` have not been applied to any hosted database. CI (`.github/workflows/ci.yml`) is added but has not yet run on GitHub.

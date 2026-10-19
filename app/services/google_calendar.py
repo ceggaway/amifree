@@ -210,6 +210,23 @@ class GoogleCalendar:
         log.warning("google_calendar_unexpected status=%s", response.status_code)
         return GoogleCalendarError("Google Calendar had a problem just now.")
 
+    @staticmethod
+    def _refused(response: httpx.Response, what: str) -> None:
+        """Log why Google said no (no calendar data in it), so the owner can fix the setup."""
+        try:
+            err = response.json().get("error", {})
+            reason = (err.get("errors") or [{}])[0].get("reason", "")
+            message = str(err.get("message", ""))[:200]
+        except ValueError:
+            reason = message = ""
+        log.warning(
+            "google_refused what=%s status=%s reason=%s message=%s",
+            what,
+            response.status_code,
+            reason,
+            message,
+        )
+
     # ---- what the student gave us ----
 
     async def probe(self, calendar_email: str) -> Access:
@@ -221,6 +238,7 @@ class GoogleCalendar:
                 "POST", "/users/me/calendarList", json={"id": calendar_email}
             )
         if response.status_code in (403, 404):
+            self._refused(response, "probe")
             return Access.NONE
         if response.status_code != 200:
             raise self._unexpected(response)

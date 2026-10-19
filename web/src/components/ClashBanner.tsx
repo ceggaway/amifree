@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { span } from "../format";
 import type { Availability } from "../types";
 
@@ -8,13 +9,13 @@ export function ClashBanner({ availability }: { availability: Availability }) {
     <div className="banner-stack">
       {conflicts.length > 0 ? (
         <div className="banner clash">
-          ⚠️ Clashes with {conflicts[0].title} ({span(conflicts[0].start_at, conflicts[0].end_at)})
+          <Icon name="warning" size={16} /> Clashes with {conflicts[0].title} ({span(conflicts[0].start_at, conflicts[0].end_at)})
           {conflicts.length > 1 ? ` and ${conflicts.length - 1} more` : ""}
         </div>
       ) : busy_day ? (
-        <div className="banner info">ℹ️ Busy day: {day_count} other plans, no clashes</div>
+        <div className="banner info"><Icon name="info" size={16} /> Busy day: {day_count} other plans, no clashes</div>
       ) : (
-        <div className="banner ok">✅ No clashes found</div>
+        <div className="banner ok"><Icon name="check" size={16} /> No clashes found</div>
       )}
       {possible.length > 0 && (
         <div className="banner info">

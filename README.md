@@ -122,6 +122,8 @@ Members must have opened a private chat with the bot at least once before it can
 
 ### Mini App
 
+Use Node.js 22.12+ (22.x), 24.x, or 26+ for the frontend build and tests. CI uses Node.js 22.
+
 ```bash
 cd web
 npm ci

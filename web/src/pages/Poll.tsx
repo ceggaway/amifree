@@ -69,7 +69,7 @@ export function Poll() {
       <p>
         <Link to={`/g/${p.chat}`}>‹ All events</Link>
       </p>
-      <h1>🗳 {p.title}</h1>
+      <h1>{p.title}</h1>
       <p className="hint">
         {Number.isInteger(hours * 2) ? `${hours}h` : `${p.duration_minutes} min`}
         {p.deadline_at && p.status !== "CLOSED" ? ` · reply by ${day(p.deadline_at)}` : ""}
@@ -90,11 +90,11 @@ export function Poll() {
             <p className="banner ok">You're in.</p>
           ) : (
             <button type="button" className="on big" disabled={busy} onClick={() => run(() => api.joinPoll(p.id))}>
-              ✋ Count me in
+              Count me in
             </button>
           )}
           <p>
-            <Link to={`/poll/${p.id}/mine`}>✍️ Set my free times by hand</Link>
+            <Link to={`/poll/${p.id}/mine`}>Set my free times by hand</Link>
           </p>
         </section>
       )}
@@ -108,7 +108,7 @@ export function Poll() {
               </h3>
             </div>
             <p className="hint">
-              ✅ {slot.yes} can make it{slot.maybe ? ` · 🤔 ${slot.maybe} maybe` : ""} · {slot.free} of {slot.of} have no
+              {slot.yes} can make it{slot.maybe ? ` · ${slot.maybe} maybe` : ""} · {slot.free} of {slot.of} have no
               known clash
             </p>
             <div className="segmented" role="group" aria-label={`Time ${index + 1}`}>
@@ -130,7 +130,7 @@ export function Poll() {
             </div>
             {p.organiser && (
               <button type="button" disabled={busy} onClick={() => pick(index)}>
-                📌 Pick this time
+                Pick this time
               </button>
             )}
           </section>
@@ -146,7 +146,7 @@ export function Poll() {
               </button>
             )}
             <button type="button" disabled={busy} onClick={() => run(() => api.nudgePoll(p.id))}>
-              📣 Nudge
+              Nudge
             </button>
           </div>
           {p.status === "OPEN" && <p className="hint">Pick a time above to post it as an event card.</p>}

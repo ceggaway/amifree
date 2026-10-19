@@ -79,12 +79,12 @@ describe("poll page", () => {
     fireEvent.click(second.querySelector("button:nth-child(2)")!);
     await waitFor(() => expect(calls).toEqual([["vote", 1, "MAYBE"]]));
     expect(second.querySelector("button:nth-child(2)")!.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.queryByText("📌 Pick this time")).toBeNull();
+    expect(screen.queryByText("Pick this time")).toBeNull();
   });
 
   it("lets a member count themselves in while times are being collected", async () => {
     show({ ...base, status: "COLLECTING", slots: [], joined: 2 });
-    fireEvent.click(await screen.findByRole("button", { name: "✋ Count me in" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Count me in" }));
     expect(await screen.findByText("You're in.")).toBeTruthy();
     expect(calls).toEqual([["join"]]);
   });
@@ -92,7 +92,7 @@ describe("poll page", () => {
   it("lets the organiser pick a time, which opens the posted event", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     show({ ...base, organiser: true });
-    const picks = await screen.findAllByRole("button", { name: "📌 Pick this time" });
+    const picks = await screen.findAllByRole("button", { name: "Pick this time" });
     fireEvent.click(picks[2]);
     expect(await screen.findByText("Event page")).toBeTruthy();
     expect(calls).toEqual([["pick", 2]]);

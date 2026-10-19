@@ -158,8 +158,16 @@ def split_command(text: str) -> tuple[str, str]:
 
 async def send_private(bot, telegram_id: int, reply: Reply):
     """A direct message to one person. Raises Forbidden/BadRequest when they never opened the bot."""
-    if reply.photo:
-        await bot.send_photo(telegram_id, reply.photo, caption=reply.text)
+    if reply.photos:
+        from telegram import InputMediaPhoto
+
+        await bot.send_media_group(
+            telegram_id,
+            [
+                InputMediaPhoto(p, caption=reply.text if i == 0 else None)
+                for i, p in enumerate(reply.photos)
+            ],
+        )
     elif reply.document:
         from telegram import InputFile
 

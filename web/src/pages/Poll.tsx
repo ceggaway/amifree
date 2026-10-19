@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
 import { day, span } from "../format";
-import { haptic } from "../telegram";
+import { confirm, haptic } from "../telegram";
 import type { PollAnswer, PollDetail } from "../types";
 import { useLoad } from "../useLoad";
 import { Heatmap } from "./Heatmap";
@@ -50,7 +50,7 @@ export function Poll() {
   }
 
   async function pick(slot: number) {
-    if (!window.confirm("Post this time as the event? The poll closes for everyone.")) return;
+    if (!(await confirm("Post this time as the event? The poll closes for everyone."))) return;
     setBusy(true);
     try {
       const { event_id } = await api.pick(p!.id, slot);

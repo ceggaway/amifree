@@ -4,7 +4,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, refusal } from "../api";
 import { ClashBanner } from "../components/ClashBanner";
 import { day, span, time, toInput, fromInput } from "../format";
-import { closeApp, haptic } from "../telegram";
+import { closeApp, confirm, haptic } from "../telegram";
 import type { Answer, GroupEventDetail } from "../types";
 import { useLoad } from "../useLoad";
 import { NotInGroup } from "./GroupHome";
@@ -149,8 +149,8 @@ function Organiser({ event: e, run }: { event: GroupEventDetail; run: Run }) {
           <button
             type="button"
             className="danger"
-            onClick={() =>
-              window.confirm("Cancel this event for everyone?") &&
+            onClick={async () =>
+              (await confirm("Cancel this event for everyone?")) &&
               run(async () => {
                 const done = await api.cancelEvent(e.id, e.version);
                 if (done.series_followup) setFollowup("stop");

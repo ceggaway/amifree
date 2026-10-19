@@ -6,6 +6,8 @@ type WebApp = {
   expand: () => void;
   close?: () => void;
   HapticFeedback?: { notificationOccurred: (kind: "success" | "error" | "warning") => void };
+  showConfirm?: (message: string, callback: (ok: boolean) => void) => void;
+  isVersionAtLeast?: (version: string) => boolean;
 };
 
 declare global {
@@ -42,4 +44,19 @@ export function haptic(kind: "success" | "error" | "warning") {
 /** Back to the chat, e.g. after posting a card there. Does nothing in a plain browser. */
 export function closeApp() {
   window.Telegram?.WebApp?.close?.();
+}
+
+/** "Are you sure?" with Telegram's own dialog. Some Telegram apps (Mac and some desktop
+ * versions) block the browser's window.confirm, which would make the button do nothing;
+ * a plain browser and older Telegram versions still get window.confirm. */
+export function confirm(message: string): Promise<boolean> {
+  const app = window.Telegram?.WebApp;
+  if (app?.showConfirm && app.isVersionAtLeast?.("6.2")) {
+    try {
+      return new Promise((resolve) => app.showConfirm!(message, (ok) => resolve(Boolean(ok))));
+    } catch {
+      // Fall through to the browser's dialog.
+    }
+  }
+  return Promise.resolve(window.confirm(message));
 }

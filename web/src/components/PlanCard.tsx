@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError, api } from "../api";
 import { day, fromInput, span, toInput } from "../format";
+import { confirm } from "../telegram";
 import type { Plan, Status } from "../types";
 import { ClashBanner } from "./ClashBanner";
 
@@ -33,7 +34,7 @@ export function PlanCard({ plan, onChange, compact }: { plan: Plan; onChange?: (
       const detail = e instanceof ApiError ? (e.detail as { reason?: string } | string) : null;
       if (typeof detail === "object" && detail?.reason === "clash") {
         // Same rule as the bot's "Going anyway": a clash must be acknowledged.
-        if (window.confirm("This clashes with another commitment. Go anyway?")) {
+        if (await confirm("This clashes with another commitment. Go anyway?")) {
           await patch({ ...body, force: true });
         }
       } else if (typeof detail === "object" && detail?.reason === "stale") {
@@ -91,7 +92,7 @@ export function PlanCard({ plan, onChange, compact }: { plan: Plan; onChange?: (
             <button
               type="button"
               className="danger"
-              onClick={() => window.confirm("Cancel this plan?") && patch({ cancel: true })}
+              onClick={async () => (await confirm("Cancel this plan?")) && patch({ cancel: true })}
             >
               Cancel plan
             </button>

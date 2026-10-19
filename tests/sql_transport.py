@@ -105,6 +105,8 @@ TABLES = {
     "pro_payments",
     "weekly_availability",
     "deadlines",
+    "google_connections",
+    "google_event_links",
 }
 COLUMNS = {
     "version",
@@ -189,6 +191,10 @@ COLUMNS = {
     "refunded_at",
     "start_min",
     "end_min",
+    "google_connected",
+    "calendar_email",
+    "connected_at",
+    "synced_version",
 }
 
 

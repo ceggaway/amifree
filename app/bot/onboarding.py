@@ -3,6 +3,8 @@
 Every screen edits the same message, so setup never floods the chat (ux-flows.md, /start A).
 """
 
+import html
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 NUSMODS_URL = "https://nusmods.com/timetable"
@@ -155,13 +157,44 @@ def welcome_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def pick_calendar_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
-            [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
-        ]
+def pick_calendar_keyboard(google: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
+        [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
+    ]
+    if google:
+        # Sharing a calendar with AmIFree lets it add plans for the student, not only read.
+        rows.insert(
+            0,
+            [
+                InlineKeyboardButton(
+                    "🔗 Share Google Calendar (adds plans)", callback_data="gcal:start"
+                )
+            ],
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def google_share_steps(email: str) -> str:
+    return (
+        "🔗 Share your Google Calendar with AmIFree\n\n"
+        "I'll add the plans you tap Going on to your calendar, and update or remove them when "
+        "they change. I only change events I added myself.\n\n"
+        "This needs a computer, or your phone's browser in desktop mode.\n\n"
+        "1. Go to calendar.google.com and sign in.\n"
+        "2. On the left, hover over your calendar, tap ⋮, then Settings and sharing.\n"
+        "3. Under Share with specific people or groups, click Add people and groups.\n"
+        f"4. Paste this email (tap it to copy): <code>{html.escape(email)}</code>\n"
+        "5. Choose Make changes (see private events as free/busy). If you don't see that, "
+        "choose Make changes to events.\n"
+        "6. Click Send.\n\n"
+        "Then send me your own Google email, like you@gmail.com, so I know which calendar to use.\n\n"
+        "Stop any time: remove AmIFree from Shared with, or tap Remove in /calendar."
     )
+
+
+def google_steps_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
 
 
 def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
@@ -177,12 +210,12 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
 
 
-def screen(name: str) -> tuple[str, InlineKeyboardMarkup | None] | None:
+def screen(name: str, google: bool = False) -> tuple[str, InlineKeyboardMarkup | None] | None:
     """The text and buttons for one setup screen, or None for an unknown name."""
     if name == "home":
         return WELCOME, welcome_keyboard()
     if name == "calendar":
-        return PICK_CALENDAR, pick_calendar_keyboard()
+        return PICK_CALENDAR, pick_calendar_keyboard(google)
     if name == "skip":
         return SKIPPED, None
     if name in GUIDES:

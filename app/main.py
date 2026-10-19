@@ -23,6 +23,7 @@ from app.bot.handlers import register_handlers
 from app.config import Settings
 from app.db.supabase import SupabaseRepository
 from app.services.event_extractor import EventExtractor
+from app.services.google_calendar import GoogleCalendar, load_key
 from app.services.image_reader import ImageReader
 from app.services.nusmods import NUSModsImporter
 from app.services.personal_calendar import CalendarReader
@@ -120,6 +121,11 @@ def create_app(
                 NUSModsImporter(http, settings.nusmods_academic_year),
                 settings,
                 calendar_reader=CalendarReader(http),
+                google=(
+                    GoogleCalendar(http, key)
+                    if (key := load_key(settings.google_service_account.get_secret_value()))
+                    else None
+                ),
                 image_reader=(
                     ImageReader(ai, settings.openai_vision_model or settings.openai_model)
                     if settings.read_pictures

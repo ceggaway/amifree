@@ -226,6 +226,12 @@ def page_keyboard(page: int, pages: int, prefix: str = "events") -> InlineKeyboa
     return InlineKeyboardMarkup([buttons])
 
 
+def google_help_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Show the steps again", callback_data="gcal:start")]]
+    )
+
+
 def calendar_settings_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

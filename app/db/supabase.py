@@ -7,7 +7,7 @@ from datetime import UTC, datetime, time, timedelta
 from supabase import AsyncClient
 
 from app.models.timetable import BlockRule, BusyBlock
-from app.models.user import PersonalCalendar, User
+from app.models.user import GoogleConnection, PersonalCalendar, User
 from app.schemas.event import (
     SG,
     Deadline,
@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -53,7 +53,7 @@ class SupabaseRepository:
         # Check everything the current code needs (tables, columns and the calendar function),
         # not merely that the host responds. A missing migration fails here, by name, in the log.
         required = {
-            "users": "id,calendar_feed_token,calendar_feed_seen_at",
+            "users": "id,calendar_feed_token,calendar_feed_seen_at,google_connected",
             "timetable_blocks": "id",
             "events": "id",
             "event_extractions": "id",
@@ -74,6 +74,8 @@ class SupabaseRepository:
             "weekly_availability": "user_id,weekday,start_min,end_min",
             "personal_calendars": "id,user_id,url_hash,label,synced_at,checked_at,error",
             "calendar_busy_blocks": "id,user_id,calendar_id,start_at,end_at",
+            "google_connections": "user_id,calendar_email,calendar_id,synced_at,error",
+            "google_event_links": "user_id,event_id,synced_version",
             "schema_migrations": "version,name",
             "processed_updates": "update_id,status,claimed_at",
         }
@@ -708,6 +710,88 @@ class SupabaseRepository:
             .execute()
         ).data
         return [PersonalCalendar.model_validate(r) for r in rows]
+
+    # ---- Google Calendar sharing ----
+
+    async def get_google_connection(self, user_id: str) -> GoogleConnection | None:
+        rows = (
+            await self.client.table("google_connections")
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        ).data
+        return GoogleConnection.model_validate(rows[0]) if rows else None
+
+    async def save_google_connection(
+        self, user_id: str, calendar_email: str, calendar_id: str
+    ) -> GoogleConnection:
+        """Connect, or reconnect to a different calendar. Reconnecting forgets which plans
+        were already added, so the new calendar gets them all."""
+        await self.client.table("google_connections").delete().eq("user_id", user_id).execute()
+        row = (
+            await self.client.table("google_connections")
+            .insert(
+                {"user_id": user_id, "calendar_email": calendar_email, "calendar_id": calendar_id}
+            )
+            .execute()
+        ).data[0]
+        await self.set_user_flags(user_id, google_connected=True)
+        return GoogleConnection.model_validate(row)
+
+    async def remove_google_connection(self, user_id: str):
+        await self.client.table("google_connections").delete().eq("user_id", user_id).execute()
+        await self.set_user_flags(user_id, google_connected=False)
+
+    async def google_connections_due(
+        self, before: datetime, limit: int = 20
+    ) -> list[GoogleConnection]:
+        cutoff = before.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = (
+            await self.client.table("google_connections")
+            .select("*")
+            .or_(f"synced_at.is.null,synced_at.lt.{cutoff}")
+            .order("synced_at", desc=False, nullsfirst=True)
+            .limit(limit)
+            .execute()
+        ).data
+        return [GoogleConnection.model_validate(r) for r in rows]
+
+    async def mark_google_synced(self, user_id: str, when: datetime, error: str | None = None):
+        await (
+            self.client.table("google_connections")
+            .update({"synced_at": when.isoformat(), "error": error[:300] if error else None})
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+    async def google_links(self, user_id: str) -> dict[str, int]:
+        rows = (
+            await self.client.table("google_event_links")
+            .select("event_id,synced_version")
+            .eq("user_id", user_id)
+            .execute()
+        ).data
+        return {r["event_id"]: r["synced_version"] for r in rows}
+
+    async def save_google_link(self, user_id: str, event_id: str, version: int):
+        await (
+            self.client.table("google_event_links")
+            .upsert(
+                {"user_id": user_id, "event_id": event_id, "synced_version": version},
+                on_conflict="user_id,event_id",
+            )
+            .execute()
+        )
+
+    async def delete_google_link(self, user_id: str, event_id: str):
+        await (
+            self.client.table("google_event_links")
+            .delete()
+            .eq("user_id", user_id)
+            .eq("event_id", event_id)
+            .execute()
+        )
 
     async def set_feed_token(self, user_id: str, token: str | None):
         # A new (or no) link always resets "seen": the old subscription no longer works.

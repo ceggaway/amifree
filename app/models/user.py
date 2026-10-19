@@ -17,6 +17,7 @@ class User(BaseModel):
     dm_blocked: bool = False
     calendar_feed_token: str | None = None
     calendar_feed_seen_at: datetime | None = None
+    google_connected: bool = False
 
 
 class PersonalCalendar(BaseModel):
@@ -35,3 +36,14 @@ class PersonalCalendar(BaseModel):
     def busy_title(self) -> str:
         """What a clash with this calendar is called: "CCA calendar", "iPhone calendar"."""
         return self.label if self.label.lower().endswith("calendar") else f"{self.label} calendar"
+
+
+class GoogleConnection(BaseModel):
+    """A calendar the user shared with AmIFree's Google account, so plans can be added to it."""
+
+    user_id: str
+    calendar_email: str
+    calendar_id: str | None = None
+    connected_at: datetime | None = None
+    synced_at: datetime | None = None
+    error: str | None = None

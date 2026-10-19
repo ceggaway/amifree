@@ -46,7 +46,7 @@ async def test_sdk_queries_are_scoped_and_rpcs_match_schema(reference):
             assert body["p_user_id"] == uid
             return httpx.Response(200, json=[event])
         if path == "schema_migrations":
-            return httpx.Response(200, json=[{"version": 14}])
+            return httpx.Response(200, json=[{"version": 15}])
         if path == "events":
             if request.url.params.get("select") == "id":
                 assert request.url.params.get("limit") == "1"

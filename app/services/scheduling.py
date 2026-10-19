@@ -71,6 +71,9 @@ from app.services.detection import DetectionService
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
 from app.services.free_time import free_gaps, parse_free, weekend
+from app.services.google_calendar import EMAIL as GOOGLE_EMAIL
+from app.services.google_calendar import GCAL_PREFIX
+from app.services.google_sync import GoogleSyncService
 from app.services.group_events import GroupEventService
 from app.services.image_reader import PictureError
 from app.services.personal_calendar import (
@@ -164,13 +167,17 @@ BLOCK_TIME = re.compile(
 
 
 def synced(user: User) -> bool:
-    return bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+    return bool(user.google_connected or (user.calendar_feed_token and user.calendar_feed_seen_at))
 
 
 def decided_card(event: Event, availability, note: str, user: User) -> Reply:
     """The tapped card, updated in place: same verdict and details, new status and buttons."""
     card = event_card(event, availability, synced(user))
-    if event.status in (Status.SAVED, Status.GOING) and not user.calendar_feed_token:
+    if (
+        event.status in (Status.SAVED, Status.GOING)
+        and not user.calendar_feed_token
+        and not user.google_connected
+    ):
         note += "\nTip: /calendar puts every plan in your iPhone calendar automatically."
     return Reply(f"{card.text}\n{note}", card.keyboard, edit=True)
 
@@ -198,6 +205,7 @@ class SchedulingService:
         clock: Callable[[], datetime] | None = None,
         calendar_reader=None,
         image_reader=None,
+        google=None,
     ):
         self.repo, self.extractor, self.importer, self.settings = (
             repository,
@@ -210,6 +218,10 @@ class SchedulingService:
         self.calendar_reader = calendar_reader
         # Reads the text in forwarded pictures; None leaves pictures to their captions.
         self.image_reader = image_reader
+        # AmIFree's own Google account, for students who share a calendar with it; None
+        # where no key is set (the feature is then hidden).
+        self.google = google
+        self.google_sync = GoogleSyncService(self)
         self.groups = GroupEventService(self)
         self.polls = PollService(self)
         # Set by the bot layer: re-renders a group card after its headcount changes.
@@ -845,6 +857,10 @@ class SchedulingService:
             return [Reply(str(exc))]
         if calendar_link:
             return await self.connect_calendar(user, calendar_link)
+        if self.google_sync.enabled and GOOGLE_EMAIL.fullmatch(text.strip()):
+            if not self.calendar_limit.allow(user.id):
+                return [Reply(SLOW_DOWN)]
+            return await self.google_sync.connect(user, text)
         if "nusmods.com" in text.lower() and text.strip().startswith(("http://", "https://")):
             if not self.calendar_limit.allow(user.id):
                 return [Reply(SLOW_DOWN)]
@@ -1472,9 +1488,14 @@ class SchedulingService:
                 "check your plans and /free. Use several calendars? Send each link. I keep "
                 "only start and end times, never titles, places or notes.\n\n"
                 "Not sure where to find it? Pick your calendar and I'll show you step by step.",
-                onboarding.pick_calendar_keyboard(),
+                onboarding.pick_calendar_keyboard(self.google_sync.enabled),
             )
         lines = []
+        google = (
+            await self.repo.get_google_connection(user.id)
+            if self.google_sync.enabled and user.google_connected
+            else None
+        )
         for c in calendars:
             if c.error:
                 lines.append(f"• {c.label}: ⚠️ {c.error}")
@@ -1484,6 +1505,8 @@ class SchedulingService:
                 )
             else:
                 lines.append(f"• {c.label} · connecting")
+            if google and c.id == google.calendar_id:
+                lines[-1] += "\n   ✍️ Plans you say Going to are added here"
         room = MAX_CALENDARS - len(calendars)
         more = (
             f"Paste another calendar's link to add it ({room} more allowed)."
@@ -1540,21 +1563,33 @@ class SchedulingService:
         except ValueError:
             return [Reply("That button isn't valid. Use /calendar.")]
         calendars = {c.id: c for c in await self.repo.list_calendars(user.id)}
+        google = await self.repo.get_google_connection(user.id) if user.google_connected else None
+        was_google = bool(google and google.calendar_id == calendar_id)
         if calendar_id not in calendars or not await self.repo.remove_calendar(
             user.id, calendar_id
         ):
             return [Reply("That calendar is already removed. Use /calendar to see what's left.")]
+        if was_google:
+            await self.repo.set_user_flags(user.id, google_connected=False)
+            user = user.model_copy(update={"google_connected": False})
         await self.safe_action(user.id, "personal_calendar_disconnected")
         status = await self.personal_calendar_status(user)
         removed = (
             f"Removed {calendars[calendar_id].label}. I've deleted its link and every busy time I "
             "read from it."
         )
+        if was_google:
+            removed += (
+                " Events I already added stay in your calendar; delete them there if you like, "
+                "and remove AmIFree from Shared with so I can't see it."
+            )
         return [Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True)]
 
     async def disconnect_calendar(self, user: User) -> list[Reply]:
         for c in await self.repo.list_calendars(user.id):
             await self.repo.remove_calendar(user.id, c.id)
+        if user.google_connected:
+            await self.repo.set_user_flags(user.id, google_connected=False)
         await self.safe_action(user.id, "personal_calendar_disconnected")
         return [
             Reply(
@@ -1563,9 +1598,12 @@ class SchedulingService:
             )
         ]
 
+    def google_sync_soon(self, telegram_id: int):
+        self.google_sync.sync_soon(telegram_id)
+
     async def refresh_calendars(self, limit: int = 20) -> int:
         """Background refresh, run by the jobs tick. Returns how many calendars were checked."""
-        if self.calendar_reader is None:
+        if self.calendar_reader is None and not self.google_sync.enabled:
             return 0
         now = self.clock()
         due = await self.repo.calendars_due(now - CALENDAR_REFRESH, limit)
@@ -1577,6 +1615,11 @@ class SchedulingService:
                 await self.repo.calendar_error(
                     calendar.id, "Please send me this calendar's link again.", now
                 )
+                continue
+            if link.startswith(GCAL_PREFIX):
+                await self.google_sync.refresh_busy(calendar, link.removeprefix(GCAL_PREFIX), now)
+                continue
+            if self.calendar_reader is None:
                 continue
             try:
                 data = await self.calendar_reader.read(link, now)
@@ -1690,7 +1733,7 @@ class SchedulingService:
         if data in MENU_COMMANDS:
             return await self.command(telegram_id, MENU_COMMANDS[data])
         if data.startswith("setup:"):
-            found = onboarding.screen(data.removeprefix("setup:"))
+            found = onboarding.screen(data.removeprefix("setup:"), google=self.google_sync.enabled)
             if found is None:
                 return [Reply("That button isn't valid. Send /start.")]
             text, keyboard = found
@@ -1710,6 +1753,10 @@ class SchedulingService:
                 await self.repo.set_pending(user.id, None)
             reply = await self.free_days(user, days)
             return [Reply(reply.text, edit=True)]
+        if data == "gcal:start":
+            if not self.google_sync.enabled:
+                return [Reply("Google sharing isn't available right now.")]
+            return [self.google_sync.steps()]
         if data == "pcal:off":
             return await self.disconnect_calendar(user)
         if data.startswith("pcal:rm:"):

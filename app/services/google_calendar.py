@@ -243,6 +243,7 @@ class GoogleCalendar:
         if response.status_code != 200:
             raise self._unexpected(response)
         role = response.json().get("accessRole", "")
+        log.warning("google_probe status=%s role=%s", response.status_code, role)
         if role in ("writer", "owner"):
             return Access.WRITE
         if role == "reader":

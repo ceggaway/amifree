@@ -287,19 +287,23 @@ def labels(reply):
     return [b.text for row in reply.keyboard.inline_keyboard for b in row]
 
 
-async def test_the_share_button_only_appears_when_google_is_set_up(service_factory, reference):
+async def test_google_is_one_button_and_the_choice_comes_after(service_factory, reference):
     service, _ = service_factory()
     await onboard(service, reference)
-    assert "🔗 Share Google Calendar (adds plans)" not in labels(
-        (await service.command(1, "calendar"))[1]
-    )
-    service.google = FakeGoogle()
-    assert "🔗 Share Google Calendar (adds plans)" in labels(
-        (await service.command(1, "calendar"))[1]
-    )
-    # And in the "how do I add another" screen.
     pick = (await service.callback(1, "setup:calendar"))[0]
-    assert "🔗 Share Google Calendar (adds plans)" in labels(pick)
+    assert labels(pick) == ["🍎 iPhone / iCloud", "📅 Google", "📧 Outlook", "« Back"]
+    # Without the bot's Google account there is only the link.
+    link_only = (await service.callback(1, "setup:google"))[0]
+    assert "gcal:start" not in str(link_only.keyboard)
+    service.google = FakeGoogle()
+    choice = (await service.callback(1, "setup:google"))[0]
+    assert labels(choice) == [
+        "🔗 Share it (adds plans)",
+        "📋 Paste a link (read only)",
+        "« Other calendars",
+    ]
+    link = (await service.callback(1, "setup:googlelink"))[0]
+    assert "Secret address" in link.text or "link" in link.text.lower()
 
 
 async def test_the_steps_show_the_bots_google_email(with_google, reference):

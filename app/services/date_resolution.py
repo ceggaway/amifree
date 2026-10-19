@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import date, datetime, time, timedelta
 
@@ -227,14 +228,23 @@ _RANGE = re.compile(
 )
 
 
-def time_ranges(text: str) -> set[str]:
+def time_ranges(text: str) -> set:
     """Distinct written time ranges such as 7-9pm, 11am-2pm, 1400 – 1500, 19:00 - 22:00."""
     found = set()
     for m in _RANGE.finditer(text):
         a, a_suffix, b, b_suffix = m.groups()
         clock = a_suffix or b_suffix or ":" in a + b or (len(a) >= 3 and len(b) >= 3)
         if clock:
-            found.add(re.sub(r"\s+", "", m[0].casefold()))
+            # The same hours written two ways ("7-9pm", "7:00 PM – 9:00 PM": a caption and the
+            # poster's own text) are one range. Fall back to the written form if unreadable.
+            try:
+                key = (
+                    resolve_time(a + (a_suffix or b_suffix or "")),
+                    resolve_time(b + (b_suffix or a_suffix or "")),
+                )
+            except Clarification:
+                key = re.sub(r"\s+", "", m[0].casefold())
+            found.add(key)
     return found
 
 
@@ -313,7 +323,10 @@ def fill_answer(previous: Extraction, asked: str, reply: str, reference: datetim
 
 def single_event_guard(text: str) -> None:
     """A fresh message with two different time ranges is almost always two events."""
-    if len(time_ranges(text)) >= 2:
+    found = time_ranges(text)
+    if len(found) >= 2:
+        # Only the matched times are logged, never the message.
+        logging.getLogger(__name__).warning("single_event_guard ranges=%s", sorted(map(str, found)))
         raise Clarification(
             "That message has more than one event. Send me the one you want to save, "
             "for example: Bake sale Wed 11am-2pm."

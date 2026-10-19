@@ -1495,7 +1495,7 @@ class SchedulingService:
                 "check your plans and /free. Use several calendars? Send each link. I keep "
                 "only start and end times, never titles, places or notes.\n\n"
                 "Not sure where to find it? Pick your calendar and I'll show you step by step.",
-                onboarding.pick_calendar_keyboard(self.google_sync.enabled),
+                onboarding.pick_calendar_keyboard(),
             )
         lines = []
         google = (

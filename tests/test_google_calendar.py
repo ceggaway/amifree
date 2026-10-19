@@ -147,6 +147,7 @@ async def test_a_refused_key_is_a_google_error_not_a_crash():
     [
         ("owner", Access.WRITE),
         ("writer", Access.WRITE),
+        ("writerWithoutPrivateAccess", Access.WRITE),
         ("reader", Access.READ),
         ("freeBusyReader", Access.BUSY_ONLY),
     ],

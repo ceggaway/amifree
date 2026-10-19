@@ -221,11 +221,13 @@ async def test_organiser_tools_in_the_app(hub, reference):
     ).json()["id"]
     url = f"/api/group-events/{event_id}"
     await client.post(f"{url}/rsvp", headers=bearer(2), json={"status": "GOING", "force": True})
-    await client.post(f"{url}/rsvp", headers=bearer(3), json={"status": "MAYBE"})
+    maybe = await client.post(f"{url}/rsvp", headers=bearer(3), json={"status": "MAYBE"})
+    assert maybe.status_code == 422  # Maybe is gone: Going or Can't
+    await client.post(f"{url}/rsvp", headers=bearer(3), json={"status": "DECLINED"})
     seen = (await client.get(url, headers=bearer(1))).json()
-    assert seen["organiser"] is True
+    assert seen["organiser"] is True and seen["counts"] == {"GOING": 1, "DECLINED": 1}
     people = seen["manage"]["people"]
-    assert [p["answer"] for p in people] == ["GOING", "MAYBE"]
+    assert [p["answer"] for p in people] == ["GOING", "DECLINED"]
     # Members are refused the organiser's actions.
     version = seen["version"]
     for method, path, body in (
@@ -315,11 +317,19 @@ async def test_running_a_poll_from_its_page(hub, reference):
     assert suggested.status_code == 200
     opened = (await client.get(page, headers=bearer(1))).json()
     assert opened["status"] == "OPEN" and len(opened["slots"]) == 3 and opened["organiser"]
-    # Members answer Yes, Maybe or No per time; the page shows counts and their own answers.
-    voted = await client.post(
-        f"{page}/vote", headers=bearer(2), json={"slot": 0, "answer": "MAYBE"}
-    )
-    assert voted.json()["mine"] == {"0": "MAYBE"} and voted.json()["slots"][0]["maybe"] == 1
+    # One vote each: voting for another time moves it, repeating a vote changes nothing.
+    vote = f"{page}/vote"
+    first = await client.post(vote, headers=bearer(2), json={"slot": 0, "answer": "FREE"})
+    assert first.json()["mine"]["0"] == "FREE" and first.json()["slots"][0]["yes"] == 1
+    for _ in range(3):
+        again = await client.post(vote, headers=bearer(2), json={"slot": 0, "answer": "FREE"})
+    assert [s["yes"] for s in again.json()["slots"]] == [1, 0, 0]
+    moved = await client.post(vote, headers=bearer(2), json={"slot": 2, "answer": "FREE"})
+    assert [s["yes"] for s in moved.json()["slots"]] == [0, 0, 1]
+    back = await client.post(vote, headers=bearer(2), json={"slot": 2, "answer": "BUSY"})
+    assert [s["yes"] for s in back.json()["slots"]] == [0, 0, 0]
+    maybe = await client.post(vote, headers=bearer(2), json={"slot": 0, "answer": "MAYBE"})
+    assert maybe.status_code == 422
     bad = await client.post(f"{page}/vote", headers=bearer(2), json={"slot": 5, "answer": "FREE"})
     assert bad.status_code == 422
     assert (await client.post(f"{page}/nudge", headers=bearer(1))).status_code == 200
@@ -352,7 +362,7 @@ async def test_group_commands_open_the_app(service_factory):
         )
         card = transport.sent[-1]
         labels = [b["text"] for row in markup(card)["inline_keyboard"] for b in row]
-        assert labels == ["Going", "Maybe", "Can't", "📱 Details"]
+        assert labels == ["Going", "Can't", "📱 Details"]
 
 
 async def test_without_the_app_set_up_commands_work_as_before(service_factory):

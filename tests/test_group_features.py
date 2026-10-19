@@ -40,7 +40,7 @@ async def test_whos_going_lists_only_going_names(service_factory):
     async with bot:
         await press(bot, taps["Going"], 2, 8001, first_name="Wei Ling", username="weiling")
         await press(bot, taps["Going"], 3, 8002, first_name="Jun")
-        await press(bot, taps["Maybe"], 4, 8003, first_name="Priya")
+        await press(bot, taps["Can't"], 4, 8003, first_name="Priya")
         await press(bot, taps["Can't"], 5, 8004, first_name="Daniel")
         await press(bot, taps["Who's going?"], 6, 8005)
     text = alerts(transport)[-1]["text"]
@@ -121,7 +121,7 @@ async def test_still_coming_check_and_organiser_summary(service_factory):
     start = repo.group_events[event.id].start_at
     async with bot:
         for n, (member, label) in enumerate(
-            {2: "Going", 3: "Going", 4: "Going", 5: "Going", 6: "Maybe", 7: "Can't"}.items()
+            {2: "Going", 3: "Going", 4: "Going", 5: "Going", 6: "Can't", 7: "Can't"}.items()
         ):
             await press(bot, taps[label], member, 8600 + n)
         await press(bot, taps["Status"], 2, 8610)
@@ -153,7 +153,7 @@ async def test_still_coming_check_and_organiser_summary(service_factory):
     async with bot:
         await press(bot, taps["Status"], 1, 8620)
     assert alerts(transport)[-1]["text"] == (
-        "Going 3 · Maybe 1 · Can't 2\n1 confirmed · 1 unsure · 1 dropped · 1 no reply"
+        "Going 3 · Can't 3\n1 confirmed · 1 unsure · 1 dropped · 1 no reply"
     )
     assert (await service.callback(9, data["Still coming"]))[0].text.startswith("That check isn't")
     linked = {e.user_id: e.status for e in repo.events.values() if e.group_event_id == event.id}
@@ -161,7 +161,7 @@ async def test_still_coming_check_and_organiser_summary(service_factory):
     assert linked[four] == Status.DECLINED
     # The shared card follows the drop.
     edits = [p for name, p in transport.calls if name == "editMessageText"]
-    assert "Going 3 · Maybe 1 · Can't 2" in edits[-1]["text"]
+    assert "Going 3 · Can't 3" in edits[-1]["text"]
 
 
 async def test_still_coming_skips_people_who_changed_their_mind(service_factory):
@@ -174,7 +174,7 @@ async def test_still_coming_skips_people_who_changed_their_mind(service_factory)
         service.clock = lambda: start - timedelta(hours=26)
         queued = await service.groups.enqueue_confirmations(service.clock())
         assert queued == 2
-        await press(bot, taps["Maybe"], 3, 8702)  # changed their mind before it was sent
+        await press(bot, taps["Can't"], 3, 8702)  # changed their mind before it was sent
     result = await service.notifier.deliver()
     assert result["sent"] == 1 and [t for t, _ in outbox.sent] == [2]
     # After the event has started a late tap does nothing.

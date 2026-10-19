@@ -130,7 +130,7 @@ label { display: flex; flex-direction: column; font-size: 12px; font-weight: 550
 label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
 .stack { display: flex; flex-direction: column; margin-top: 8px; gap: 14px; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.segmented { display: grid; grid-template-columns: repeat(3, 1fr); margin: 8px 0; gap: 3px; background: var(--muted); padding: 4px; border-radius: 8px; }
+.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin: 8px 0; gap: 3px; background: var(--muted); padding: 4px; border-radius: 8px; }
 .segmented button { border-color: transparent; background: transparent; }
 .banner { font-size: 12px; padding: 9px 12px; background: var(--muted); border-radius: 6px; }
 .banner .icon { margin-right: 4px; }

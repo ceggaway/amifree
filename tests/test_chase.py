@@ -67,7 +67,7 @@ async def test_nudges_respect_opt_out_and_late_answers(service_factory):
             Update.de_json(group_tap(taps["Nudge"], 1, update_id=9200), bot.bot)
         )
         await bot.process_update(
-            Update.de_json(group_tap(taps["Maybe"], 4, update_id=9201), bot.bot)
+            Update.de_json(group_tap(taps["Can't"], 4, update_id=9201), bot.bot)
         )
     result = await service.notifier.deliver()
     assert result["sent"] == 1 and [telegram_id for telegram_id, _ in outbox.sent] == [5]
@@ -127,6 +127,6 @@ async def test_poll_nudges_non_voters(service_factory, reference):
     assert len(outbox.sent) == 1 and outbox.sent[0][0] == 3
     assert (
         "choosing a time for sync" in outbox.sent[0][1]
-        and "times you can make" in outbox.sent[0][1]
+        and "time that works best" in outbox.sent[0][1]
     )
     assert not repo.events

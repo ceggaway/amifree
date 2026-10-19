@@ -91,7 +91,7 @@ function Detection({ code, on: initial }: { code: string; on: boolean }) {
 }
 
 function EventRow({ event }: { event: GroupEventSummary }) {
-  const { GOING, MAYBE } = event.counts;
+  const { GOING } = event.counts;
   return (
     <Link className="card link event-row" to={`/e/${event.id}`}>
       <div className="date-tile" aria-hidden="true">
@@ -108,7 +108,7 @@ function EventRow({ event }: { event: GroupEventSummary }) {
           {event.location ? ` · ${event.location}` : ""}
         </p>
         <p className="hint">
-          {GOING} going{MAYBE ? ` · ${MAYBE} maybe` : ""}
+          {GOING} going
           {event.recurring ? " · repeats" : ""}
           {event.organiser ? " · you organise this" : ""}
         </p>

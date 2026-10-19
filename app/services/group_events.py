@@ -38,13 +38,13 @@ log = logging.getLogger(__name__)
 EXAMPLE = "/event Dinner Fri 7–9pm at Vivo"
 USAGE = f"Reply /event to a message with the plan, or send {EXAMPLE}."
 GONE = "This card is no longer available."
+NO_MAYBE = "Maybe isn't an option any more. Tap Going or Can't."
 ENDED = "This event has ended."
 CHECK_IN_OPENS = timedelta(minutes=30)
 EXPORT_DAYS = 120
 FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 RSVP = {
     "go": (Status.GOING, "You're Going."),
-    "maybe": (Status.MAYBE, "Marked Maybe."),
     "no": (Status.DECLINED, "Marked Can't make it."),
     "save": (Status.SAVED, "Saved to your /plans."),
 }
@@ -766,6 +766,8 @@ class GroupEventService:
         event = await self.repo.get_group_event(event_id) if event_id else None
         user = await self.repo.ensure_user(telegram_id)
         members = await self.repo.group_member_ids(event.chat_id) if event else []
+        if event and user.id in members and parts[1] == "maybe":
+            return [Reply(NO_MAYBE)]
         if not event or user.id not in members or parts[1] not in RSVP:
             return [Reply("That card isn't available to you.")]
         result = await self.callback(telegram_id, event.chat_id, data)
@@ -832,6 +834,9 @@ class GroupEventService:
             return GroupResult(alert=private_verdict(availability))
         if action == "goall":
             return await self.going_to_all(user, event)
+        if action == "maybe":
+            # Cards posted before Maybe was removed still carry the button.
+            return GroupResult(alert=NO_MAYBE, card=await self.render(event))
         if action not in RSVP:
             return GroupResult(alert="That action isn't available.")
         status, text = RSVP[action]
@@ -858,10 +863,7 @@ class GroupEventService:
 
     async def status_text(self, event: GroupEvent) -> str:
         counts = await self.repo.group_counts(event.id)
-        line = (
-            f"Going {counts.get('GOING', 0)} · Maybe {counts.get('MAYBE', 0)}"
-            f" · Can't {counts.get('DECLINED', 0)}"
-        )
+        line = f"Going {counts.get('GOING', 0)} · Can't {counts.get('DECLINED', 0)}"
         now = self.scheduling.clock()
         if event.start_at - now > timedelta(hours=30):
             return line + "\nThe still-coming check goes out the day before."

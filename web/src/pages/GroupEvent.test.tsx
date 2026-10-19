@@ -44,7 +44,7 @@ const base: GroupEventDetail = {
   version: 1,
   ended: false,
   recurring: false,
-  counts: { GOING: 0, MAYBE: 0, DECLINED: 0 },
+  counts: { GOING: 0, DECLINED: 0 },
   my_status: null,
   availability: { ...free, conflicts: [] , possible: [] },
   going: [],

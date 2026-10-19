@@ -59,7 +59,7 @@ async def test_fill_mine_respects_the_members_own_grid(service_factory):
         poll.id, member.id, [morning.isoformat(), (morning + STEP).isoformat()]
     )
     result = await PollService(service).callback(2, CHAT, f"p:fill:{poll.id}")
-    assert "1 Free · 2 Busy" in result.alert
+    assert "Voted for time 1" in result.alert
     assert repo.poll_votes[(poll.id, member.id, 0)] == "FREE"
     assert repo.poll_votes[(poll.id, member.id, 1)] == "BUSY"
 
@@ -72,7 +72,7 @@ async def test_fill_mine_respects_usual_times(service_factory):
     await repo.poll_join(poll.id, member.id)
     await repo.replace_usual(member.id, [(0, 18 * 60, 22 * 60)])  # only free Monday evenings
     result = await PollService(service).callback(2, CHAT, f"p:fill:{poll.id}")
-    assert "1 Busy · 2 Free" in result.alert
+    assert "Voted for time 2" in result.alert
 
 
 async def test_stopping_a_series_leaves_sessions_already_held(service_factory, reference):

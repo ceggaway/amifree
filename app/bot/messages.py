@@ -24,7 +24,7 @@ only covers what AmIFree knows about.
 /calendar shows the calendars you've connected and lets you add another (Google, iPhone,
 Outlook) so its busy times count. It can also put your plans in your phone's calendar.
 
-In a group: reply /event to a plan message to post a card with Going / Maybe / Can't,
+In a group: reply /event to a plan message to post a card with Going / Can't,
 a private "Am I free?" check and a headcount. Say "every Tue/Thu until week 13" to make a
 recurring event. /whosfree <what> suggests times from the schedules of members who opt in.
 Organisers also get /stats and /export (Clubs Pro). A group admin can switch on /detect.
@@ -177,7 +177,7 @@ def private_verdict(availability: Availability, prefix: str = "") -> str:
 GROUP_HELP = """👋 AmIFree in this group
 
 /event Dinner Fri 7-9pm at Vivo: post an event card (or reply /event to a plan message)
-   Everyone taps Going / Maybe / Can't, and can check privately whether they're free.
+   Everyone taps Going or Can't, and can check privately whether they're free.
    "every Tue/Thu until week 13" makes a recurring event.
 /whosfree project meeting 2h next week: find a time; members tap the times that work
 /attendance, /stats, /export: turnout for your events (sent to you privately)
@@ -214,8 +214,7 @@ def group_card(
         "📅 "
         + details(event)
         + series
-        + f"\n\nGoing {counts.get('GOING', 0)} · Maybe {counts.get('MAYBE', 0)}"
-        + f" · Can't {counts.get('DECLINED', 0)}"
+        + f"\n\nGoing {counts.get('GOING', 0)} · Can't {counts.get('DECLINED', 0)}"
         + tip
     )
     return Reply(body, group_keyboard(event, app_url))

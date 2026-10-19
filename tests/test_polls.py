@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 
 from telegram import Update
@@ -126,30 +127,52 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
         taps = buttons(opened["reply_markup"])
         assert all(len(data.encode()) <= 64 for data in taps.values())
         assert list(taps)[:3] == ["✅ 1", "✅ 2", "✅ 3"] and "Fill mine" not in taps
-        # Cards posted before the redesign still have Fill mine and ✅/🤔/❌: they keep working.
+
+        def votes():
+            return [int(n) for n in re.findall(r"✅ (\d+) votes?", last_card(transport)["text"])]
+
+        # Cards posted before one-vote polls still have Fill mine and ✅/🤔/❌: they keep
+        # working, and still give each person one vote.
         fill, vote = f"p:fill:{poll.id}", f"p:v:{poll.id}:0"
         await bot.process_update(Update.de_json(group_tap(fill, 3, update_id=8201), bot.bot))
         filled = alerts(transport)[-1]
-        assert filled["text"].startswith("Filled from your schedule: 1 Maybe · 2 Free · 3 Free")
-        assert filled["show_alert"] and len(filled["text"]) <= 200
+        assert filled["text"].startswith("Voted for time 1") and filled["show_alert"]
+        assert len(filled["text"]) <= 200
         await bot.process_update(Update.de_json(group_tap(fill, 2, update_id=8202), bot.bot))
-        # Someone who never opted in can still answer by hand, and change an answer.
         await bot.process_update(Update.de_json(group_tap(vote + "B", 9, update_id=8203), bot.bot))
         await bot.process_update(Update.de_json(group_tap(vote + "M", 3, update_id=8204), bot.bot))
+        assert votes() == [1, 0, 0]  # 🤔 on their own time takes member 3's vote back
         await bot.process_update(Update.de_json(group_tap(vote + "F", 3, update_id=8205), bot.bot))
-        assert "1. Mon 5 Oct 14:00–16:00" in last_card(transport)["text"]
-        assert "✅ 2 can make it" in last_card(transport)["text"]
-        # Today's card: one tap says "I can make it", a second tap takes it back.
+        assert votes() == [2, 0, 0]
+        # Today's card: one vote each. Tapping another time moves it; tapping it again takes
+        # it back. Spamming never counts anyone twice.
         await bot.process_update(
             Update.de_json(group_tap(taps["✅ 1"], 9, update_id=8210), bot.bot)
         )
-        assert "you can make it" in alerts(transport)[-1]["text"]
-        assert "✅ 3 can make it" in last_card(transport)["text"]
-        await bot.process_update(
-            Update.de_json(group_tap(taps["✅ 1"], 9, update_id=8211), bot.bot)
+        assert "Your vote: time 1" in alerts(transport)[-1]["text"] and votes() == [3, 0, 0]
+        for n in range(4):
+            await bot.process_update(
+                Update.de_json(group_tap(taps[f"✅ {n % 3 + 1}"], 9, update_id=8220 + n), bot.bot)
+            )
+        assert sum(votes()) <= 3 and votes()[1:].count(1) <= 1
+        assert (
+            len(
+                [
+                    k
+                    for k, v in repo.poll_votes.items()
+                    if k[:2] == (poll.id, repo.users[9].id) and v == "FREE"
+                ]
+            )
+            <= 1
         )
-        assert "removed" in alerts(transport)[-1]["text"]
-        assert "✅ 2 can make it" in last_card(transport)["text"]
+        await bot.process_update(
+            Update.de_json(group_tap(taps["✅ 2"], 9, update_id=8230), bot.bot)
+        )
+        assert "Your vote: time 2" in alerts(transport)[-1]["text"] and votes() == [2, 1, 0]
+        await bot.process_update(
+            Update.de_json(group_tap(taps["✅ 2"], 9, update_id=8231), bot.bot)
+        )
+        assert "taken back" in alerts(transport)[-1]["text"] and votes() == [2, 0, 0]
         assert len(repo.poll_people[poll.id]) == 3
         # Only the organiser can settle it; picking posts a normal event card.
         await bot.process_update(
@@ -235,4 +258,4 @@ async def test_fill_mine_refuses_to_answer_free_for_someone_with_no_schedule(ser
         fourth = (await repo.ensure_user(4)).id
         assert not any(key[1] == fourth for key in repo.poll_votes)
         await bot.process_update(Update.de_json(group_tap(fill, 2, update_id=8502), bot.bot))
-        assert alerts(transport)[-1]["text"].startswith("Filled from your schedule")
+        assert alerts(transport)[-1]["text"].startswith("Voted for time")

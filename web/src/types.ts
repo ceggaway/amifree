@@ -68,8 +68,8 @@ export type MyGrid = {
   days: { date: string; cells: { start_at: string; state: CellState }[] }[];
 };
 
-export type Counts = { GOING: number; MAYBE: number; DECLINED: number };
-export type Answer = "GOING" | "MAYBE" | "DECLINED";
+export type Counts = { GOING: number; DECLINED: number };
+export type Answer = "GOING" | "DECLINED";
 
 export type GroupEventSummary = {
   id: string;
@@ -162,9 +162,9 @@ export type PollForm = {
   reply_by: string | null;
 };
 
-export type PollAnswer = "FREE" | "MAYBE" | "BUSY";
+export type PollAnswer = "FREE" | "BUSY";
 
-export type PollSlot = { start_at: string; end_at: string; free: number; of: number; yes: number; maybe: number };
+export type PollSlot = { start_at: string; end_at: string; free: number; of: number; yes: number };
 
 export type PollDetail = {
   id: string;

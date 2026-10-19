@@ -29,7 +29,7 @@ async def finished_event(service, repo, going=(2, 3, 4), came=(2, 3)):
         _, taps, event = await post_card(bot, transport, repo)
         for n, member in enumerate(going):
             await press(bot, taps["Going"], member, 9000 + n, first_name=f"Member {member}")
-        await press(bot, taps["Maybe"], 8, 9020, first_name='=HYPERLINK("x")')
+        await press(bot, taps["Can't"], 8, 9020, first_name='=HYPERLINK("x")')
         start = repo.group_events[event.id].start_at
         service.clock = lambda: start - timedelta(minutes=5)
         for n, member in enumerate(came):
@@ -81,7 +81,7 @@ async def test_export_is_pro_only_when_switched_on(service_factory):
     assert by_name["Member 2"]["rsvp"] == "Going" and by_name["Member 2"]["attended"] == "Yes"
     assert by_name["Member 4"]["rsvp"] == "Going" and by_name["Member 4"]["attended"] == "No"
     # A name that would run as a formula in a spreadsheet is neutralised.
-    assert '\'=HYPERLINK("x")' in by_name and by_name['\'=HYPERLINK("x")']["rsvp"] == "Maybe"
+    assert '\'=HYPERLINK("x")' in by_name and by_name['\'=HYPERLINK("x")']["rsvp"] == "Can't"
     assert set(rows[0]) == {
         "event",
         "date",

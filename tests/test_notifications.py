@@ -79,7 +79,7 @@ def test_change_wording():
 
 async def test_edit_once_alerts_savers_only_and_once(service_factory, reference):
     service, repo = service_factory(extraction(), MOVED)
-    answers = {2: "Going", 3: "Save", 4: "Can't", 6: "Maybe"}
+    answers = {2: "Going", 3: "Save", 4: "Can't"}
     bot, transport, outbox, taps, event = await card_with_members(service, repo, answers)
     async with bot:
         # Only the organiser is sent to their private chat to edit.
@@ -97,9 +97,9 @@ async def test_edit_once_alerts_savers_only_and_once(service_factory, reference)
         )
         done = await organiser_moves_to_8pm(service, event)
     assert "Event updated" in done[0].text
-    # Going, Saved and Maybe are told; the decliner, the organiser and outsiders are not.
+    # Going and Saved are told; the decliner, the organiser and outsiders are not.
     told = sorted(telegram_id for telegram_id, _ in outbox.sent)
-    assert told == [2, 3, 6]
+    assert told == [2, 3]
     text = outbox.sent[0][1]
     assert text.startswith("CCA dinner changed: Fri 9 Oct 7pm–9pm → 8pm–10pm; venue unchanged")
     assert "✅ No clashes found" in text
@@ -109,7 +109,7 @@ async def test_edit_once_alerts_savers_only_and_once(service_factory, reference)
     assert "20:00" in edits[-1]["text"] and int(edits[-1]["chat_id"]) == CHAT
     # Running the worker again sends nothing more.
     assert await service.notifier.deliver() == {"sent": 0, "failed": 0, "skipped": 0}
-    assert len(outbox.sent) == 3 and all(n["status"] == "sent" for n in repo.notifications)
+    assert len(outbox.sent) == 2 and all(n["status"] == "sent" for n in repo.notifications)
 
 
 async def test_alert_carries_a_fresh_clash_check(service_factory, reference):
@@ -117,7 +117,7 @@ async def test_alert_carries_a_fresh_clash_check(service_factory, reference):
     service, repo = service_factory(lecture, extraction(), MOVED)
     mine = (await service.message(2, 5, "Night class Friday 20:00 22:00", reference))[0]
     await service.callback(2, mine.keyboard.inline_keyboard[0][0].callback_data)
-    _, _, outbox, _, event = await card_with_members(service, repo, {2: "Maybe"})
+    _, _, outbox, _, event = await card_with_members(service, repo, {2: "Save"})
     await organiser_moves_to_8pm(service, event)
     assert outbox.sent[0][0] == 2
     assert "⚠️ Clashes with Night class" in outbox.sent[0][1]
@@ -303,7 +303,7 @@ async def test_jobs_endpoint_requires_its_secret(service_factory, reference):
 
 async def test_change_alert_offers_to_update_the_calendar(service_factory):
     service, repo = service_factory(extraction(), MOVED)
-    _, _, outbox, _, event = await card_with_members(service, repo, {2: "Going", 3: "Maybe"})
+    _, _, outbox, _, event = await card_with_members(service, repo, {2: "Going", 3: "Can't"})
     await organiser_moves_to_8pm(service, event)
     by_user = dict(outbox.replies)
     going = by_user[2]
@@ -311,10 +311,8 @@ async def test_change_alert_offers_to_update_the_calendar(service_factory):
     assert google.url and "20261009T120000Z" in google.url  # the new 8pm start, in UTC
     assert apple.callback_data.startswith("ics:")
     assert "replaces the old entry" in going.text
-    # Maybe isn't a commitment, so there's nothing to update in a calendar.
-    assert all(
-        b.text != "📅 Google Calendar" for row in by_user[3].keyboard.inline_keyboard for b in row
-    )
+    # Someone who said Can't isn't told about the change at all.
+    assert 3 not in by_user
 
 
 async def test_backlog_is_measured_and_a_stuck_outbox_is_logged(service_factory, caplog):

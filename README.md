@@ -6,7 +6,7 @@ One FastAPI backend serves the Telegram bot, a JSON API and a React Telegram Min
 
 | For students | For organisers |
 | --- | --- |
-| Forward to save, `/plans` | `/event` cards with Going / Maybe / Can't and a live headcount |
+| Forward to save, `/plans` | `/event` cards with Going / Can't and a live headcount |
 | Instant clash check: No clashes found, Clashes with X, or Busy day | Edit once: everyone who kept the plan gets one change alert |
 | Private "Am I free?" on every group card, and `/free fri 7-9pm` or `/free tomorrow` | `/whosfree` self-filling poll |
 | Night-before summary, change alerts | Auto-chase (two private nudges) and a Nudge button for non-responders |
@@ -22,7 +22,7 @@ NUSMods is optional. After Save or Going, the bot offers 📅 Google Calendar (a
 ## Privacy by design
 
 - The bot acts only on messages sent or forwarded to it in private, on commands, and on button taps. Telegram privacy mode stays on, so ordinary group messages are never delivered to it, unless a group admin makes the bot an admin and switches on `/detect on` (see below). `/event` reads only the one message it replies to.
-- Anything derived from a person's schedule in a group is returned as a callback alert that only the person who tapped can see. Group cards show counts, never names or reasons. The one exception is **Who's going?**, which lists the names of people who tapped Going (never Maybe or Can't).
+- Anything derived from a person's schedule in a group is returned as a callback alert that only the person who tapped can see. Group cards show counts, never names or reasons. The one exception is **Who's going?**, which lists the names of people who tapped Going (never Can't).
 - Names (`first_name`, `@username`) are kept per group, only for people who tapped something there, so Who's going? and the organiser's attendance export can show them. They are deleted with `/deletemydata` and with the person's record.
 - `/whosfree` reads a schedule only after that member taps Count me in, and suggests slots only once three people have joined.
 - Nudges and reminders go only to people who have used AmIFree; `/reminders off` stops summaries and nudges.
@@ -87,7 +87,7 @@ In disabled mode `/healthz` returns 200 and `/readyz` returns 503. This does not
 3. Review the card and tap Save, then send `/plans`. Send `busy sat 2-6pm` and confirm the block.
 4. Optionally send your NUSMods Share/Sync link (select all class types first). Tap Going on the plan; the bot confirms the commitment.
 5. Forward a second invitation overlapping that time. It should report Clash and offer Going anyway.
-6. Tap Maybe or Can't make it on a commitment to release its block. Use Edit to correct details; changes require confirmation.
+6. Tap Remove (or Can't make it on a group plan) to release its block. Use Edit to correct details; changes require confirmation.
 7. Forward `CCA dinner moved to 8pm` or `CCA dinner cancelled`. Review the proposed change before confirming. Ambiguous matches require selection.
 8. Test a second Telegram account to verify isolation.
 
@@ -98,9 +98,9 @@ Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `
 1. In BotFather leave **Group Privacy** turned on (the default). Add the bot to a test group.
 2. Reply `/event` to a message containing a plan, or send `/event Dinner Fri 7-9pm at Vivo`. The bot posts a card.
 3. With two accounts, tap **📱 Details** on the same card. Each sees their own private "Am I free?" check at the top; nothing appears in the group. (Without the Mini App set up, the card has an **Am I free?** button that shows a private popup instead.)
-4. Tap Going / Maybe / Can't and watch the headcount. The plan appears in each member's `/plans`.
+4. Tap Going / Can't and watch the headcount; tapping again many times still counts you once. The plan appears in each member's `/plans`.
 5. As the organiser tap **📱 Details** (or **⚙️ Manage** without the Mini App, which opens the private chat). Edit, cancel, nudge, "still coming?" and marking who came are there. Edit the time and save: members who kept the plan each receive one message stating what changed.
-6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **✋ Count me in**. Times are suggested when the reply-by time passes; the organiser can also suggest them earlier from **📱 Open**. Members then tap **✅ 1 / ✅ 2 / ✅ 3** for the times they can make (tap again to undo); Maybe is in the app. The organiser picks a time in **📱 Open**, which posts the event card.
+6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **✋ Count me in**. Times are suggested when the reply-by time passes; the organiser can also suggest them earlier from **📱 Open**. Each member taps **✅ 1, ✅ 2 or ✅ 3** for the time that works best: one vote each, so tapping another time moves it and tapping theirs again takes it back. The organiser picks a time in **📱 Open**, which posts the event card.
 7. In **📱 Details**, see who's going, and check in with **I'm here** from 30 minutes before the start.
 8. A card is redrawn as "ended · N went" once the event is over (or "N said Going" when nobody checked in).
 
@@ -138,10 +138,10 @@ Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for
 Groups can do everything from the Mini App. `/app` in a group, `/help`, and `/event` or
 `/whosfree` sent with nothing after them reply with one button that opens it (the group page
 leads with **Create an event** and **Find a time**). Cards stay small: an event card is Going /
-Maybe / Can't plus **📱 Details**, which shows your private clash check, who's going and
+Can't plus **📱 Details**, which shows your private clash check, who's going and
 check-in, and for the organiser edit, cancel, nudge, "still coming?" and marking who came. A poll
 card is **✋ Count me in** (or **✅ 1 / ✅ 2 / ✅ 3** once times are suggested) plus **📱 Open**,
-where members answer Yes / Maybe / No and the organiser suggests times, nudges and picks one.
+where members vote for one time and the organiser suggests times, nudges and picks one.
 Without the Mini App set up, the cards fall back to the full set of chat buttons. A card made in
 the app is posted in the group like any other.
 

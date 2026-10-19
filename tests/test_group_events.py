@@ -103,11 +103,10 @@ async def test_event_card_from_a_replied_message(service_factory):
         card, taps, event = await post_card(bot, transport, repo)
     assert service.extractor.calls[0][0] == TEXT
     assert "CCA dinner" in card["text"] and "Location: Vivo" in card["text"]
-    assert "Going 0 · Maybe 0 · Can't 0" in card["text"]
-    # Seven buttons: the answers, two private checks, check-in, and one organiser menu.
+    assert "Going 0 · Can't 0" in card["text"] and "Maybe" not in card["text"]
+    # Six buttons: two answers, two private checks, check-in, and one organiser menu.
     assert labels_on(card["reply_markup"]) == [
         "Going",
-        "Maybe",
         "Can't",
         "Am I free?",
         "Who's going?",
@@ -148,14 +147,19 @@ async def test_rsvp_updates_headcount_and_personal_plans(service_factory, refere
     async with bot:
         _, taps, event = await post_card(bot, transport, repo)
         for n, (member, label) in enumerate(
-            ((2, "Going"), (3, "Going"), (4, "Maybe"), (5, "Can't"))
+            ((2, "Going"), (3, "Going"), (4, "Can't"), (5, "Can't"))
         ):
             await bot.process_update(
                 Update.de_json(group_tap(taps[label], member, update_id=6000 + n), bot.bot)
             )
+        # Tapping Going again and again still counts that person once.
+        for n in range(5):
+            await bot.process_update(
+                Update.de_json(group_tap(taps["Going"], 2, update_id=6050 + n), bot.bot)
+            )
         # Changing an answer moves the count rather than adding a second one.
         await bot.process_update(
-            Update.de_json(group_tap(taps["Maybe"], 3, update_id=6100), bot.bot)
+            Update.de_json(group_tap(taps["Can't"], 3, update_id=6100), bot.bot)
         )
         # Save keeps an existing answer.
         await bot.process_update(
@@ -165,7 +169,7 @@ async def test_rsvp_updates_headcount_and_personal_plans(service_factory, refere
             Update.de_json(group_tap(taps["Save"], 6, update_id=6102), bot.bot)
         )
     edits = [p for name, p in transport.calls if name == "editMessageText"]
-    assert "Going 1 · Maybe 2 · Can't 1" in edits[-1]["text"]
+    assert "Going 1 · Can't 3" in edits[-1]["text"]
     assert "Member" not in edits[-1]["text"]  # a count, never names
     linked = {e.user_id: e for e in repo.events.values() if e.group_event_id == event.id}
     assert len(linked) == 5
@@ -186,9 +190,10 @@ async def test_going_from_a_group_card_blocks_later_checks(service_factory, refe
         await bot.process_update(Update.de_json(group_tap(taps["Going"], 2), bot.bot))
         # A private RSVP on the linked plan re-renders the shared card's headcount.
         mine = (await service.command(2, "events"))[0]
-        await service.callback(2, tap(mine, "Maybe"))
+        assert "Maybe" not in [b.text for row in mine.keyboard.inline_keyboard for b in row]
+        await service.callback(2, tap(mine, "Can't make it"))
     edits = [p for name, p in transport.calls if name == "editMessageText"]
-    assert "Going 0 · Maybe 1" in edits[-1]["text"]
+    assert "Going 0 · Can't 1" in edits[-1]["text"]
     assert int(edits[-1]["chat_id"]) == CHAT and int(edits[-1]["message_id"]) == 101
     linked = next(e for e in repo.events.values() if e.group_event_id == event.id)
     await service.callback(2, f"go:{linked.id}:{linked.version}")

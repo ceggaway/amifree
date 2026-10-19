@@ -11,7 +11,6 @@ import { NotInGroup } from "./GroupHome";
 
 const ANSWERS: [Answer, string][] = [
   ["GOING", "Going"],
-  ["MAYBE", "Maybe"],
   ["DECLINED", "Can't"],
 ];
 
@@ -110,7 +109,7 @@ export function GroupEvent() {
       )}
 
       <h2>
-        {e.counts.GOING} going · {e.counts.MAYBE} maybe · {e.counts.DECLINED} can't
+        {e.counts.GOING} going · {e.counts.DECLINED} can't
       </h2>
       {e.going.length > 0 ? <p>{e.going.join(", ")}</p> : <p className="hint">Nobody has said Going yet.</p>}
 

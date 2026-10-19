@@ -228,9 +228,7 @@ async def test_shared_plans_and_group_event_access(api, reference):
     await repo.group_rsvp(member.id, card, Status.GOING)
     url = f"/api/group-events/{card.id}"
     seen = (await client.get(url, headers=bearer(2))).json()
-    assert (
-        seen["counts"] == {"GOING": 1, "MAYBE": 0, "DECLINED": 0} and seen["my_status"] == "GOING"
-    )
+    assert seen["counts"] == {"GOING": 1, "DECLINED": 0} and seen["my_status"] == "GOING"
     assert "creator_user_id" not in seen and "chat_id" not in seen
     # Knowing the ID is not enough: only people seen in that group may open it.
     assert (await client.get(url, headers=bearer(3))).status_code == 404
@@ -242,10 +240,15 @@ async def test_shared_plans_and_group_event_access(api, reference):
         plan_url, headers=bearer(2), json={"version": linked.version, "title": "Mine"}
     )
     assert edit.status_code == 403
+    # Maybe is gone: Going or Can't only.
     maybe = await client.patch(
         plan_url, headers=bearer(2), json={"version": linked.version, "status": "MAYBE"}
     )
-    assert maybe.status_code == 200 and await repo.group_counts(card.id) == {"MAYBE": 1}
+    assert maybe.status_code == 422
+    cant = await client.patch(
+        plan_url, headers=bearer(2), json={"version": linked.version, "status": "DECLINED"}
+    )
+    assert cant.status_code == 200 and await repo.group_counts(card.id) == {"DECLINED": 1}
 
 
 async def test_api_unavailable_without_a_bot_and_cors_is_opt_in(service_factory):

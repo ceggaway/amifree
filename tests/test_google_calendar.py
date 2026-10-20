@@ -580,7 +580,7 @@ async def test_the_steps_come_with_a_picture_of_the_sharing_box(with_google, ref
     service, _, _ = with_google()
     await onboard(service, reference)
     replies = await service.callback(1, "gcal:start")
-    assert replies[0].edit and "Part 1" in replies[0].text
+    assert replies[0].edit and "Share your Google Calendar" in replies[0].text
     assert len(replies[1].photos) == 5
     assert all(p.startswith(b"\x89PNG") for p in replies[1].photos)
     assert len(replies[1].text) <= 1024  # Telegram's caption limit

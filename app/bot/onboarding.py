@@ -32,8 +32,8 @@ PICK_CALENDAR = (
 
 # Every calendar guide ends the same way, so nobody wonders what to do after the last step.
 PASTE_NEXT = (
-    "\n\n👇 Paste the link here when you have it.\n"
-    "Stuck? Setup is optional: you can forward me a plan any time."
+    "\n\n👇 <b>Paste the link here</b> when you have it.\n"
+    "Stuck? Setup is optional — forward me a plan any time."
 )
 
 # Guides are sent as HTML so the words to look for on screen are bold.
@@ -55,42 +55,36 @@ GUIDES = {
         "timetable changes." + PASTE_NEXT
     ),
     "ios": (
-        "🍎 <b>iPhone / iCloud Calendar</b> · about 1 minute\n"
+        "🍎 <b>iPhone · iCloud Calendar</b> · about 1 minute\n"
         "Do this on your iPhone.\n\n"
         "1. Open the <b>Calendar</b> app.\n"
-        "2. Tap the calendar icon at the bottom right. (Older iPhones show the word "
-        "<b>Calendars</b> instead.)\n"
-        "3. Under the <b>iCloud</b> heading, tap the <b>ⓘ</b> next to the calendar you want me "
-        "to check. Not the ones under Gmail.\n"
-        "4. Scroll down and turn on <b>Public Calendar</b>.\n"
-        "5. Tap <b>Share Link…</b> just below it, then <b>Copy</b>.\n\n"
-        "✅ You'll know it's right: the link starts with <code>webcal://</code>. That's normal.\n"
-        "⚠️ This only works for iCloud calendars. Calendar under Gmail, or no Public Calendar "
-        "switch? That one is from Google or Outlook, so use that guide instead.\n\n"
-        "More than one iCloud calendar, like Classes, CCA and Events? Repeat for each one and "
-        "paste every link. I'll check them all.\n\n"
+        "2. Tap the calendar icon at the bottom right.\n"
+        "3. Under <b>iCloud</b>, tap the <b>ⓘ</b> next to your calendar.\n"
+        "    <i>Not the ones under Gmail.</i>\n"
+        "4. Scroll down, turn on <b>Public Calendar</b>.\n"
+        "5. Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
+        "✅ You'll know it's right: it starts with <code>webcal://</code>.\n\n"
+        "⚠️ This only works for iCloud calendars. A calendar under Gmail, or with no Public "
+        "Calendar switch, is from Google or Outlook — use that guide.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
-        "it here. I keep just when you're busy. Turn <b>Public Calendar</b> off any time to "
-        "stop sharing it." + PASTE_NEXT
+        "it here. I keep just your busy times.\n\n"
+        "🗂 Several iCloud calendars (Classes, CCA, Events)? Add each one's link." + PASTE_NEXT
     ),
     "mac": (
-        "💻 <b>Mac Calendar</b> · about 1 minute\n"
+        "💻 <b>Mac · iCloud Calendar</b> · about 1 minute\n"
         "Do this on your Mac. (iPad? Use the iPhone steps.)\n\n"
         "1. Open the <b>Calendar</b> app.\n"
-        "2. On the left, under the <b>iCloud</b> heading, find the calendar you want me to "
-        "check. No list? Click the calendar icon at the top.\n"
-        "3. Click the person icon next to its name. (It shows when you hover over it.)\n"
-        "4. Tick <b>Public Calendar</b>. A link appears.\n"
-        "5. Click the share button next to the link, then <b>Copy</b>. Then click "
-        "<b>Done</b>.\n\n"
-        "✅ You'll know it's right: the link starts with <code>webcal://</code>. That's normal.\n"
-        "⚠️ This only works for iCloud calendars. Calendar under Gmail, or no Public Calendar "
-        "box? That one is from Google or Outlook, so use that guide instead.\n\n"
-        "More than one iCloud calendar? Repeat for each one and paste every link. I'll check "
-        "them all.\n\n"
+        "2. In the left list, under <b>iCloud</b>, find your calendar.\n"
+        "    <i>No list? Click the calendar icon up top.</i>\n"
+        "3. Hover over its name, click the <b>person icon</b>.\n"
+        "4. Tick <b>Public Calendar</b> — a link appears.\n"
+        "5. Click the <b>share button</b> by the link, then <b>Copy</b>, then <b>Done</b>.\n\n"
+        "✅ You'll know it's right: it starts with <code>webcal://</code>.\n\n"
+        "⚠️ This only works for iCloud calendars. A calendar under Gmail, or with no Public "
+        "Calendar box, is from Google or Outlook — use that guide.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
-        "it here. I keep just when you're busy. Untick <b>Public Calendar</b> any time to "
-        "stop sharing it." + PASTE_NEXT
+        "it here. I keep just your busy times.\n\n"
+        "🗂 Several iCloud calendars? Add each one's link." + PASTE_NEXT
     ),
     "google": (
         "📅 <b>Google Calendar</b> · about 1 minute\n"
@@ -255,49 +249,40 @@ def google_choose_keyboard() -> InlineKeyboardMarkup:
 
 def google_share_steps(email: str) -> str:
     return (
-        "🔗 <b>Share your Google Calendar with AmIFree</b>\n\n"
-        "This lets me add your Going plans to your calendar. It takes about 1 minute, and you "
-        "can stop any time.\n"
-        "You need a computer, or your phone's browser in desktop mode.\n\n"
-        "<b>Part 1 · Open your calendar's settings</b>\n"
-        "1. Go to calendar.google.com.\n"
-        "2. Click the ⚙️ gear at the top right, then <b>Settings</b>.\n"
-        "3. On the left, under <b>Settings for my calendars</b>, click the calendar you want to "
-        "connect.\n\n"
-        "<b>Part 2 · Add AmIFree</b>\n"
-        "4. Scroll down to <b>Share with specific people or groups</b> and click "
-        "<b>Add people and groups</b>.\n"
-        f"5. Paste this email (tap it to copy): <code>{html.escape(email)}</code>\n"
-        "6. Open the <b>Permission</b> menu and choose <b>Make changes (see private events as "
-        "free/busy)</b>. If you don't see that, choose <b>Make changes to events</b>.\n"
+        "🔗 <b>Share your Google Calendar</b> · about 1 minute\n"
+        "Do this on a computer (or your phone's browser in desktop mode).\n\n"
+        "1. Go to <b>calendar.google.com</b>.\n"
+        "2. Click the <b>⚙️</b> gear, then <b>Settings</b>.\n"
+        "3. Under <b>Settings for my calendars</b>, click your calendar.\n"
+        "4. Open <b>Share with specific people or groups</b>, then <b>Add people and "
+        "groups</b>.\n"
+        f"5. Paste this email: <code>{html.escape(email)}</code>\n"
+        "6. Set the permission to <b>Make changes (see private events as free/busy)</b>.\n"
         "7. Click <b>Send</b>.\n\n"
-        "<b>Part 3 · Tell me your email</b>\n"
-        "8. Send me your own Google email here, like you@gmail.com. I'll put a code in that "
-        "calendar. Send the code back to show the calendar is yours.\n\n"
-        "I only change events I added myself. To stop, remove AmIFree from Shared with, or tap "
-        "Remove in /calendar."
+        "Then send me your own Google email here (like you@gmail.com). I'll drop a code in "
+        "your calendar — send it back to show it's yours.\n\n"
+        "✨ Connects live, and I can add your Going plans to this calendar too.\n\n"
+        "🔒 I only read your busy times, and only change events I add. To stop: remove AmIFree "
+        "from <b>Shared with</b>, or tap Remove in /calendar."
     )
 
 
 def google_share_steps_phone(email: str) -> str:
     return (
-        "🔗 <b>Share your Google Calendar with AmIFree</b> · about 1 minute\n"
+        "🔗 <b>Share your Google Calendar</b> · about 1 minute\n"
         "Do this in the Google Calendar app on your phone.\n\n"
-        "<b>Part 1 · Open your calendar's sharing</b>\n"
-        "1. Open the <b>Google Calendar</b> app and tap <b>☰</b> (top left).\n"
+        "1. Open <b>Google Calendar</b>, tap <b>☰</b> (top left).\n"
         "2. Tap <b>Settings</b>.\n"
-        "3. Under your email, tap <b>My calendar</b> (or the calendar you want me to check).\n\n"
-        "<b>Part 2 · Add AmIFree</b>\n"
+        "3. Tap your calendar — <b>My calendar</b>, or the one to check.\n"
         "4. Tap <b>Shared with</b>, then <b>Add people or groups</b>.\n"
-        f"5. Paste this email (tap to copy): <code>{html.escape(email)}</code>\n"
-        "6. Open the permission menu and choose <b>Make changes (see private events as "
-        "free/busy)</b>.\n"
+        f"5. Paste this email: <code>{html.escape(email)}</code>\n"
+        "6. Set the permission to <b>Make changes (see private events as free/busy)</b>.\n"
         "7. Tap <b>Save</b>.\n\n"
-        "<b>Part 3 · Tell me your email</b>\n"
-        "8. Send me your own Google email here, like you@gmail.com. I'll put a code in that "
-        "calendar; send the code back to show it's yours.\n\n"
-        "I only change events I added myself. To stop, remove AmIFree from Shared with, or tap "
-        "Remove in /calendar."
+        "Then send me your own Google email here (like you@gmail.com). I'll drop a code in "
+        "your calendar — send it back to show it's yours.\n\n"
+        "✨ Connects live, and I can add your Going plans to this calendar too.\n\n"
+        "🔒 I only read your busy times, and only change events I add. To stop: remove AmIFree "
+        "from <b>Shared with</b>, or tap Remove in /calendar."
     )
 
 

@@ -6,8 +6,9 @@ const db = new PGlite();
 const schema = await readFile(new URL('../../app/db/schema.sql', import.meta.url), 'utf8');
 await db.exec('create role anon; create role authenticated; create role service_role bypassrls;');
 const migrationDir = new URL('../../app/db/migrations/', import.meta.url);
+const migrationFiles = (await readdir(migrationDir)).filter(f => f.endsWith('.sql')).sort();
 const migrations = [];
-for (const file of (await readdir(migrationDir)).filter(f => f.endsWith('.sql')).sort()) {
+for (const file of migrationFiles) {
   migrations.push(await readFile(new URL(file, migrationDir), 'utf8'));
 }
 // Schema and every migration are applied twice: reapplication must be safe.
@@ -208,7 +209,8 @@ await check('user deletion cascades to all personal data', async () => {
   await q('delete from events');
 });
 await check('migration ledger and durable update claims behave', async () => {
-  assert.equal((await one('select max(version)::int v from schema_migrations')).v,15);
+  const latestVersion = Math.max(...migrationFiles.map(file => Number.parseInt(file, 10)));
+  assert.equal((await one('select max(version)::int v from schema_migrations')).v,latestVersion);
   const claim = async (id, stale = 120) =>
     (await one('select amifree_claim_update($1,$2) claimed',[id,stale])).claimed;
   assert.equal(await claim(5001),true);

@@ -57,10 +57,11 @@ GUIDES = {
     "ios": (
         "🍎 <b>iPhone · iCloud Calendar</b> · about 1 minute\n"
         "Do this on your iPhone.\n\n"
+        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Mine's Google</b> below "
+        "to switch to the Google setup guide.\n\n"
         "1. Open the <b>Calendar</b> app.\n"
         "2. Tap the calendar icon at the bottom right.\n"
         "3. Under <b>iCloud</b>, tap the <b>ⓘ</b> next to your calendar.\n"
-        "    <i>Not the ones under Gmail.</i>\n"
         "4. Scroll down, turn on <b>Public Calendar</b>.\n"
         "5. Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
         "✅ You'll know it's right: it starts with <code>webcal://</code>.\n\n"
@@ -73,6 +74,8 @@ GUIDES = {
     "mac": (
         "💻 <b>Mac · iCloud Calendar</b> · about 1 minute\n"
         "Do this on your Mac. (iPad? Use the iPhone steps.)\n\n"
+        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Mine's Google</b> below "
+        "to switch to the Google setup guide.\n\n"
         "1. Open the <b>Calendar</b> app.\n"
         "2. In the left list, under <b>iCloud</b>, find your calendar.\n"
         "    <i>No list? Click the calendar icon up top.</i>\n"

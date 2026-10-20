@@ -349,6 +349,8 @@ async def test_share_steps_are_phone_first_with_a_computer_switch(with_google, r
     assert "💻 On a computer instead?" in labels
     assert len(default) == 2 and len(default[1].photos) == 5
     assert all(ph.startswith(b"\x89PNG") for ph in default[1].photos)
+    assert default[0].clear_album_group == "setup" and default[1].album_group == "setup"
+    assert "Picture guide below" in default[0].text
     computer = (await service.callback(1, "gcal:computer"))[0]
     assert "calendar.google.com" in computer.text
     clabels = [b.text for row in computer.keyboard.inline_keyboard for b in row]

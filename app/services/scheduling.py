@@ -1776,10 +1776,20 @@ class SchedulingService:
                 return [Reply("That button isn't valid. Send /start.")]
             text, keyboard = found
             name = data.removeprefix("setup:")
-            replies = [Reply(text, keyboard, edit=True, parse_mode=onboarding.parse_mode(name))]
             photos = onboarding.screen_photos(name)
             if photos:
-                replies.append(Reply(onboarding.PHOTOS_CAPTION, photos=photos))
+                text += "\n\n📸 <b>Picture guide below</b> ↓"
+            replies = [
+                Reply(
+                    text,
+                    keyboard,
+                    edit=True,
+                    parse_mode=onboarding.parse_mode(name),
+                    clear_album_group="setup",
+                )
+            ]
+            if photos:
+                replies.append(Reply(onboarding.PHOTOS_CAPTION, photos=photos, album_group="setup"))
             return replies
         if data in ("free:today", "free:tomorrow", "free:weekend"):
             today = self.clock().astimezone(SG).date()

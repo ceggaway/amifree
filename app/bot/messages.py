@@ -7,44 +7,30 @@ from app.bot.keyboards import event_keyboard, group_keyboard
 from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
 from app.services.availability import Availability
 
-HELP = """Forward me a plan and I'll save it and tell you if it clashes.
+HELP = """Forward me a plan and I'll tell you if you're free, then save it.
 
-1. Forward a text invitation with a date and time.
-   Or ask: /free fri 7-9pm, /free tomorrow.
-2. Check the card, then tap Add to plans or Skip. /plans shows everything coming up.
-   Forward a deadline ("report due Fri 11:59pm") and I'll remind you the day before.
-3. Optional: send your NUSMods Share/Sync link so classes and exams are checked too.
+HOW TO USE ME
+• Forward or type a plan with a date and time, like "Dinner Fri 7-9pm at Vivo". I check it against your schedule, then you tap Add to plans or Skip.
+• Forward a deadline, like "report due Fri 11:59pm", and I'll remind you the day before.
+• Connect a calendar or NUSMods so I can see your classes and busy times (optional).
 
-I check your AmIFree Going plans, your busy blocks, any imported NUSMods timetable and,
-if you connect it with /calendar, your own calendar's busy times. "No clashes found"
-only covers what AmIFree knows about.
+"No clashes found" only covers what I know about.
 
-/usual tue evenings, sat all day tells group polls when you're usually free.
+COMMANDS
+/plans — everything coming up, with Edit and Remove
+/free — am I free? e.g. /free fri 7-9pm or /free tomorrow
+/deadline — save a deadline, or see your list
+/calendar — connect a calendar (Google, iPhone, Outlook) or add NUSMods
+/settings — reminders and privacy
+/cancel — clear a pending action
+/deletemydata — delete everything I store about you
+/start — set up again
 
-/calendar shows the calendars you've connected and lets you add another (Google, iPhone,
-Outlook) so its busy times count. It can also put your plans in your phone's calendar.
+IN A GROUP
+Reply /event to a plan to post a card with Going / Can't, a private "Am I free?" check and a headcount. /whosfree finds a time that works for everyone.
 
-In a group: reply /event to a plan message to post a card with Going / Can't,
-a private "Am I free?" check and a headcount. Say "every Tue/Thu until week 13" to make a
-recurring event. /whosfree <what> suggests times from the schedules of members who opt in.
-Organisers also get /stats and /export (Clubs Pro). A group admin can switch on /detect.
-
-Privacy: I only act on messages you send or forward to me, commands and button taps. Pictures you forward are read for their text and not kept.
-I never read group chats, and your schedule is never shown to a group.
-
-/start — getting started
-/help — this guide
-/plans — upcoming saved plans
-/block — mark yourself busy, e.g. "busy sat 2–6pm" or "work every Wed 6–10pm"
-/blocks — list or remove busy blocks
-/usual — your usual free times for group polls
-/deadline — save something due, e.g. "/deadline CS3244 report fri 11:59pm"
-/deadlines — upcoming deadlines; tap Done when handed in
-/remind — set a reminder, e.g. "remind me at 5pm to buy milk" (or just type it)
-/settings — turn reminders on or off
-/events — every recent card, including unsaved previews
-/cancel — stop a pending clarification or edit
-/deletemydata — delete everything AmIFree stores about you"""
+PRIVACY
+I only act on what you send or forward to me, commands and taps. Pictures you forward are read for their text and not kept. I never read group chats, and your schedule is never shown to a group."""
 
 STATUS_LABELS = {
     Status.PREVIEW: "Not saved yet",
@@ -72,6 +58,11 @@ class Reply:
     # Replace the card whose button was tapped instead of sending a new message.
     edit: bool = False
     parse_mode: str | None = None
+    # When these photos form an album that should replace an earlier album in the same chat,
+    # the group name both share; the earlier album's messages are deleted before this is sent.
+    album_group: str | None = None
+    # A text/screen reply that deletes the tracked album for this group before it is shown.
+    clear_album_group: str | None = None
 
 
 def details(draft: EventDraft) -> str:
@@ -251,8 +242,34 @@ def event_card(event: Event, availability: Availability, synced: bool = False) -
     return Reply(body, keyboard)
 
 
+# Per-chat message ids of the last guide picture album, so switching guides deletes the
+# previous album instead of stacking them. Keyed by (chat_id, group). In-memory only: after a
+# restart an orphaned album simply is not cleaned up, which is harmless.
+_guide_albums: dict[tuple[int, str], list[int]] = {}
+
+
+async def _clear_guide_album(update, group: str) -> None:
+    chat = getattr(update, "effective_chat", None)
+    if chat is None:
+        return
+    ids = _guide_albums.pop((chat.id, group), None)
+    if not ids:
+        return
+    message = getattr(update, "effective_message", None)
+    bot = message.get_bot() if message is not None else None
+    if bot is None:
+        return
+    for message_id in ids:
+        try:
+            await bot.delete_message(chat.id, message_id)
+        except Exception:
+            pass  # already gone, too old, or not allowed: nothing to clean up
+
+
 async def send_reply(update, reply: Reply):
     """Send one reply to the chat the update came from: a document, or plain text."""
+    if reply.clear_album_group is not None:
+        await _clear_guide_album(update, reply.clear_album_group)
     query = getattr(update, "callback_query", None)
     if reply.edit and query is not None and not reply.document:
         from telegram.error import BadRequest
@@ -269,12 +286,15 @@ async def send_reply(update, reply: Reply):
     if reply.photos:
         from telegram import InputMediaPhoto
 
-        await update.effective_message.reply_media_group(
+        sent = await update.effective_message.reply_media_group(
             [
                 InputMediaPhoto(photo, caption=reply.text if i == 0 else None)
                 for i, photo in enumerate(reply.photos)
             ]
         )
+        chat = getattr(update, "effective_chat", None)
+        if reply.album_group is not None and sent and chat is not None:
+            _guide_albums[(chat.id, reply.album_group)] = [msg.message_id for msg in sent]
     elif reply.document:
         from telegram import InputFile
 

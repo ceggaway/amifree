@@ -36,6 +36,7 @@ PASTE_NEXT = (
     "Stuck? Setup is optional: you can forward me a plan any time."
 )
 
+# Guides are sent as HTML so the words to look for on screen are bold.
 GUIDES = {
     "export": (
         "📆 Classes in your own calendar\n\n"
@@ -45,50 +46,62 @@ GUIDES = {
         "there. To have me check your classes, paste your NUSMods Share/Sync link instead."
     ),
     "nusmods": (
-        "📚 Your NUSMods link · about 1 minute\n\n"
-        "1. Open NUSMods (button below) and go to your timetable.\n"
+        "📚 <b>Your NUSMods link</b> · about 1 minute\n\n"
+        "1. Tap <b>Open NUSMods</b> below and go to your timetable.\n"
         "2. Check every class type is chosen: lecture, tutorial, lab…\n"
-        "3. Tap Share/Sync, then Copy link.\n\n"
+        "3. Tap <b>Share/Sync</b>, then <b>Copy link</b>.\n\n"
+        "✅ You'll know it's right: the link starts with <code>https://nusmods.com/timetable</code>.\n\n"
         "I'll add your classes and exams as busy times. Send a new link whenever your "
         "timetable changes." + PASTE_NEXT
     ),
     "ios": (
-        "🍎 iPhone / iCloud calendar · about 1 minute\n\n"
-        "1. Open the Calendar app on your iPhone.\n"
-        "2. Tap Calendars at the bottom.\n"
-        "3. Tap ⓘ next to the calendar you use most.\n"
-        "4. Turn on Public Calendar.\n"
-        "5. Tap Share Link…, then Copy.\n\n"
-        "It starts with webcal://, that's right.\n\n"
-        "Use several calendars, like Classes, CCA and Events? Do this for each one and paste "
+        "🍎 <b>iPhone / iCloud Calendar</b> · about 1 minute\n"
+        "Do this on your iPhone.\n\n"
+        "1. Open the <b>Calendar</b> app.\n"
+        "2. Tap <b>Calendars</b> at the bottom.\n"
+        "3. Tap the <b>ⓘ</b> next to the calendar you use most.\n"
+        "4. Turn on <b>Public Calendar</b>.\n"
+        "5. Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
+        "✅ You'll know it's right: the link starts with <code>webcal://</code>. That's normal.\n"
+        "⚠️ This only works for iCloud calendars. For a calendar from Google or Outlook, use "
+        "that guide instead.\n\n"
+        "Use several calendars, like Classes, CCA and Events? Repeat for each one and paste "
         "every link. I'll check them all.\n\n"
-        "Anyone who has a link can see that calendar, so only paste it here. Turn Public "
-        "Calendar off any time to stop sharing it." + PASTE_NEXT
+        "🔒 Anyone with a link can see that calendar, so only paste it here. I keep just "
+        "when you're busy. Turn <b>Public Calendar</b> off any time to stop sharing it."
+        + PASTE_NEXT
     ),
     "google": (
-        "📅 Google Calendar · about 1 minute\n\n"
-        "Do this on a computer, or your phone's browser in desktop mode: the Google "
+        "📅 <b>Google Calendar</b> · about 1 minute\n"
+        "Do this on a computer, or your phone's browser in desktop mode. The Google "
         "Calendar app can't show it.\n\n"
-        "1. Go to calendar.google.com and sign in.\n"
-        "2. Click ⚙️ at the top right, then Settings.\n"
-        "3. On the left, under Settings for my calendars, click your calendar.\n"
-        "4. Scroll down to Integrate calendar.\n"
-        "5. Copy Secret address in iCal format. It ends in .ics.\n\n"
+        "1. Go to <b>calendar.google.com</b> and sign in.\n"
+        "2. Click the <b>⚙️</b> at the top right, then <b>Settings</b>.\n"
+        "3. On the left, under <b>Settings for my calendars</b>, click your calendar.\n"
+        "4. Scroll down and open <b>Integrate calendar</b>.\n"
+        "5. Copy <b>Secret address in iCal format</b>.\n"
+        "⚠️ Not the Public address: that one only works if your calendar is public.\n\n"
+        "✅ You'll know it's right: the link starts with <code>https://calendar.google.com</code> "
+        "and ends in <code>.ics</code>.\n\n"
         "Several calendars? Repeat for each one and paste every link.\n\n"
-        "Keep it secret: anyone with it can see your calendar. If it ever leaks, click "
-        "Reset next to it in Google and send me the new one." + PASTE_NEXT
+        "🔒 Keep it secret: anyone with it can see your calendar. If it ever leaks, click "
+        "<b>Reset</b> next to it in Google and send me the new one.\n"
+        "Using a school or work account and can't see it? Your admin may have turned it off. "
+        "Try another calendar." + PASTE_NEXT
     ),
     "outlook": (
-        "📧 Outlook calendar · about 1 minute\n\n"
-        "Do this on a computer.\n\n"
-        "1. Go to outlook.com (or outlook.office.com for a school or work account), then "
-        "⚙️ Settings.\n"
-        "2. Choose Calendar, then Shared calendars.\n"
-        '3. Under Publish a calendar, pick your calendar and "Can view when I\'m busy", '
-        "then Publish.\n"
-        "4. Copy the ICS link.\n\n"
-        "Can't see Publish? Your school account may not allow it. Try another calendar, or "
-        "add your NUSMods instead." + PASTE_NEXT
+        "📧 <b>Outlook Calendar</b> · about 1 minute\n"
+        "Do this on a computer, at outlook.com (or outlook.office.com for a school or work "
+        "account).\n\n"
+        "1. Click the <b>⚙️ Settings</b> gear at the top right.\n"
+        "2. Go to <b>Calendar</b>, then <b>Shared calendars</b>.\n"
+        "3. Under <b>Publish a calendar</b>, choose your calendar.\n"
+        "4. Set the detail to <b>Can view when I'm busy</b>, then click <b>Publish</b>.\n"
+        "5. Copy the <b>ICS</b> link that appears.\n"
+        "⚠️ You'll see two links, HTML and ICS. Copy the ICS one.\n\n"
+        "✅ You'll know it's right: the link ends in <code>.ics</code>.\n\n"
+        "Can't see Publish? Your school or work account may not allow it. Try another "
+        "calendar, or add your NUSMods instead." + PASTE_NEXT
     ),
 }
 
@@ -280,6 +293,14 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     if screen == "export":
         return InlineKeyboardMarkup([[_button("« NUSMods link", "nusmods")]])
     return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
+
+
+HTML_SCREENS = frozenset({"home", "nusmods", "ios", "google", "outlook"})
+
+
+def parse_mode(name: str) -> str | None:
+    """Telegram parse mode for one setup screen."""
+    return "HTML" if name in HTML_SCREENS else None
 
 
 def screen(name: str, google: bool = False) -> tuple[str, InlineKeyboardMarkup | None] | None:

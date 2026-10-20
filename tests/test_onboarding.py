@@ -73,6 +73,31 @@ async def test_every_guide_ends_with_what_to_do_next(service_factory):
         assert "Setup is optional" in guide.text, screen
 
 
+async def test_guides_warn_about_the_common_wrong_turns(service_factory):
+    service, _ = service_factory()
+    ios = (await service.callback(1, "setup:ios"))[0].text
+    assert "only works for iCloud calendars" in ios and "Google or Outlook" in ios
+    google = (await service.callback(1, "setup:google"))[0].text
+    assert "Not the Public address" in google and "school or work account" in google
+    outlook = (await service.callback(1, "setup:outlook"))[0].text
+    assert "two links" in outlook and "ICS one" in outlook
+
+
+async def test_guides_say_where_to_do_it_and_how_to_spot_the_right_link(service_factory):
+    service, _ = service_factory()
+    expected = {
+        "ios": ("Do this on your iPhone", "<code>webcal://</code>"),
+        "google": ("Do this on a computer", "ends in <code>.ics</code>"),
+        "outlook": ("Do this on a computer", "ends in <code>.ics</code>"),
+        "nusmods": ("Open NUSMods", "<code>https://nusmods.com/timetable</code>"),
+    }
+    for screen, phrases in expected.items():
+        guide = (await service.callback(1, f"setup:{screen}"))[0]
+        assert guide.parse_mode == "HTML", screen  # so the on-screen labels are bold
+        assert "You'll know it's right" in guide.text, screen
+        assert all(p in guide.text for p in phrases), screen
+
+
 async def test_nusmods_guide_links_to_nusmods(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]
@@ -105,7 +130,7 @@ async def test_nusmods_guide_points_to_its_own_calendar_export(service_factory):
     export = (await service.callback(1, tap(guide, "Classes in my own calendar?")))[0]
     assert export.edit and "Export" in export.text and "not your classes" in export.text
     back = (await service.callback(1, tap(export, "« NUSMods link")))[0]
-    assert back.text.startswith("📚 Your NUSMods link")
+    assert back.text.startswith("📚 <b>Your NUSMods link</b>")
 
 
 async def test_after_a_calendar_link_start_says_all_set(service_factory, reference):

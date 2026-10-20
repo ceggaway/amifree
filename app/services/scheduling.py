@@ -1775,11 +1775,8 @@ class SchedulingService:
             if found is None:
                 return [Reply("That button isn't valid. Send /start.")]
             text, keyboard = found
-            return [
-                Reply(
-                    text, keyboard, edit=True, parse_mode="HTML" if data == "setup:home" else None
-                )
-            ]
+            name = data.removeprefix("setup:")
+            return [Reply(text, keyboard, edit=True, parse_mode=onboarding.parse_mode(name))]
         if data in ("free:today", "free:tomorrow", "free:weekend"):
             today = self.clock().astimezone(SG).date()
             days = {

@@ -1795,7 +1795,11 @@ class SchedulingService:
         if data == "gcal:start":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            return self.google_sync.steps()
+            return self.google_sync.steps(phone=True)
+        if data == "gcal:computer":
+            if not self.google_sync.enabled:
+                return [Reply("Google sharing isn't available right now.")]
+            return self.google_sync.steps(phone=False)
         if data == "pcal:off":
             return await self.disconnect_calendar(user)
         if data.startswith("pcal:rm:"):

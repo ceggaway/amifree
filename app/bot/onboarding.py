@@ -279,6 +279,28 @@ def google_share_steps(email: str) -> str:
     )
 
 
+def google_share_steps_phone(email: str) -> str:
+    return (
+        "🔗 <b>Share your Google Calendar with AmIFree</b> · about 1 minute\n"
+        "Do this in the Google Calendar app on your phone.\n\n"
+        "<b>Part 1 · Open your calendar's sharing</b>\n"
+        "1. Open the <b>Google Calendar</b> app and tap <b>☰</b> (top left).\n"
+        "2. Tap <b>Settings</b>.\n"
+        "3. Under your email, tap <b>My calendar</b> (or the calendar you want me to check).\n\n"
+        "<b>Part 2 · Add AmIFree</b>\n"
+        "4. Tap <b>Shared with</b>, then <b>Add people or groups</b>.\n"
+        f"5. Paste this email (tap to copy): <code>{html.escape(email)}</code>\n"
+        "6. Open the permission menu and choose <b>Make changes (see private events as "
+        "free/busy)</b>.\n"
+        "7. Tap <b>Save</b>.\n\n"
+        "<b>Part 3 · Tell me your email</b>\n"
+        "8. Send me your own Google email here, like you@gmail.com. I'll put a code in that "
+        "calendar; send the code back to show it's yours.\n\n"
+        "I only change events I added myself. To stop, remove AmIFree from Shared with, or tap "
+        "Remove in /calendar."
+    )
+
+
 PHOTOS_CAPTION = "Swipe through the pictures: the red marks show where to tap."
 
 # Guide name -> (folder under app/assets, pictures in order).
@@ -320,8 +342,31 @@ def google_share_photos() -> tuple[bytes, ...]:
         return ()
 
 
-def google_steps_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
+GOOGLE_PHONE_PHOTO_FILES = (
+    "gphone_step1.png",
+    "gphone_step2.png",
+    "gphone_step3.png",
+    "gphone_step4.png",
+    "gphone_step5.png",
+)
+
+
+def google_phone_photos() -> tuple[bytes, ...]:
+    """The phone share screenshots, in order. Empty if they can't be read: the steps still work."""
+    folder = Path(__file__).resolve().parent.parent / "assets" / "google_phone"
+    try:
+        return tuple((folder / name).read_bytes() for name in GOOGLE_PHONE_PHOTO_FILES)
+    except OSError:
+        return ()
+
+
+def google_steps_keyboard(phone: bool = False) -> InlineKeyboardMarkup:
+    switch = (
+        InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")
+        if phone
+        else InlineKeyboardButton("📱 On my phone instead?", callback_data="gcal:start")
+    )
+    return InlineKeyboardMarkup([[switch], [_button("« Other calendars", "calendar")]])
 
 
 def guide_keyboard(screen: str) -> InlineKeyboardMarkup:

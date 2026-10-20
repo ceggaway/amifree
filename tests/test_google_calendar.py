@@ -339,6 +339,24 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     assert "Secret address" in link.text or "link" in link.text.lower()
 
 
+async def test_share_steps_are_phone_first_with_a_computer_switch(with_google, reference):
+    service, _, _ = with_google()
+    await onboard(service, reference)
+    default = await service.callback(1, "gcal:start")
+    assert "Google Calendar app on your phone" in default[0].text
+    assert default[0].parse_mode == "HTML"
+    labels = [b.text for row in default[0].keyboard.inline_keyboard for b in row]
+    assert "💻 On a computer instead?" in labels
+    assert len(default) == 2 and len(default[1].photos) == 5
+    assert all(ph.startswith(b"\x89PNG") for ph in default[1].photos)
+    computer = (await service.callback(1, "gcal:computer"))[0]
+    assert "calendar.google.com" in computer.text
+    clabels = [b.text for row in computer.keyboard.inline_keyboard for b in row]
+    assert "📱 On my phone instead?" in clabels
+    back = (await service.callback(1, "gcal:start"))[0]
+    assert "Google Calendar app on your phone" in back.text
+
+
 async def test_the_steps_show_the_bots_google_email(with_google, reference):
     service, _, _ = with_google()
     await onboard(service, reference)

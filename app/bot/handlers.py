@@ -15,7 +15,7 @@ from telegram.ext import (
     filters,
 )
 
-from app.bot.delivery import webhook_delivery
+from app.bot.delivery import telegram_profile, webhook_delivery
 from app.bot.keyboards import links_keyboard
 from app.bot.messages import GROUP_HELP, Reply, send_reply
 from app.services.app_links import group_links
@@ -68,6 +68,7 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
     if update.effective_chat.type != ChatType.PRIVATE:
         await group_dispatch(update, context, operation)
         return
+    telegram_profile.set((update.effective_user.username, update.effective_user.first_name))
     service = context.application.bot_data["service"]
     try:
         if operation == "callback":

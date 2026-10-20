@@ -152,6 +152,7 @@ def create_app(
                     BotCommand("deadline", "Save a deadline, or see your list"),
                     BotCommand("calendar", "Connect a calendar so I check it too"),
                     BotCommand("settings", "Reminders and privacy"),
+                    BotCommand("feedback", "Tell the team what you think"),
                     BotCommand("help", "How AmIFree works"),
                     BotCommand("cancel", "Clear a pending action"),
                     BotCommand("deletemydata", "Delete everything about me"),

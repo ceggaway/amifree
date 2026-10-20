@@ -11,6 +11,7 @@ from datetime import time as day_time
 from uuid import UUID
 
 from app.bot import onboarding
+from app.bot.delivery import telegram_profile
 from app.bot.keyboards import (
     agenda_keyboard,
     calendar_settings_keyboard,
@@ -18,6 +19,7 @@ from app.bot.keyboards import (
     choose_keyboard,
     confirm_keyboard,
     deadline_keyboard,
+    feedback_choice_keyboard,
     free_keyboard,
     menu_keyboard,
     page_keyboard,
@@ -196,6 +198,14 @@ MENU_COMMANDS = {
 }
 
 
+FEEDBACK_PROMPT = "💬 Type your feedback and I'll pass it to the team. /cancel to stop."
+FEEDBACK_ASK = (
+    "Send this feedback?\n\n"
+    "🕶 Anonymous — just your message.\n"
+    "👤 With your @handle — so the team can reply."
+)
+
+
 class SchedulingService:
     def __init__(
         self,
@@ -251,6 +261,7 @@ class SchedulingService:
         self.extraction_limit = RateLimiter(15, 300)
         self.picture_limit = RateLimiter(10, 300)  # a picture is also an extraction afterwards
         self.calendar_limit = RateLimiter(8, 600)
+        self.feedback_limit = RateLimiter(5, 600)
 
     async def flush_notifications(self):
         if self.notifier:
@@ -311,10 +322,43 @@ class SchedulingService:
         except Exception as exc:
             log.warning("analytics_failed error_type=%s action=%s", type(exc).__name__, kind)
 
+    async def receive_feedback_text(self, user, text: str) -> list[Reply]:
+        message = text.strip()
+        if not message:
+            return [Reply("Nothing to send yet. Type your feedback, or /cancel.")]
+        await self.repo.set_pending(user.id, {"stage": "feedback_choose", "text": message[:2000]})
+        return [Reply(FEEDBACK_ASK, feedback_choice_keyboard())]
+
+    async def submit_feedback(self, user, data: str) -> list[Reply]:
+        pending = user.pending
+        if not pending or pending.get("stage") != "feedback_choose":
+            return [Reply("That feedback form expired. Send /feedback to start again.", edit=True)]
+        await self.repo.set_pending(user.id, None)
+        if data == "fb:cancel":
+            return [Reply("No worries — nothing sent.", edit=True)]
+        if not self.feedback_limit.allow(user.id):
+            return [Reply(SLOW_DOWN, edit=True)]
+        username, name = (None, None)
+        if data == "fb:named":
+            username, name = telegram_profile.get()
+        await self.repo.create_feedback(pending["text"], username, name)
+        await self.safe_action(user.id, "feedback")
+        how = " with your @handle" if data == "fb:named" else " anonymously"
+        return [Reply(f"🙌 Thanks! Sent to the team{how}.", edit=True)]
+
     async def command(self, telegram_id: int, command: str, args: str = "") -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
         if command == "help":
             return [Reply(HELP, parse_mode="HTML")]
+        if command == "feedback":
+            body = args.strip()
+            if body:
+                await self.repo.set_pending(
+                    user.id, {"stage": "feedback_choose", "text": body[:2000]}
+                )
+                return [Reply(FEEDBACK_ASK, feedback_choice_keyboard())]
+            await self.repo.set_pending(user.id, {"stage": "feedback_text"})
+            return [Reply(FEEDBACK_PROMPT)]
         if command == "start":
             await self.safe_action(user.id, "start")
             if user.dm_blocked:
@@ -861,6 +905,8 @@ class SchedulingService:
         self, telegram_id: int, message_id: int, text: str, reference: datetime
     ) -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
+        if user.pending and user.pending.get("stage") == "feedback_text":
+            return await self.receive_feedback_text(user, text)
         if len(text) > 8000:
             return [
                 Reply(
@@ -1805,6 +1851,8 @@ class SchedulingService:
                 await self.repo.set_pending(user.id, None)
             reply = await self.free_days(user, days)
             return [Reply(reply.text, edit=True)]
+        if data in ("fb:anon", "fb:named", "fb:cancel"):
+            return await self.submit_feedback(user, data)
         if data == "gcal:start":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]

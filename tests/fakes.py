@@ -35,6 +35,7 @@ class MemoryRepository:
         self.poll_created = {}
         self.events = {}
         self.actions = []
+        self.feedbacks = []
         self.available = True
         self.calendar_blocks = {}  # calendar id -> [(start, end)]
         self.calendars = {}
@@ -853,6 +854,9 @@ class MemoryRepository:
             return False
         del self.deadlines[deadline_id]
         return True
+
+    async def create_feedback(self, message, username, name):
+        self.feedbacks.append({"message": message, "username": username, "name": name})
 
     async def create_reminder(self, user_id, text, remind_at):
         r = Reminder(

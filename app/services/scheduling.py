@@ -1776,7 +1776,11 @@ class SchedulingService:
                 return [Reply("That button isn't valid. Send /start.")]
             text, keyboard = found
             name = data.removeprefix("setup:")
-            return [Reply(text, keyboard, edit=True, parse_mode=onboarding.parse_mode(name))]
+            replies = [Reply(text, keyboard, edit=True, parse_mode=onboarding.parse_mode(name))]
+            photos = onboarding.screen_photos(name)
+            if photos:
+                replies.append(Reply(onboarding.PHOTOS_CAPTION, photos=photos))
+            return replies
         if data in ("free:today", "free:tomorrow", "free:weekend"):
             today = self.clock().astimezone(SG).date()
             days = {

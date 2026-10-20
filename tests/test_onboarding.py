@@ -98,6 +98,29 @@ async def test_guides_say_where_to_do_it_and_how_to_spot_the_right_link(service_
         assert all(p in guide.text for p in phrases), screen
 
 
+async def test_iphone_guide_has_a_mac_version_and_back(service_factory):
+    service, _ = service_factory()
+    iphone = (await service.callback(1, "setup:ios"))[0]
+    assert "💻 On a Mac instead?" in labels(iphone)
+    mac = (await service.callback(1, tap(iphone, "💻 On a Mac instead?")))[0]
+    assert mac.edit and mac.parse_mode == "HTML"
+    assert all(p in mac.text for p in ("Do this on your Mac", "Public Calendar", "webcal://"))
+    assert labels(mac) == ["📱 On an iPhone instead?", "« Other calendars"]
+    back = (await service.callback(1, tap(mac, "📱 On an iPhone instead?")))[0]
+    assert "Do this on your iPhone" in back.text
+
+
+async def test_iphone_and_mac_guides_send_their_pictures(service_factory):
+    service, _ = service_factory()
+    ios = await service.callback(1, "setup:ios")
+    assert len(ios) == 2 and ios[1].text == onboarding.PHOTOS_CAPTION and len(ios[1].photos) == 4
+    mac = await service.callback(1, "setup:mac")
+    assert len(mac) == 2 and len(mac[1].photos) == 2
+    # Only these two guides have pictures here; Google's are sent by its own flow.
+    assert len(await service.callback(1, "setup:outlook")) == 1
+    assert all(photo.startswith(b"\x89PNG") for photo in ios[1].photos + mac[1].photos)
+
+
 async def test_nusmods_guide_links_to_nusmods(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]

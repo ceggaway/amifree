@@ -58,18 +58,39 @@ GUIDES = {
         "🍎 <b>iPhone / iCloud Calendar</b> · about 1 minute\n"
         "Do this on your iPhone.\n\n"
         "1. Open the <b>Calendar</b> app.\n"
-        "2. Tap <b>Calendars</b> at the bottom.\n"
-        "3. Tap the <b>ⓘ</b> next to the calendar you use most.\n"
-        "4. Turn on <b>Public Calendar</b>.\n"
-        "5. Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
+        "2. Tap the calendar icon at the bottom right. (Older iPhones show the word "
+        "<b>Calendars</b> instead.)\n"
+        "3. Under the <b>iCloud</b> heading, tap the <b>ⓘ</b> next to the calendar you want me "
+        "to check. Not the ones under Gmail.\n"
+        "4. Scroll down and turn on <b>Public Calendar</b>.\n"
+        "5. Tap <b>Share Link…</b> just below it, then <b>Copy</b>.\n\n"
         "✅ You'll know it's right: the link starts with <code>webcal://</code>. That's normal.\n"
-        "⚠️ This only works for iCloud calendars. For a calendar from Google or Outlook, use "
-        "that guide instead.\n\n"
-        "Use several calendars, like Classes, CCA and Events? Repeat for each one and paste "
-        "every link. I'll check them all.\n\n"
-        "🔒 Anyone with a link can see that calendar, so only paste it here. I keep just "
-        "when you're busy. Turn <b>Public Calendar</b> off any time to stop sharing it."
-        + PASTE_NEXT
+        "⚠️ This only works for iCloud calendars. Calendar under Gmail, or no Public Calendar "
+        "switch? That one is from Google or Outlook, so use that guide instead.\n\n"
+        "More than one iCloud calendar, like Classes, CCA and Events? Repeat for each one and "
+        "paste every link. I'll check them all.\n\n"
+        "🔒 Anyone with the link can see that calendar, including event names, so only paste "
+        "it here. I keep just when you're busy. Turn <b>Public Calendar</b> off any time to "
+        "stop sharing it." + PASTE_NEXT
+    ),
+    "mac": (
+        "💻 <b>Mac Calendar</b> · about 1 minute\n"
+        "Do this on your Mac. (iPad? Use the iPhone steps.)\n\n"
+        "1. Open the <b>Calendar</b> app.\n"
+        "2. On the left, under the <b>iCloud</b> heading, find the calendar you want me to "
+        "check. No list? Click the calendar icon at the top.\n"
+        "3. Click the person icon next to its name. (It shows when you hover over it.)\n"
+        "4. Tick <b>Public Calendar</b>. A link appears.\n"
+        "5. Click the share button next to the link, then <b>Copy</b>. Then click "
+        "<b>Done</b>.\n\n"
+        "✅ You'll know it's right: the link starts with <code>webcal://</code>. That's normal.\n"
+        "⚠️ This only works for iCloud calendars. Calendar under Gmail, or no Public Calendar "
+        "box? That one is from Google or Outlook, so use that guide instead.\n\n"
+        "More than one iCloud calendar? Repeat for each one and paste every link. I'll check "
+        "them all.\n\n"
+        "🔒 Anyone with the link can see that calendar, including event names, so only paste "
+        "it here. I keep just when you're busy. Untick <b>Public Calendar</b> any time to "
+        "stop sharing it." + PASTE_NEXT
     ),
     "google": (
         "📅 <b>Google Calendar</b> · about 1 minute\n"
@@ -258,6 +279,27 @@ def google_share_steps(email: str) -> str:
     )
 
 
+PHOTOS_CAPTION = "Swipe through the pictures: the red marks show where to tap."
+
+# Guide name -> (folder under app/assets, pictures in order).
+SCREEN_PHOTOS = {
+    "ios": ("ios", ("ios_step1.png", "ios_step2.png", "ios_step3.png", "ios_step4.png")),
+    "mac": ("ios", ("mac_step1.png", "mac_step2.png")),
+}
+
+
+def screen_photos(name: str) -> tuple[bytes, ...]:
+    """The step pictures for one setup guide. Empty if there are none or they can't be read."""
+    if name not in SCREEN_PHOTOS:
+        return ()
+    folder, files = SCREEN_PHOTOS[name]
+    base = Path(__file__).resolve().parent.parent / "assets" / folder
+    try:
+        return tuple((base / f).read_bytes() for f in files)
+    except OSError:
+        return ()
+
+
 GOOGLE_PHOTOS_CAPTION = "Swipe through the pictures: the red box shows what to click in each step."
 
 GOOGLE_PHOTO_FILES = (
@@ -292,10 +334,24 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         )
     if screen == "export":
         return InlineKeyboardMarkup([[_button("« NUSMods link", "nusmods")]])
+    if screen == "ios":
+        return InlineKeyboardMarkup(
+            [
+                [_button("💻 On a Mac instead?", "mac")],
+                [_button("« Other calendars", "calendar")],
+            ]
+        )
+    if screen == "mac":
+        return InlineKeyboardMarkup(
+            [
+                [_button("📱 On an iPhone instead?", "ios")],
+                [_button("« Other calendars", "calendar")],
+            ]
+        )
     return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
 
 
-HTML_SCREENS = frozenset({"home", "nusmods", "ios", "google", "outlook"})
+HTML_SCREENS = frozenset({"home", "nusmods", "ios", "mac", "google", "outlook"})
 
 
 def parse_mode(name: str) -> str | None:

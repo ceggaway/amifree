@@ -1091,7 +1091,8 @@ class SchedulingService:
         if extracted.kind == "unknown":
             return [
                 Reply(
-                    "I couldn't find an event in that message. Send an invitation with a title, date and start/end times."
+                    "I couldn't find an event in that message. If it's in longer notes, "
+                    "try sending just the relevant line with the event, date and start time."
                 )
             ]
         weekly = None if pending else weekly_weekday(text)

@@ -65,7 +65,7 @@ GUIDES = {
         "5. Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
         "✅ You'll know it's right: it starts with <code>webcal://</code>.\n\n"
         "⚠️ This only works for iCloud calendars. A calendar under Gmail, or with no Public "
-        "Calendar switch, is from Google or Outlook — use that guide.\n\n"
+        "Calendar switch, is from Google or Outlook — tap its button below.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
         "it here. I keep just your busy times.\n\n"
         "🗂 Several iCloud calendars (Classes, CCA, Events)? Add each one's link." + PASTE_NEXT
@@ -81,7 +81,7 @@ GUIDES = {
         "5. Click the <b>share button</b> by the link, then <b>Copy</b>, then <b>Done</b>.\n\n"
         "✅ You'll know it's right: it starts with <code>webcal://</code>.\n\n"
         "⚠️ This only works for iCloud calendars. A calendar under Gmail, or with no Public "
-        "Calendar box, is from Google or Outlook — use that guide.\n\n"
+        "Calendar box, is from Google or Outlook — tap its button below.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
         "it here. I keep just your busy times.\n\n"
         "🗂 Several iCloud calendars? Add each one's link." + PASTE_NEXT
@@ -368,6 +368,7 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             [
                 [_button("💻 On a Mac instead?", "mac")],
+                [_button("📅 Mine's Google", "google"), _button("📧 Mine's Outlook", "outlook")],
                 [_button("« Other calendars", "calendar")],
             ]
         )
@@ -375,6 +376,7 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             [
                 [_button("📱 On an iPhone instead?", "ios")],
+                [_button("📅 Mine's Google", "google"), _button("📧 Mine's Outlook", "outlook")],
                 [_button("« Other calendars", "calendar")],
             ]
         )

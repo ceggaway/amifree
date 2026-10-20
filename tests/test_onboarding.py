@@ -105,7 +105,12 @@ async def test_iphone_guide_has_a_mac_version_and_back(service_factory):
     mac = (await service.callback(1, tap(iphone, "💻 On a Mac instead?")))[0]
     assert mac.edit and mac.parse_mode == "HTML"
     assert all(p in mac.text for p in ("Do this on your Mac", "Public Calendar", "webcal://"))
-    assert labels(mac) == ["📱 On an iPhone instead?", "« Other calendars"]
+    assert labels(mac) == [
+        "📱 On an iPhone instead?",
+        "📅 Mine's Google",
+        "📧 Mine's Outlook",
+        "« Other calendars",
+    ]
     back = (await service.callback(1, tap(mac, "📱 On an iPhone instead?")))[0]
     assert "Do this on your iPhone" in back.text
 

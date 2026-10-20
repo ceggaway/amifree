@@ -107,6 +107,7 @@ TABLES = {
     "deadlines",
     "google_connections",
     "google_event_links",
+    "feedback",
 }
 COLUMNS = {
     "version",
@@ -155,6 +156,7 @@ COLUMNS = {
     "group_event_id",
     "chat_id",
     "message_id",
+    "message",
     "reminders_enabled",
     "dm_blocked",
     "poll_id",

@@ -347,6 +347,17 @@ def _menu(label: str, name: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(label, callback_data=f"menu:{name}")
 
 
+def feedback_choice_keyboard() -> InlineKeyboardMarkup:
+    """Anonymous by default; attaching the handle is an explicit opt-in."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🕶 Send anonymously", callback_data="fb:anon")],
+            [InlineKeyboardButton("👤 Send with my @handle", callback_data="fb:named")],
+            [InlineKeyboardButton("Cancel", callback_data="fb:cancel")],
+        ]
+    )
+
+
 def menu_keyboard() -> InlineKeyboardMarkup:
     """The four things a set-up user does most; each tap runs the matching command."""
     return InlineKeyboardMarkup(

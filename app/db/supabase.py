@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -78,6 +78,7 @@ class SupabaseRepository:
             "google_event_links": "user_id,event_id,synced_version",
             "schema_migrations": "version,name",
             "processed_updates": "update_id,status,claimed_at",
+            "feedback": "id,message,status,created_at",
         }
 
         async def has_table(table, columns):
@@ -291,6 +292,14 @@ class SupabaseRepository:
         return bool(result.data)
 
     # ---- reminders ----
+
+    async def create_feedback(self, message: str, username: str | None, name: str | None) -> None:
+        row: dict = {"message": message[:2000]}
+        if username:
+            row["username"] = username[:64]
+        if name:
+            row["name"] = name[:128]
+        await self.client.table("feedback").insert(row).execute()
 
     async def create_reminder(self, user_id: str, text: str, remind_at: datetime) -> Reminder:
         row = {"user_id": user_id, "text": text, "remind_at": remind_at.isoformat()}

@@ -24,3 +24,9 @@ class Delivery:
 
 
 webhook_delivery: ContextVar[Delivery | None] = ContextVar("webhook_delivery", default=None)
+
+# The tapping/sending user's Telegram handle for this request, so a service method can
+# attach it to named feedback without threading it through every call signature.
+telegram_profile: ContextVar[tuple[str | None, str | None]] = ContextVar(
+    "telegram_profile", default=(None, None)
+)

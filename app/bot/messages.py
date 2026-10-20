@@ -22,6 +22,7 @@ HELP = """<b>AmIFree</b> — forward me a plan, I'll tell you if you're free and
 /deadline — save one, or see your list
 /calendar — connect Google, iPhone or Outlook
 /settings — reminders and privacy
+/feedback — tell the team what you think
 /cancel — clear a pending action
 /deletemydata — delete my data
 /start — set up again

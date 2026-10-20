@@ -67,6 +67,7 @@ from app.services.date_resolution import (
 )
 from app.services.deadlines import EXAMPLE as DEADLINE_EXAMPLE
 from app.services.deadlines import card_text, due_line, validate_deadline
+from app.services.deadlines import when as deadline_when
 from app.services.detection import DetectionService
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
@@ -190,7 +191,7 @@ AGENDA_PAGE = 10
 MENU_COMMANDS = {
     "menu:plans": "plans",
     "menu:free": "free",
-    "menu:deadlines": "deadlines",
+    "menu:deadlines": "deadline",
     "menu:settings": "settings",
 }
 
@@ -313,7 +314,7 @@ class SchedulingService:
     async def command(self, telegram_id: int, command: str, args: str = "") -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
         if command == "help":
-            return [Reply(HELP)]
+            return [Reply(HELP, parse_mode="HTML")]
         if command == "start":
             await self.safe_action(user.id, "start")
             if user.dm_blocked:
@@ -788,7 +789,8 @@ class SchedulingService:
         try:
             UUID(item_id)
         except ValueError:
-            return [Reply("That button isn't valid. Use /plans.")]
+            command = "deadline" if kind == "dc" else "plans"
+            return [Reply(f"That button isn't valid. Use /{command}.")]
         if kind == "pc":
             event = await self.repo.get_event(user.id, item_id)
             if not event or event.status in (Status.PREVIEW, Status.DECLINED, Status.CANCELLED):
@@ -796,8 +798,8 @@ class SchedulingService:
             return [event_card(event, await self.availability(user, event, event.id), synced(user))]
         if kind == "dc":
             deadline = await self.repo.get_deadline(user.id, item_id)
-            if not deadline:
-                return [Reply("That deadline is gone. Use /plans.")]
+            if not deadline or deadline.done:
+                return [Reply("That deadline is gone or already done. Use /deadline.")]
             return [
                 Reply(
                     card_text(deadline, self.clock(), user.reminders_enabled),
@@ -1103,8 +1105,8 @@ class SchedulingService:
             )
         ]
 
-    async def list_deadlines(self, user: User) -> list[Reply]:
-        """Overdue first (they stay until Done or Remove), then upcoming, each with days left."""
+    async def list_deadlines(self, user: User, page: int = 0) -> list[Reply]:
+        """One numbered message: overdue first, then upcoming, with a button per deadline."""
         now = self.clock()
         found = await self.repo.deadlines_between(
             now - timedelta(days=365), now + timedelta(days=400), user.id
@@ -1116,33 +1118,32 @@ class SchedulingService:
                     f"/deadline {DEADLINE_EXAMPLE.removeprefix('For example: ')}"
                 )
             ]
-        overdue = [d for d in found if d.due_at < now]
-        upcoming = [d for d in found if d.due_at >= now]
-        replies: list[Reply] = []
-        for heading, group in (("⚠️ Overdue", overdue), ("Coming up", upcoming)):
-            if not group:
-                continue
-            if overdue:
-                replies.append(Reply(heading))
-            replies += [
-                Reply(
-                    card_text(d, now, user.reminders_enabled).rsplit("\n\n", 1)[0],
-                    deadline_keyboard(d.id),
-                )
-                for d in group[:20]
-            ]
-            if len(group) > 20:
-                replies.append(Reply(f"…and {len(group) - 20} more."))
-        return replies
+        found.sort(key=lambda d: d.due_at)
+        pages = (len(found) + AGENDA_PAGE - 1) // AGENDA_PAGE
+        page = max(0, min(page, pages - 1))
+        shown = found[page * AGENDA_PAGE : (page + 1) * AGENDA_PAGE]
+        lines = ["Deadlines — tap a number to open it."]
+        buttons = []
+        last = None
+        for n, deadline in enumerate(shown, 1):
+            heading = "⚠️ Overdue" if deadline.due_at < now else "Coming up"
+            if heading != last:
+                lines.append("\n" + heading)
+                last = heading
+            lines.append(f"{n}. {deadline.title[:60]} · Due {deadline_when(deadline.due_at, now)}")
+            buttons.append((str(n), "dc", deadline.id))
+        if pages > 1:
+            lines.append(f"\nPage {page + 1} of {pages}")
+        return [Reply("\n".join(lines), agenda_keyboard(buttons, page, pages, "deadline"))]
 
     async def deadline_action(self, user: User, action: str, deadline_id: str) -> list[Reply]:
         try:
             UUID(deadline_id)
         except ValueError:
-            return [Reply("That button isn't valid. Use /deadlines.")]
+            return [Reply("That button isn't valid. Use /deadline.")]
         deadline = await self.repo.get_deadline(user.id, deadline_id)
         if not deadline:
-            return [Reply("That deadline is already gone. /deadlines lists the rest.", edit=True)]
+            return [Reply("That deadline is already gone. /deadline lists the rest.", edit=True)]
         if action == "rm":
             await self.repo.delete_deadline(user.id, deadline_id)
             token = self.remember_removed(
@@ -1737,12 +1738,14 @@ class SchedulingService:
             return await self.groups.series_action(user, data)
         if data.startswith(("at:", "ap:", "aa:")):
             return await self.groups.attendance_action(user, data)
-        if data.startswith(("events:", "plans:")):
+        if data.startswith(("events:", "plans:", "deadline:")):
             prefix, _, page = data.partition(":")
             if not page.isascii() or not page.isdigit() or len(page) > 8:
                 return [Reply(f"That page isn't valid. Use /{prefix}.")]
             if prefix == "plans":
                 return await self.agenda(user, int(page))
+            if prefix == "deadline":
+                return [replace(r, edit=True) for r in await self.list_deadlines(user, int(page))]
             return await self.list_events(user, int(page))
         parts = data.split(":")
         action = parts[0]

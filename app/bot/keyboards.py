@@ -199,7 +199,7 @@ def deadline_keyboard(deadline_id: str) -> InlineKeyboardMarkup:
 
 
 def agenda_keyboard(
-    items: list[tuple[str, str, str]], page: int = 0, pages: int = 1
+    items: list[tuple[str, str, str]], page: int = 0, pages: int = 1, prefix: str = "plans"
 ) -> InlineKeyboardMarkup:
     """One numbered button per agenda item (callback_data "<kind>:<id>"), then Previous/Next."""
     btns = [
@@ -208,7 +208,7 @@ def agenda_keyboard(
     ]
     rows = [btns[i : i + 6] for i in range(0, len(btns), 6)]
     if pages > 1:
-        rows.extend(page_keyboard(page, pages, "plans").inline_keyboard)
+        rows.extend(page_keyboard(page, pages, prefix).inline_keyboard)
     return InlineKeyboardMarkup(rows)
 
 

@@ -41,8 +41,9 @@ async def test_removed_deadline_comes_back(service_factory, reference):
         )
     )
     await service.command(1, "deadline", "CS3244 report due Fri 11:59pm")
-    listed = (await service.command(1, "deadlines"))[0]
-    gone = (await service.callback(1, tap(listed, "🗑 Remove")))[0]
+    listed = (await service.command(1, "deadline"))[0]
+    card = (await service.callback(1, tap(listed, "1")))[0]
+    gone = (await service.callback(1, tap(card, "🗑 Remove")))[0]
     assert gone.text == "🗑 Removed: CS3244 report" and not repo.deadlines
     back = (await service.callback(1, tap(gone, "↩️ Undo")))[0]
     assert back.text.startswith("↩️ Restored.\n📌 CS3244 report") and len(repo.deadlines) == 1

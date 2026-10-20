@@ -7,30 +7,30 @@ from app.bot.keyboards import event_keyboard, group_keyboard
 from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
 from app.services.availability import Availability
 
-HELP = """Forward me a plan and I'll tell you if you're free, then save it.
+HELP = """<b>AmIFree</b> — forward me a plan, I'll tell you if you're free and save it.
 
-HOW TO USE ME
-• Forward or type a plan with a date and time, like "Dinner Fri 7-9pm at Vivo". I check it against your schedule, then you tap Add to plans or Skip.
-• Forward a deadline, like "report due Fri 11:59pm", and I'll remind you the day before.
-• Connect a calendar or NUSMods so I can see your classes and busy times (optional).
+<b>How to use me</b>
+📩 Forward or type a plan with a time, like "Dinner Fri 7-9pm at Vivo". I check it, then you tap Add to plans or Skip.
+⏰ Forward a deadline, like "report due Fri 11:59pm". I'll remind you the day before.
+📅 Connect a calendar or NUSMods so I can see your classes and busy times (optional).
 
-"No clashes found" only covers what I know about.
+<i>"No clashes found" only covers what I know about.</i>
 
-COMMANDS
-/plans — everything coming up, with Edit and Remove
-/free — am I free? e.g. /free fri 7-9pm or /free tomorrow
-/deadline — save a deadline, or see your list
-/calendar — connect a calendar (Google, iPhone, Outlook) or add NUSMods
+<b>Commands</b>
+/plans — what's coming up
+/free — am I free? (/free fri 7-9pm)
+/deadline — save one, or see your list
+/calendar — connect Google, iPhone or Outlook
 /settings — reminders and privacy
 /cancel — clear a pending action
-/deletemydata — delete everything I store about you
+/deletemydata — delete my data
 /start — set up again
 
-IN A GROUP
-Reply /event to a plan to post a card with Going / Can't, a private "Am I free?" check and a headcount. /whosfree finds a time that works for everyone.
+<b>In a group</b>
+Reply /event to a plan for a card with Going / Can't and a headcount. /whosfree finds a time for everyone.
 
-PRIVACY
-I only act on what you send or forward to me, commands and taps. Pictures you forward are read for their text and not kept. I never read group chats, and your schedule is never shown to a group."""
+<b>Privacy</b>
+I only act on what you send me, commands and taps. I never read group chats, and your schedule is never shown to a group."""
 
 STATUS_LABELS = {
     Status.PREVIEW: "Not saved yet",

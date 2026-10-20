@@ -91,7 +91,9 @@ In disabled mode `/healthz` returns 200 and `/readyz` returns 503. This does not
 7. Forward `CCA dinner moved to 8pm` or `CCA dinner cancelled`. Review the proposed change before confirming. Ambiguous matches require selection.
 8. Test a second Telegram account to verify isolation.
 
-Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `/reminders`, `/free`, `/calendar`, `/cancel`, `/deletemydata`. Deletion requires a confirmation.
+Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `/deadline`, `/settings`, `/free`, `/calendar`, `/cancel`, `/deletemydata`. Deletion requires a confirmation.
+
+Send `/deadline <text>` to save a deadline, or `/deadline` alone for one numbered list, grouped into **⚠️ Overdue** and **Coming up** with due times and relative dates. Tap a number to open its card with **Done** and **Remove**. Lists have ten items per page; Previous/Next updates the same message. Manage deadline reminders in `/settings`.
 
 ### Groups
 

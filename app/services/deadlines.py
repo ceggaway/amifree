@@ -66,9 +66,10 @@ def card_text(deadline: Deadline, now: datetime, reminders: bool) -> str:
         text += "\n" + deadline.notes[:300]
     if reminders:
         text += "\n\nI'll remind you the day before and on the morning it's due."
+        text += " /settings to change reminders."
     else:
-        text += "\n\nReminders are off (/reminders on to turn them on)."
-    return text + "\n/deadlines lists them all."
+        text += "\n\nReminders are off (/settings to turn them on)."
+    return text + "\n/deadline lists them all."
 
 
 def reminder_moments(deadline: Deadline) -> dict[str, datetime]:
@@ -110,7 +111,10 @@ def reminder_text(deadline: Deadline, now: datetime) -> str:
         head = f"📌 Due tomorrow ({due:%a %-d %b}, {clock(due)}): {deadline.title}"
     else:
         head = f"📌 Due {when(due, now)}: {deadline.title}"
-    return head + "\n\nTap Done once it's handed in. /reminders off stops reminders."
+    return (
+        head + "\n\nTap Done once it's handed in. /settings to change reminders."
+        "\n/deadline lists them all."
+    )
 
 
 def due_line(deadline: Deadline) -> str:

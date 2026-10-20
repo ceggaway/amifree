@@ -22,9 +22,24 @@ sender's spelling, abbreviations and am/pm exactly:
 Use null for anything not stated. Never infer a date, time, venue or duration. A missing
 date or end time is not ambiguity: just leave that field null.
 
+Read the whole message. A scheduled activity is a plan even when it is embedded in meeting
+notes, minutes, a task list or a status update, rather than phrased as an invitation.
+When there is exactly ONE upcoming activity to attend, extract that activity even if the
+message also includes a notes heading/date, completed work, task targets or due dates.
+Keep the activity's own date and time together; do not use the notes date or a task's due
+date as the meeting date. Those contextual dates do not make the activity ambiguous.
+For example, "Notes 12 Oct: outline completed; slides due 20 Oct; review meeting 16 Oct
+3pm" is new: title "Review meeting", date_text "16 Oct", start_time_text "3pm",
+end_time_text null, ambiguity null. "Check if something is due" is not a confirmed deadline.
+Do not turn past meeting minutes or completed tasks alone into a new plan.
+If there are multiple upcoming activities to attend, keep ambiguity and ask which one;
+do not silently choose one. If there is no activity to attend but a clear deadline, use
+deadline as below.
+
 ambiguity: set it only for two or more possible dates or times ("Fri or Sat"), a time that
 could be am or pm ("at 7"), a vague time ("evening", "7ish"), more than one event in the
-message, a recurring event ("every Tuesday", "weekly"), a non-Singapore timezone, or a
+message to attend (not background notes or task deadlines), a recurring event ("every
+Tuesday", "weekly"), a non-Singapore timezone, or a
 missing year on a Feb 29 date. "730pm" and "7pm" are not ambiguous. Otherwise null.
 
 kind: new for any invitation or plan, including unclear ones; update for an explicit move or

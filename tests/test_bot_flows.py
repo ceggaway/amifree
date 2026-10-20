@@ -204,6 +204,8 @@ async def test_new_user_saves_without_nusmods(service_factory, reference):
     added = await service.callback(1, add.callback_data)
     assert len(added) == 1 and added[0].edit  # the tapped card is updated in place
     assert "In your plans" in added[0].text and "Added to your plans" in added[0].text
+    # nothing connected, so the first plan nudges toward classes and calendar
+    assert "classes and your own schedule" in added[0].text and "/calendar" in added[0].text
     event = next(iter(repo.events.values()))
     assert event.status == Status.GOING
     assert "CCA dinner" in (await service.command(1, "events"))[0].text

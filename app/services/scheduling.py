@@ -2027,7 +2027,20 @@ class SchedulingService:
         if statuses[action] == Status.GOING and was_preview and not result.group_event_id:
             going = [e for e in await self.repo.recent_events(user.id) if e.status == Status.GOING]
             if len(going) == 1:
-                note += "\nNext, try /free tomorrow to see your day."
+                calendars = await self.repo.list_calendars(user.id)
+                connected = (
+                    user.onboarding_status == "READY" or bool(calendars) or user.google_connected
+                )
+                if connected:
+                    note += "\nNext, try /free tomorrow to see your day."
+                else:
+                    # Nothing connected yet: now that they've seen it work, offer to make it
+                    # schedule-aware. One-off, because it only fires on the very first plan.
+                    note += (
+                        "\n\n🎉 First plan saved! I'll remind you the night before and flag "
+                        "clashes with your other plans.\nWant me to check your classes and your "
+                        "own schedule too? Tap /calendar."
+                    )
         card = decided_card(result, availability, note, user)
         if statuses[action] == Status.DECLINED and not was_preview and not result.group_event_id:
             # One tap brings it back: Undo is just "add to my plans" again.

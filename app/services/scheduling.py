@@ -579,9 +579,14 @@ class SchedulingService:
         on = user.reminders_enabled
         text = (
             "⚙️ Settings\n\n"
-            f"Reminders: {'on' if on else 'off'}\n"
-            'The night-before summary, deadline reminders, "still coming?" checks and nudges '
-            "about plans you haven't answered. Change alerts for plans you've added, and reminders you set with /remind, always arrive."
+            f"Reminders: {'on' if on else 'off'}\n\n"
+            "This toggle controls:\n"
+            "• A summary of tomorrow's plans\n"
+            "• Deadline reminders\n"
+            '• "Still coming?" checks\n'
+            "• Nudges to reply to group plans and polls\n\n"
+            "Even when off, you'll still get updates to plans you've added "
+            "and reminders you set with /remind."
         )
         return Reply(text, settings_keyboard(on))
 

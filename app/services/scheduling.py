@@ -1775,11 +1775,12 @@ class SchedulingService:
             if found is None:
                 return [Reply("That button isn't valid. Send /start.")]
             text, keyboard = found
-            return [
-                Reply(
-                    text, keyboard, edit=True, parse_mode="HTML" if data == "setup:home" else None
-                )
-            ]
+            name = data.removeprefix("setup:")
+            replies = [Reply(text, keyboard, edit=True, parse_mode=onboarding.parse_mode(name))]
+            photos = onboarding.screen_photos(name)
+            if photos:
+                replies.append(Reply(onboarding.PHOTOS_CAPTION, photos=photos))
+            return replies
         if data in ("free:today", "free:tomorrow", "free:weekend"):
             today = self.clock().astimezone(SG).date()
             days = {
@@ -1794,7 +1795,11 @@ class SchedulingService:
         if data == "gcal:start":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            return self.google_sync.steps()
+            return self.google_sync.steps(phone=True)
+        if data == "gcal:computer":
+            if not self.google_sync.enabled:
+                return [Reply("Google sharing isn't available right now.")]
+            return self.google_sync.steps(phone=False)
         if data == "pcal:off":
             return await self.disconnect_calendar(user)
         if data.startswith("pcal:rm:"):

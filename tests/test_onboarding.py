@@ -121,6 +121,21 @@ async def test_iphone_and_mac_guides_send_their_pictures(service_factory):
     assert all(photo.startswith(b"\x89PNG") for photo in ios[1].photos + mac[1].photos)
 
 
+async def test_picture_guides_announce_and_replace_each_other(service_factory):
+    service, _ = service_factory()
+    ios = await service.callback(1, "setup:ios")
+    assert "Picture guide below" in ios[0].text
+    assert ios[0].clear_album_group == "setup"
+    assert ios[1].album_group == "setup" and len(ios[1].photos) == 4
+    # switching to the Mac guide clears the previous album, then shows its own
+    mac = await service.callback(1, "setup:mac")
+    assert mac[0].clear_album_group == "setup"
+    assert mac[1].album_group == "setup" and len(mac[1].photos) == 2
+    # a guide with no pictures still clears a stuck album
+    outlook = await service.callback(1, "setup:outlook")
+    assert outlook[0].clear_album_group == "setup" and len(outlook) == 1
+
+
 async def test_nusmods_guide_links_to_nusmods(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]

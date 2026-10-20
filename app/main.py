@@ -147,19 +147,24 @@ def create_app(
             await bot_app.bot.set_my_commands(
                 [
                     BotCommand("start", "Getting started"),
-                    BotCommand("help", "How AmIFree works"),
-                    BotCommand("plans", "Everything coming up: plans, deadlines, busy time"),
-                    BotCommand("block", "Mark yourself busy: busy sat 2-6pm"),
-                    BotCommand("deadline", "Save a deadline: CS3244 report fri 11:59pm"),
-                    BotCommand("deadlines", "Upcoming deadlines"),
-                    BotCommand("remind", "Remind me at 5pm to buy milk"),
-                    BotCommand("settings", "Reminders and other settings"),
+                    BotCommand("plans", "What's coming up"),
                     BotCommand("free", "Am I free? e.g. /free fri 7-9pm"),
-                    BotCommand("usual", "Your usual free times: /usual tue evenings"),
-                    BotCommand("calendar", "Calendar sync and your calendar's busy times"),
-                    BotCommand("cancel", "Clear pending action"),
+                    BotCommand("deadline", "Save a deadline, or see your list"),
+                    BotCommand("calendar", "Connect a calendar so I check it too"),
+                    BotCommand("settings", "Reminders and privacy"),
+                    BotCommand("help", "How AmIFree works"),
+                    BotCommand("cancel", "Clear a pending action"),
                     BotCommand("deletemydata", "Delete everything about me"),
                 ]
+            )
+            await bot_app.bot.set_my_short_description(
+                "Forward a plan, I'll tell you if you're free. Reminders the night before. "
+                "Add me to a group to find a time."
+            )
+            await bot_app.bot.set_my_description(
+                "Hi! I'm AmIFree. 📩 Forward me any plan and I'll check if you're free and "
+                "save it. 🔔 I'll remind you the night before. 👥 Add me to a group to find a "
+                "time that works for everyone.\n\nTap Start to begin."
             )
             await bot_app.bot.set_my_commands(
                 [

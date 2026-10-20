@@ -69,9 +69,11 @@ class GoogleSyncService:
             photos = onboarding.google_share_photos()
             caption = onboarding.GOOGLE_PHOTOS_CAPTION
         keyboard = onboarding.google_steps_keyboard(phone)
-        replies = [Reply(text, keyboard, edit=True, parse_mode="HTML")]
         if photos:
-            replies.append(Reply(caption, photos=photos))
+            text += "\n\n📸 <b>Picture guide below</b> ↓"
+        replies = [Reply(text, keyboard, edit=True, parse_mode="HTML", clear_album_group="setup")]
+        if photos:
+            replies.append(Reply(caption, photos=photos, album_group="setup"))
         return replies
 
     async def connect(self, user, email: str) -> list[Reply]:

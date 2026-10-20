@@ -65,7 +65,7 @@ GUIDES = {
         "5. Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
         "✅ You'll know it's right: it starts with <code>webcal://</code>.\n\n"
         "⚠️ This only works for iCloud calendars. A calendar under Gmail, or with no Public "
-        "Calendar switch, is from Google or Outlook — tap its button below.\n\n"
+        "Calendar switch, is from Google or Outlook — use that guide instead.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
         "it here. I keep just your busy times.\n\n"
         "🗂 Several iCloud calendars (Classes, CCA, Events)? Add each one's link." + PASTE_NEXT
@@ -81,7 +81,7 @@ GUIDES = {
         "5. Click the <b>share button</b> by the link, then <b>Copy</b>, then <b>Done</b>.\n\n"
         "✅ You'll know it's right: it starts with <code>webcal://</code>.\n\n"
         "⚠️ This only works for iCloud calendars. A calendar under Gmail, or with no Public "
-        "Calendar box, is from Google or Outlook — tap its button below.\n\n"
+        "Calendar box, is from Google or Outlook — use that guide instead.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
         "it here. I keep just your busy times.\n\n"
         "🗂 Several iCloud calendars? Add each one's link." + PASTE_NEXT
@@ -105,18 +105,13 @@ GUIDES = {
         "Try another calendar." + PASTE_NEXT
     ),
     "outlook": (
-        "📧 <b>Outlook Calendar</b> · about 1 minute\n"
-        "Do this on a computer, at outlook.com (or outlook.office.com for a school or work "
-        "account).\n\n"
-        "1. Click the <b>⚙️ Settings</b> gear at the top right.\n"
-        "2. Go to <b>Calendar</b>, then <b>Shared calendars</b>.\n"
-        "3. Under <b>Publish a calendar</b>, choose your calendar.\n"
-        "4. Set the detail to <b>Can view when I'm busy</b>, then click <b>Publish</b>.\n"
-        "5. Copy the <b>ICS</b> link that appears.\n"
-        "⚠️ You'll see two links, HTML and ICS. Copy the ICS one.\n\n"
-        "✅ You'll know it's right: the link ends in <code>.ics</code>.\n\n"
-        "Can't see Publish? Your school or work account may not allow it. Try another "
-        "calendar, or add your NUSMods instead." + PASTE_NEXT
+        "📧 <b>Outlook — coming soon</b>\n"
+        "We're still setting up Outlook calendars, so this one isn't ready yet.\n\n"
+        "For now you can:\n"
+        "🍎 Use your iPhone / iCloud calendar\n"
+        "📅 Use your Google calendar\n"
+        "📚 Or add your NUSMods timetable\n\n"
+        "You can still forward me a plan any time — setup is optional."
     ),
 }
 
@@ -364,11 +359,18 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         )
     if screen == "export":
         return InlineKeyboardMarkup([[_button("« NUSMods link", "nusmods")]])
+    if screen == "outlook":
+        return InlineKeyboardMarkup(
+            [
+                [_button("📅 Use Google", "google"), _button("🍎 Use iPhone", "ios")],
+                [_button("« Other calendars", "calendar")],
+            ]
+        )
     if screen == "ios":
         return InlineKeyboardMarkup(
             [
                 [_button("💻 On a Mac instead?", "mac")],
-                [_button("📅 Mine's Google", "google"), _button("📧 Mine's Outlook", "outlook")],
+                [_button("📅 Mine's Google", "google")],
                 [_button("« Other calendars", "calendar")],
             ]
         )
@@ -376,7 +378,7 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             [
                 [_button("📱 On an iPhone instead?", "ios")],
-                [_button("📅 Mine's Google", "google"), _button("📧 Mine's Outlook", "outlook")],
+                [_button("📅 Mine's Google", "google")],
                 [_button("« Other calendars", "calendar")],
             ]
         )

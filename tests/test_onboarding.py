@@ -43,7 +43,7 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
     expected = {
         "🍎 iPhone / iCloud": ["Public Calendar", "Share Link", "webcal://"],
         "📅 Google": ["calendar.google.com", "Integrate calendar", "Secret address in iCal format"],
-        "📧 Outlook": ["Publish a calendar", "Can view when I'm busy"],
+        "📧 Outlook": ["coming soon"],
     }
     for button, phrases in expected.items():
         guide = (await service.callback(1, tap(picker, button)))[0]
@@ -66,7 +66,7 @@ async def test_picker_says_which_calendars_need_a_computer(service_factory):
 
 async def test_every_guide_ends_with_what_to_do_next(service_factory):
     service, _ = service_factory()
-    for screen in ("ios", "google", "outlook", "nusmods"):
+    for screen in ("ios", "google", "nusmods"):
         guide = (await service.callback(1, f"setup:{screen}"))[0]
         assert "about 1 minute" in guide.text, screen
         assert "Paste the link here" in guide.text, screen
@@ -80,7 +80,7 @@ async def test_guides_warn_about_the_common_wrong_turns(service_factory):
     google = (await service.callback(1, "setup:google"))[0].text
     assert "Not the Public address" in google and "school or work account" in google
     outlook = (await service.callback(1, "setup:outlook"))[0].text
-    assert "two links" in outlook and "ICS one" in outlook
+    assert "coming soon" in outlook.lower()
 
 
 async def test_guides_say_where_to_do_it_and_how_to_spot_the_right_link(service_factory):
@@ -88,7 +88,6 @@ async def test_guides_say_where_to_do_it_and_how_to_spot_the_right_link(service_
     expected = {
         "ios": ("Do this on your iPhone", "<code>webcal://</code>"),
         "google": ("Do this on a computer", "ends in <code>.ics</code>"),
-        "outlook": ("Do this on a computer", "ends in <code>.ics</code>"),
         "nusmods": ("Open NUSMods", "<code>https://nusmods.com/timetable</code>"),
     }
     for screen, phrases in expected.items():
@@ -108,7 +107,6 @@ async def test_iphone_guide_has_a_mac_version_and_back(service_factory):
     assert labels(mac) == [
         "📱 On an iPhone instead?",
         "📅 Mine's Google",
-        "📧 Mine's Outlook",
         "« Other calendars",
     ]
     back = (await service.callback(1, tap(mac, "📱 On an iPhone instead?")))[0]

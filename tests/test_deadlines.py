@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.schemas.event import SG
+from app.schemas.event import SG, DeadlineDraft
 from app.services.date_resolution import Clarification
 from app.services.deadlines import validate_deadline
 from app.services.jobs import Notifier
@@ -87,7 +87,7 @@ async def test_deadline_command_overrides_the_ai(service_factory, reference):
     assert card.text.startswith("📌 CS3244 report")
     # With no text, /deadline shows the list (and leaves nothing pending).
     listed = (await service.command(1, "deadline"))[0]
-    assert listed.text.startswith("📌 CS3244 report")
+    assert "1. CS3244 report · Due Fri 9 Oct, 11:59pm (in 5 days)" in listed.text
     assert (await repo.ensure_user(1)).pending is None
     card = (await service.command(1, "deadline", "Pay hall fees by Fri"))[0]
     assert card.text.startswith("📌 Pay hall fees")
@@ -110,11 +110,15 @@ async def test_list_done_and_remove(service_factory, reference):
     )
     await service.message(1, 1, REPORT, reference)
     await service.message(1, 2, "Pay hall fees by Wed", reference)
-    listed = await service.command(1, "deadlines")
-    assert [r.text.split("\n")[0] for r in listed] == ["📌 Pay hall fees", "📌 CS3244 report"]
-    done = (await service.callback(1, tap(listed[0], "✅ Done")))[0]
+    listed = await service.command(1, "deadline")
+    assert len(listed) == 1
+    assert "1. Pay hall fees" in listed[0].text and "2. CS3244 report" in listed[0].text
+    assert listed == await service.command(1, "deadlines")  # hidden alias
+    fees = (await service.callback(1, tap(listed[0], "1")))[0]
+    report = (await service.callback(1, tap(listed[0], "2")))[0]
+    done = (await service.callback(1, tap(fees, "✅ Done")))[0]
     assert done.edit and done.text.startswith("✅ Done: Pay hall fees")
-    gone = (await service.callback(1, tap(listed[1], "🗑 Remove")))[0]
+    gone = (await service.callback(1, tap(report, "🗑 Remove")))[0]
     assert gone.text == "🗑 Removed: CS3244 report"
     assert "No upcoming deadlines" in (await service.command(1, "deadlines"))[0].text
 
@@ -197,23 +201,23 @@ async def test_list_shows_overdue_first_and_days_left(service_factory, reference
     service, repo = service_factory(due(), due(title="Pay hall fees", date_text="Wed"))
     await service.command(1, "deadline", REPORT)
     await service.command(1, "deadline", "Pay hall fees due Wed 11:59pm")
-    user = await repo.ensure_user(1)
     late = next(d for d in repo.deadlines.values() if d.title == "Pay hall fees")
     late.due_at = at(2, 23, 59)  # two days before the reference (Sun 4 Oct)
 
-    listed = await service.command(1, "deadlines")
-    assert [r.text.split("\n")[0] for r in listed] == [
-        "⚠️ Overdue",
-        "📌 Pay hall fees",
-        "Coming up",
-        "📌 CS3244 report",
-    ]
-    assert "2 days overdue" in listed[1].text and "in 5 days" in listed[3].text
+    listed = await service.command(1, "deadline")
+    assert len(listed) == 1
+    assert listed[0].text == (
+        "Deadlines — tap a number to open it.\n\n⚠️ Overdue\n"
+        "1. Pay hall fees · Due Fri 2 Oct, 11:59pm (2 days overdue)\n\nComing up\n"
+        "2. CS3244 report · Due Fri 9 Oct, 11:59pm (in 5 days)"
+    )
     # Overdue items still have Done / Remove, and Done clears them.
-    await service.callback(1, tap(listed[1], "✅ Done"))
-    again = await service.command(1, "deadlines")
-    assert [r.text.split("\n")[0] for r in again] == ["📌 CS3244 report"]
-    assert user
+    card = (await service.callback(1, tap(listed[0], "1")))[0]
+    assert tap(card, "🗑 Remove")
+    await service.callback(1, tap(card, "✅ Done"))
+    again = await service.command(1, "deadline")
+    assert len(again) == 1 and "1. CS3244 report" in again[0].text
+    assert "Overdue" not in again[0].text and "Pay hall fees" not in again[0].text
 
 
 async def test_bare_deadline_with_none_saved_explains_how_to_add(service_factory, reference):
@@ -222,3 +226,78 @@ async def test_bare_deadline_with_none_saved_explains_how_to_add(service_factory
     assert (
         reply.text.startswith("No upcoming deadlines") and "/deadline CS3244 report" in reply.text
     )
+
+
+async def test_deadline_pages_stay_in_deadlines_and_edit_in_both_directions(
+    service_factory, reference
+):
+    service, repo = service_factory()
+    user = await repo.ensure_user(1)
+    for n in range(23):
+        await repo.create_deadline(
+            user.id,
+            None,
+            DeadlineDraft(title=f"Report {n}", due_at=reference + timedelta(days=n - 10)),
+        )
+    (first,) = await service.command(1, "deadline")
+    assert "Page 1 of 3" in first.text and "⚠️ Overdue" in first.text
+    assert "Coming up" not in first.text and not first.edit
+    assert [b.text for row in first.keyboard.inline_keyboard for b in row] == [
+        *map(str, range(1, 11)),
+        "Next",
+    ]
+    (second,) = await service.callback(1, tap(first, "Next"))
+    assert second.edit and "Page 2 of 3" in second.text and "Coming up" in second.text
+    assert "Overdue" not in second.text and "1. Report 10" in second.text
+    (third,) = await service.callback(1, tap(second, "Next"))
+    assert third.edit and "Page 3 of 3" in third.text
+    (card,) = await service.callback(1, tap(third, "3"))
+    assert card.text.startswith("📌 Report 22")
+    assert tap(card, "✅ Done") and tap(card, "🗑 Remove")
+    (back,) = await service.callback(1, tap(second, "Previous"))
+    assert back.edit and back.text == first.text
+    assert (await service.callback(1, "deadline:99"))[0].text == third.text
+
+
+@pytest.mark.parametrize("page", ["-1", "bad", "1:2", "９", "123456789"])
+async def test_invalid_deadline_pages(service_factory, page):
+    service, _ = service_factory()
+    (reply,) = await service.callback(1, f"deadline:{page}")
+    assert reply.text == "That page isn't valid. Use /deadline."
+
+
+async def test_deadline_buttons_handle_completed_removed_and_other_users_items(
+    service_factory, reference
+):
+    service, _ = service_factory(due())
+    (card,) = await service.command(1, "deadline", REPORT)
+    (listed,) = await service.command(1, "deadline")
+    open_button = tap(listed, "1")
+    # A copied callback cannot reveal another user's deadline.
+    assert "/deadline" in (await service.callback(2, open_button))[0].text
+    assert (await service.command(2, "deadline"))[0].text.startswith("No upcoming deadlines")
+    await service.callback(1, tap(card, "✅ Done"))
+    assert "already done" in (await service.callback(1, open_button))[0].text
+    await service.callback(1, tap(card, "🗑 Remove"))
+    assert "/deadline" in (await service.callback(1, open_button))[0].text
+    assert "/deadline" in (await service.callback(1, tap(card, "🗑 Remove")))[0].text
+    assert "/deadline" in (await service.callback(1, "dl:done:invalid"))[0].text
+    assert "/deadline" in (await service.callback(1, "dc:invalid"))[0].text
+
+
+async def test_deadline_cards_and_reminders_point_to_current_commands(service_factory, reference):
+    service, repo = service_factory(due())
+    (enabled,) = await service.command(1, "deadline", REPORT)
+    (panel,) = await service.command(1, "settings")
+    await service.callback(1, tap(panel, "🔔 Turn off reminders"))
+    (listed,) = await service.command(1, "deadline")
+    (disabled,) = await service.callback(1, tap(listed, "1"))
+    assert "Reminders are off" in disabled.text
+    (panel,) = await service.command(1, "settings")
+    await service.callback(1, tap(panel, "🔔 Turn on reminders"))
+    for deadline in repo.deadlines.values():
+        deadline.created_at = reference
+    (reminder,) = await reminders_at(service, repo, at(8, 9))
+    for reply in (enabled, disabled, reminder):
+        assert "/settings" in reply.text and "/deadline lists them all" in reply.text
+        assert "/reminders" not in reply.text and "/deadlines" not in reply.text

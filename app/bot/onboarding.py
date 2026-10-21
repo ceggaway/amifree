@@ -25,7 +25,8 @@ WELCOME = (
 PICK_CALENDAR = (
     "📅 Which calendar do you use?\n\n"
     "🍎 iPhone works right from your phone.\n"
-    "📅 Google and 📧 Outlook need a computer (or your phone's browser in desktop mode).\n\n"
+    "📅 Google works in the Google Calendar app or a computer browser.\n"
+    "📧 Outlook is coming soon.\n\n"
     "I only see when you're busy, never what your events are called, where they are "
     "or who's going."
 )

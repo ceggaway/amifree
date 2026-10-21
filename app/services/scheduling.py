@@ -1841,6 +1841,7 @@ class SchedulingService:
                     edit=True,
                     parse_mode=onboarding.parse_mode(name),
                     clear_album_group="setup",
+                    disable_link_preview=name in ("google", "googlelink"),
                 )
             ]
             if photos:

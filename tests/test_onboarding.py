@@ -58,12 +58,13 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
     assert picker.parse_mode is None
 
 
-async def test_picker_says_which_calendars_need_a_computer(service_factory):
+async def test_picker_explains_phone_setup_and_outlook_availability(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]
     picker = (await service.callback(1, tap(welcome, "📅 Connect my calendar")))[0]
     assert "iPhone works right from your phone" in picker.text
-    assert "Google" in picker.text and "need a computer" in picker.text
+    assert "Google works in the Google Calendar app or a computer browser" in picker.text
+    assert "Outlook is coming soon" in picker.text
 
 
 async def test_every_guide_ends_with_what_to_do_next(service_factory):

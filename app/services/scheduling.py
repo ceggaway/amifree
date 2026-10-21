@@ -383,7 +383,7 @@ class SchedulingService:
                         "\nChecking: "
                         + html.escape(" and ".join(connected))
                         + ".\n\n"
-                        + onboarding.PLAN_AND_DEADLINE_HELP,
+                        + onboarding.EVERYDAY_HELP,
                         menu_keyboard(),
                         parse_mode="HTML",
                     )

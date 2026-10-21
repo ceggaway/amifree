@@ -10,10 +10,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 NUSMODS_URL = "https://nusmods.com/timetable"
 
-PLAN_AND_DEADLINE_HELP = (
+EVERYDAY_HELP = (
     "📋 <b>My plans</b> · /plans — see upcoming events and deadlines you’ve saved with me.\n\n"
     "📌 <b>Deadlines</b> · /deadline — save or forward a due date and get reminders before it’s due. "
-    "Try “Report due Fri 11:59pm”."
+    "Try “Report due Fri 11:59pm”.\n\n"
+    "💬 <b>Feedback</b> · /feedback — If you run into any issues or have suggestions, send us feedback using /feedback. You can send it anonymously or with your @handle"
 )
 
 WELCOME = (
@@ -24,7 +25,7 @@ WELCOME = (
     "3️⃣ <b>Forward me a plan</b>, like “Dinner Fri 7–9pm at Vivo”, then tap "
     "<b>Add to plans</b> to save it.\n\n"
     "Want to skip 1 and 2? Just start forwarding plans. You can set up any time with /calendar.\n\n"
-    + PLAN_AND_DEADLINE_HELP
+    + EVERYDAY_HELP
     + "\n\n👥 Organising for a group? Add me to the chat and reply /event to a plan.\n\n"
     "🔒 I only see <i>when</i> you’re busy, never what your events are. I never read your "
     "group chats."

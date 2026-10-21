@@ -806,17 +806,24 @@ class SchedulingService:
         pages = (len(items) + PLANS_PAGE - 1) // PLANS_PAGE
         page = max(0, min(page, pages - 1))
         buttons = []
+        details = []
         for when, kind, item_id, title in items[page * PLANS_PAGE : (page + 1) * PLANS_PAGE]:
             title = " ".join(title.split())
-            if len(title) > 32:
-                short = title[:31]
-                if not title[31].isspace() and " " in short:
+            local = when.astimezone(SG)
+            clock = local.strftime("%-I:%M%p").replace(":00", "")
+            display_title = title if len(title) <= 300 else title[:299] + "…"
+            details.append(f"<b>{html.escape(display_title)}</b>\n{local:%-d %b %Y} · {clock} SGT")
+            if len(title) > 48:
+                short = title[:47]
+                if not title[47].isspace() and " " in short:
                     short = short.rsplit(" ", 1)[0]
                 title = short.rstrip(" ,.:;·-–—") + "…"
             buttons.append((f"{when.astimezone(SG):%-d %b} · {title}", kind, item_id))
         return [
             Reply(
-                f"<b>Your plans</b>\nSelect a plan to view its details.\n\n<i>Page {page + 1} of {pages}</i>",
+                "<b>Your plans</b>\nSelect a plan below to view its details.\n\n"
+                + "\n\n".join(details)
+                + f"\n\n<i>Page {page + 1} of {pages}</i>",
                 plans_keyboard(buttons, page, pages),
                 parse_mode="HTML",
             )

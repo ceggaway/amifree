@@ -37,9 +37,9 @@ async def test_agenda_labels_plans_deadlines_and_blocks(service_factory, referen
     block = (await service.message(1, 5, "work every wed 6-10pm", reference))[0]
     await service.callback(1, tap(block, "Save block"))
     reply = (await service.command(1, "plans"))[0]
-    assert reply.text == (
-        "<b>Your plans</b>\nSelect a plan to view its details.\n\n<i>Page 1 of 1</i>"
-    )
+    assert reply.text.startswith("<b>Your plans</b>\nSelect a plan below to view its details.")
+    assert "<b>CCA dinner</b>" in reply.text
+    assert reply.text.endswith("<i>Page 1 of 1</i>")
     labels = [row[0].text for row in reply.keyboard.inline_keyboard]
     assert labels == ["7 Oct · Busy: Work", "9 Oct · CCA dinner", "9 Oct · Due: CS3244 report"]
     assert all(len(row) == 1 for row in reply.keyboard.inline_keyboard)
@@ -205,7 +205,8 @@ async def test_long_titles_are_shortened_only_in_list(service_factory, reference
     event.title = "A very long workshop title with <tags> & more information for everyone"
     agenda = (await service.command(1, "plans"))[0]
     button = agenda.keyboard.inline_keyboard[0][0]
-    assert button.text == "5 Oct · A very long workshop title with…"
+    assert button.text == "5 Oct · A very long workshop title with <tags> & more…"
+    assert "&lt;tags&gt; &amp; more information for everyone</b>" in agenda.text
     card = (await service.callback(1, button.callback_data))[0]
     assert "&lt;tags&gt; &amp; more information for everyone</b>" in card.text
 
@@ -216,7 +217,7 @@ async def test_workshop_button_does_not_end_in_partial_word(service_factory, ref
     event.title = "Halloween Workshop: Amigurumi Ghost"
     agenda = (await service.command(1, "plans"))[0]
     button = agenda.keyboard.inline_keyboard[0][0]
-    assert button.text == "5 Oct · Halloween Workshop: Amigurumi…"
+    assert button.text == "5 Oct · Halloween Workshop: Amigurumi Ghost"
     card = (await service.callback(1, button.callback_data))[0]
     assert "<b>Halloween Workshop: Amigurumi Ghost</b>" in card.text
 

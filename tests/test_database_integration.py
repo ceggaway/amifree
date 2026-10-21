@@ -117,7 +117,7 @@ async def test_supabase_repository_connected_to_postgresql(reference):
         assert "No clashes found" in first.text
         await service.callback(1, first.keyboard.inline_keyboard[0][0].callback_data)
         second = (await service.message(1, 3, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-        assert "Clashes with" in second.text
+        assert second.text.startswith("⚠️ Overlaps with CCA dinner · 7PM–9PM SGT")
         other = (await service.message(2, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
         assert "No clashes found" in other.text
         assert (

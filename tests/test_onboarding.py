@@ -3,7 +3,7 @@
 import pytest
 
 from app.bot import onboarding
-from tests.conftest import extraction, tap
+from tests.conftest import extraction, onboard, tap
 from tests.test_personal_calendar import FRIDAY_DINNER, GOOGLE, FakeReader
 
 
@@ -177,20 +177,28 @@ async def test_nusmods_guide_points_to_its_own_calendar_export(service_factory):
     assert back.text.startswith("📚 <b>Your NUSMods link</b>")
 
 
-async def test_after_a_calendar_link_start_says_all_set(service_factory, reference):
+@pytest.mark.parametrize(
+    "calendar_name,displayed_name",
+    [
+        ("Google Calendar", "Google Calendar"),
+        ("CCA <study> & friends", "CCA &lt;study&gt; &amp; friends"),
+    ],
+)
+async def test_after_a_calendar_link_start_says_all_set(
+    service_factory, reference, calendar_name, displayed_name
+):
     service, _ = service_factory()
-    service.calendar_reader = FakeReader()
+    service.calendar_reader = FakeReader(labels={GOOGLE: calendar_name})
     await service.message(1, 1, GOOGLE, reference)
     again = (await service.command(1, "start"))[0]
     assert (
         again.text.startswith("You're all set ✅")
-        and "your calendar (Google Calendar)" in again.text
+        and f"your calendar ({displayed_name})" in again.text
     )
+    assert again.parse_mode == "HTML"
 
 
 async def test_after_nusmods_start_says_all_set(service_factory, reference):
-    from tests.conftest import onboard
-
     service, _ = service_factory()
     await onboard(service, reference)
     again = (await service.command(1, "start"))[0]
@@ -198,6 +206,41 @@ async def test_after_nusmods_start_says_all_set(service_factory, reference):
         again.text.startswith("You're all set ✅")
         and "NUSMods (2026-2027, semester 1)" in again.text
     )
+
+
+@pytest.mark.parametrize("with_personal_calendar", [False, True])
+@pytest.mark.parametrize("with_nusmods", [False, True])
+async def test_calendar_offers_nusmods_setup_and_updates_after_onboarding(
+    service_factory, reference, with_personal_calendar, with_nusmods
+):
+    service, repo = service_factory()
+    if with_personal_calendar:
+        service.calendar_reader = FakeReader()
+        await service.message(1, 1, GOOGLE, reference)
+    if with_nusmods:
+        await onboard(service, reference)
+    status = (await service.command(1, "calendar"))[0]
+    assert "Share/Sync link" in status.text
+    if with_nusmods:
+        assert "NUSMods: 2026-2027, semester 1" in status.text
+        assert "update your timetable" in status.text
+    else:
+        assert "Add your classes" in status.text
+    assert "📤 Plans in my calendar app" in labels(status)
+    guide = (await service.callback(1, tap(status, "📚 Add or update NUSMods")))[0]
+    assert guide.edit and guide.parse_mode == "HTML"
+    assert "Share/Sync" in guide.text and "Paste the link here" in guide.text
+    assert guide.keyboard.inline_keyboard[0][0].url == onboarding.NUSMODS_URL
+    added = (
+        await service.message(
+            1, 2, "https://nusmods.com/timetable/sem-1/share?CS3216=LEC:1", reference
+        )
+    )[0]
+    assert "Schedule added!" in added.text
+    status = (await service.command(1, "calendar"))[0]
+    assert "NUSMods: 2026-2027, semester 1" in status.text
+    user = await repo.ensure_user(1)
+    assert len(await repo.list_calendars(user.id)) == int(with_personal_calendar)
 
 
 async def test_a_random_link_is_explained(service_factory, reference):

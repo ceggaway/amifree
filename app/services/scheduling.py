@@ -1,5 +1,6 @@
 """Application use cases; no Telegram network calls and no LLM availability decisions."""
 
+import html
 import logging
 import re
 import secrets
@@ -379,8 +380,12 @@ class SchedulingService:
                 return [
                     Reply(
                         "You're all set ✅ Forward me a plan, or pick one below."
-                        "\nChecking: " + " and ".join(connected) + ".",
+                        "\nChecking: "
+                        + html.escape(" and ".join(connected))
+                        + ".\n\n"
+                        + onboarding.PLAN_AND_DEADLINE_HELP,
                         menu_keyboard(),
+                        parse_mode="HTML",
                     )
                 ]
             return [Reply(onboarding.WELCOME, onboarding.welcome_keyboard(), parse_mode="HTML")]
@@ -1565,12 +1570,19 @@ class SchedulingService:
     async def personal_calendar_status(self, user: User, intro: str = "") -> Reply:
         calendars = await self.repo.list_calendars(user.id)
         lead = intro + "\n\n" if intro else ""
+        nusmods = (
+            f"📚 NUSMods: {user.academic_year}, semester {user.semester}. "
+            "Paste a new Share/Sync link to update your timetable."
+            if user.onboarding_status == "READY"
+            else "📚 Add your classes with a NUSMods Share/Sync link. Tap below for the steps."
+        )
         if not calendars:
             return Reply(
                 lead + "📅 Your calendars\n\n"
                 "No calendar connected yet. Connect the one you use and its busy times count "
                 "when I check your plans and /free. I keep only start and end times, never "
                 "titles, places or notes.\n\n"
+                f"{nusmods}\n\n"
                 f"{self.feed_line(user)}\n\n"
                 "Which calendar do you use?",
                 onboarding.first_calendar_keyboard(),
@@ -1602,6 +1614,7 @@ class SchedulingService:
             lead
             + "📅 Your calendars\n\nI check these for busy times:\n"
             + "\n".join(lines)
+            + f"\n\n{nusmods}"
             + f"\n\n{self.feed_line(user)}\n\n{more} I refresh them every hour and keep only "
             "when you're busy, never what your events are.",
             personal_calendars_keyboard(calendars),

@@ -296,9 +296,10 @@ def personal_calendars_keyboard(calendars) -> InlineKeyboardMarkup:
 
 
 def calendar_home_rows():
-    """The two things /calendar always offers: connect a calendar, or send plans to a phone."""
+    """Connect a calendar, add classes, or send plans to a calendar app."""
     return [
         [InlineKeyboardButton("➕ Add a calendar", callback_data="setup:calendar")],
+        [InlineKeyboardButton("📚 Add or update NUSMods", callback_data="setup:nusmods")],
         [InlineKeyboardButton("📤 Plans in my calendar app", callback_data="cal:feed")],
     ]
 

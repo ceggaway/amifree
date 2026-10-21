@@ -12,7 +12,7 @@ NUSMODS_URL = "https://nusmods.com/timetable"
 
 PLAN_AND_DEADLINE_HELP = (
     "📋 <b>My plans</b> · /plans — see upcoming events and deadlines you’ve saved with me.\n\n"
-    "📌 <b>Deadlines</b> · /deadline — save a due date and get reminders before it’s due. "
+    "📌 <b>Deadlines</b> · /deadline — save or forward a due date and get reminders before it’s due. "
     "Try “Report due Fri 11:59pm”."
 )
 

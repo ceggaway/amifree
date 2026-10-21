@@ -14,8 +14,7 @@ EVERYDAY_HELP = (
     "📋 <b>My plans</b> · /plans — see upcoming events and deadlines you’ve saved with me.\n\n"
     "📌 <b>Deadlines</b> · /deadline — save or forward a due date and get reminders before it’s due. "
     "Try “Report due Fri 11:59pm”.\n\n"
-    "💬 <b>Feedback</b> · /feedback — type a bug report or suggestion, then choose to send "
-    "anonymously or with your @handle."
+    "💬 <b>Feedback</b> · /feedback — If you run into any issues or have suggestions, send us feedback using /feedback. You can send it anonymously or with your @handle"
 )
 
 WELCOME = (

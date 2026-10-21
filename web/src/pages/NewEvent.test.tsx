@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventForm } from "../types";
 
 const sent: EventForm[] = [];
@@ -18,7 +18,18 @@ vi.mock("../api", () => ({
 
 import { NewEvent } from "./NewEvent";
 
-afterEach(cleanup);
+beforeEach(() => {
+  // The form rejects past dates. Keep these fixtures in the future as real time advances,
+  // while leaving timers real for the availability check and Testing Library waits.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-19T12:00:00+08:00"));
+  sent.length = 0;
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("new event form", () => {
   it("posts a weekly event in Singapore time and opens it", async () => {
@@ -50,7 +61,6 @@ describe("new event form", () => {
   });
 
   it("runs past midnight when the end is before the start", async () => {
-    sent.length = 0;
     render(
       <MemoryRouter initialEntries={["/g/n100500/new"]}>
         <Routes>

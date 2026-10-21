@@ -337,6 +337,7 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     ]
     link = (await service.callback(1, "setup:googlelink"))[0]
     assert "Secret address" in link.text or "link" in link.text.lower()
+    assert link.parse_mode == "HTML" and link.disable_link_preview
 
 
 async def test_share_steps_are_phone_first_with_a_computer_switch(with_google, reference):

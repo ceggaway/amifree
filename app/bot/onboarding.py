@@ -90,22 +90,19 @@ GUIDES = {
         "🗂 Several iCloud calendars? Add each one's link." + PASTE_NEXT
     ),
     "google": (
-        "📅 <b>Google Calendar</b> · about 1 minute\n"
-        "Do this on a computer, or your phone's browser in desktop mode. The Google "
-        "Calendar app can't show it.\n\n"
+        "📅 <b>Google Calendar · read only</b> · about 1 minute\n"
+        "Do this on a computer, or in your phone's browser in desktop mode.\n\n"
         "1. Go to <b>calendar.google.com</b> and sign in.\n"
-        "2. Click the <b>⚙️</b> at the top right, then <b>Settings</b>.\n"
-        "3. On the left, under <b>Settings for my calendars</b>, click your calendar.\n"
-        "4. Scroll down and open <b>Integrate calendar</b>.\n"
-        "5. Copy <b>Secret address in iCal format</b>.\n"
-        "⚠️ Not the Public address: that one only works if your calendar is public.\n\n"
-        "✅ You'll know it's right: the link starts with <code>https://calendar.google.com</code> "
-        "and ends in <code>.ics</code>.\n\n"
-        "Several calendars? Repeat for each one and paste every link.\n\n"
-        "🔒 Keep it secret: anyone with it can see your calendar. If it ever leaks, click "
-        "<b>Reset</b> next to it in Google and send me the new one.\n"
-        "Using a school or work account and can't see it? Your admin may have turned it off. "
-        "Try another calendar." + PASTE_NEXT
+        "2. Click <b>⚙️</b> → <b>Settings</b>.\n"
+        "3. Under <b>Settings for my calendars</b>, select your calendar.\n"
+        "4. Open <b>Integrate calendar</b> and copy <b>Secret address in iCal format</b>.\n\n"
+        "✅ You'll know it's right: the link ends in <code>.ics</code>.\n"
+        "⚠️ Not the Public address. No secret address on a school or work account? "
+        "Your admin may have disabled it. Try a personal calendar.\n\n"
+        "I'll only read your busy times, without adding or changing events.\n"
+        "Several calendars? Send each calendar's link separately.\n\n"
+        "🔒 Keep the link private — anyone with it can see your calendar. If it leaks, "
+        "click <b>Reset</b> in Google and send me the new link." + PASTE_NEXT
     ),
     "outlook": (
         "📧 <b>Outlook — coming soon</b>\n"
@@ -388,7 +385,7 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
 
 
-HTML_SCREENS = frozenset({"home", "nusmods", "ios", "mac", "google", "outlook"})
+HTML_SCREENS = frozenset({"home", "nusmods", "ios", "mac", "google", "googlelink", "outlook"})
 
 
 def parse_mode(name: str) -> str | None:

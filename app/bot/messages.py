@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from telegram import InlineKeyboardMarkup
+from telegram import InlineKeyboardMarkup, LinkPreviewOptions
 
 from app.bot.keyboards import event_keyboard, group_keyboard
 from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
@@ -64,6 +64,8 @@ class Reply:
     album_group: str | None = None
     # A text/screen reply that deletes the tracked album for this group before it is shown.
     clear_album_group: str | None = None
+    # Keep setup instructions compact instead of showing a website preview below them.
+    disable_link_preview: bool = False
 
 
 def details(draft: EventDraft) -> str:
@@ -269,6 +271,11 @@ async def _clear_guide_album(update, group: str) -> None:
 
 async def send_reply(update, reply: Reply):
     """Send one reply to the chat the update came from: a document, or plain text."""
+    preview_options = (
+        {"link_preview_options": LinkPreviewOptions(is_disabled=True)}
+        if reply.disable_link_preview
+        else {}
+    )
     if reply.clear_album_group is not None:
         await _clear_guide_album(update, reply.clear_album_group)
     query = getattr(update, "callback_query", None)
@@ -277,7 +284,10 @@ async def send_reply(update, reply: Reply):
 
         try:
             await query.edit_message_text(
-                reply.text, reply_markup=reply.keyboard, parse_mode=reply.parse_mode
+                reply.text,
+                reply_markup=reply.keyboard,
+                parse_mode=reply.parse_mode,
+                **preview_options,
             )
             return
         except BadRequest as exc:
@@ -305,5 +315,8 @@ async def send_reply(update, reply: Reply):
         )
     else:
         await update.effective_message.reply_text(
-            reply.text, reply_markup=reply.keyboard, parse_mode=reply.parse_mode
+            reply.text,
+            reply_markup=reply.keyboard,
+            parse_mode=reply.parse_mode,
+            **preview_options,
         )

@@ -1,5 +1,7 @@
 """First-run setup: welcome, step-by-step link guides, and what happens after a link."""
 
+import pytest
+
 from app.bot import onboarding
 from tests.conftest import extraction, tap
 from tests.test_personal_calendar import FRIDAY_DINNER, GOOGLE, FakeReader
@@ -262,3 +264,38 @@ async def test_welcome_formatting_is_sent_to_telegram():
         sender.assert_awaited_once_with(
             onboarding.WELCOME, reply_markup=keyboard, parse_mode="HTML"
         )
+
+
+@pytest.mark.parametrize("screen", ["google", "googlelink"])
+@pytest.mark.parametrize("delivery", ["edit", "new", "fallback"])
+async def test_google_read_only_guide_formats_without_a_link_preview(
+    service_factory, screen, delivery
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from telegram import LinkPreviewOptions
+    from telegram.error import BadRequest
+
+    from app.bot.messages import send_reply
+
+    service, _ = service_factory()
+    reply = (await service.callback(1, f"setup:{screen}"))[0]
+    assert "Google Calendar · read only" in reply.text
+    assert "without adding or changing events" in reply.text
+    assert reply.parse_mode == "HTML"
+    assert reply.disable_link_preview
+    reply.edit = delivery != "new"
+    message = SimpleNamespace(reply_text=AsyncMock())
+    query = SimpleNamespace(edit_message_text=AsyncMock())
+    if delivery == "fallback":
+        query.edit_message_text.side_effect = BadRequest("Message can't be edited")
+    update = SimpleNamespace(effective_message=message, callback_query=query)
+    await send_reply(update, reply)
+    sender = query.edit_message_text if delivery == "edit" else message.reply_text
+    sender.assert_awaited_once_with(
+        reply.text,
+        reply_markup=reply.keyboard,
+        parse_mode="HTML",
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )

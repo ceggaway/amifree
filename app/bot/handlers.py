@@ -92,7 +92,12 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
             reference = message.forward_origin.date if message.forward_origin else message.date
             text, notice = await gather_text(message, context, service, update.effective_user.id)
             if not text.strip():
-                replies = [Reply(notice or NO_TEXT)]
+                # Telegram delivers album pictures individually. A decorative picture
+                # with no event text is not a failed invitation: the caption or other
+                # pictures in the album may already have produced the event card.
+                replies = (
+                    [] if message.media_group_id and notice is None else [Reply(notice or NO_TEXT)]
+                )
             else:
                 replies = await service.message(
                     update.effective_user.id, message.message_id, text, reference
@@ -177,7 +182,12 @@ async def send_private(bot, telegram_id: int, reply: Reply):
             telegram_id, InputFile(content, filename=filename), caption=reply.text
         )
     else:
-        await bot.send_message(telegram_id, reply.text, reply_markup=reply.keyboard)
+        await bot.send_message(
+            telegram_id,
+            reply.text,
+            reply_markup=reply.keyboard,
+            **({"parse_mode": reply.parse_mode} if reply.parse_mode else {}),
+        )
 
 
 def addressed_to_me(text: str, username: str | None) -> bool:
@@ -426,7 +436,12 @@ def attach_notifier(application: Application, service) -> Notifier:
 
     async def send_dm(telegram_id: int, reply: Reply):
         try:
-            await application.bot.send_message(telegram_id, reply.text, reply_markup=reply.keyboard)
+            await application.bot.send_message(
+                telegram_id,
+                reply.text,
+                reply_markup=reply.keyboard,
+                **({"parse_mode": reply.parse_mode} if reply.parse_mode else {}),
+            )
         except (Forbidden, BadRequest) as exc:
             # Blocked, or the user never opened a private chat with the bot.
             raise Undeliverable from exc

@@ -14,11 +14,11 @@ async def test_preview_offers_add_and_skip(service_factory, reference):
     service, repo = service_factory(extraction())
     await onboard(service, reference)
     card = (await service.message(1, 2, TEXT, reference))[0]
-    assert labels(card) == ["Add to plans", "Skip", "Edit"]
+    assert labels(card) == ["Add to plans", "Edit details", "Skip"]
     # Skip takes it out of plans without blocking time; the card then offers to add it back.
     skipped = (await service.callback(1, tap(card, "Skip")))[0]
-    assert "Skipped" in skipped.text and "Not in your plans" in skipped.text
-    assert labels(skipped) == ["Add to plans", "Edit"]
+    assert "❌ <b>Not in your plans.</b>" in skipped.text
+    assert labels(skipped) == ["Add to plans", "Edit details"]
     assert next(iter(repo.events.values())).status == Status.DECLINED
 
 
@@ -27,11 +27,11 @@ async def test_add_then_remove(service_factory, reference):
     await onboard(service, reference)
     card = (await service.message(1, 2, TEXT, reference))[0]
     added = (await service.callback(1, tap(card, "Add to plans")))[0]
-    assert "Added to your plans" in added.text
+    assert "☑️ <b>Added to your plans.</b>" in added.text
     assert next(iter(repo.events.values())).status == Status.GOING
-    assert "Edit" in labels(added) and "Remove" in labels(added)
-    removed = (await service.callback(1, tap(added, "Remove")))[0]
-    assert "Removed from your plans" in removed.text
+    assert "Edit details" in labels(added) and "Remove from plans" in labels(added)
+    removed = (await service.callback(1, tap(added, "Remove from plans")))[0]
+    assert "❌ <b>Not in your plans.</b>" in removed.text
     assert next(iter(repo.events.values())).status == Status.DECLINED
 
 

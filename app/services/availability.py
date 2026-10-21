@@ -19,6 +19,9 @@ class Availability:
     nusmods: bool | None = None
     # The time that was checked, so messages can say how much of it a clash takes.
     candidate: EventDraft | None = None
+    # Connection state is separate from whether imported data covers this event date.
+    timetable_connected: bool | None = None
+    personal_connected: bool | None = None
 
     @property
     def verdict(self) -> str:

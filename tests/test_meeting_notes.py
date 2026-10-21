@@ -44,7 +44,7 @@ async def test_meeting_in_notes_uses_its_own_date_and_handles_missing_end(
         else datetime(2026, 10, 28, 23, tzinfo=SG)
     )
     assert event.assumed_duration == bool(default_minutes)
-    assert ("End time assumes a 120-minute duration" in reply.text) == bool(default_minutes)
+    assert ("End time estimated." in reply.text) == bool(default_minutes)
     assert not repo.deadlines
     assert event.status == Status.PREVIEW
     await service.callback(1, tap(reply, "Add to plans"))

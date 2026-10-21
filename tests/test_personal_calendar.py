@@ -230,8 +230,9 @@ async def test_pasting_a_link_connects_and_counts_busy_times(with_calendar, refe
     [calendar] = await connected(repo)
     assert "google" not in calendar.sealed_url and "private-abc123" not in calendar.url_hash
     card = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-    assert card.text.startswith("⚠️ Clashes with Google Calendar from 7:30–8:30pm")
-    assert "Checked: your Going plans, busy blocks and personal calendar." in card.text
+    assert card.text.startswith("⚠️ Overlaps with Google Calendar · 7:30PM–8:30PM SGT")
+    assert "Checked:" not in card.text
+    assert "Calendar coverage is incomplete" not in card.text
 
 
 async def test_several_calendars_are_all_checked(with_calendar, reference):
@@ -243,7 +244,7 @@ async def test_several_calendars_are_all_checked(with_calendar, reference):
     assert second.text.startswith("✅ Added your Events calendar. I'm now checking 2 calendars.")
     assert [c.label for c in await connected(repo)] == ["CCA", "Events"]
     card = (await service.message(1, 3, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-    assert card.text.startswith("⚠️ Clashes with CCA calendar from 7:30–8:30pm")
+    assert card.text.startswith("⚠️ Overlaps with CCA calendar · 7:30PM–8:30PM SGT")
     free = (await service.command(1, "free", "fri"))[0]
     assert "Free: 8am–12pm, 1–7:30pm, 8:30–11pm" in free.text  # both calendars
 

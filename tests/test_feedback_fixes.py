@@ -26,18 +26,19 @@ async def going_dinner(service, reference):
 async def test_a_bare_venue_reply_changes_the_location(service_factory, reference):
     service, repo = service_factory(extraction(), extraction(**UNCHANGED))
     confirmed = await going_dinner(service, reference)
-    await service.callback(1, tap(confirmed[0], "Edit"))
+    menu = (await service.callback(1, tap(confirmed[0], "Edit details")))[0]
+    await service.callback(1, tap(menu, "Venue"))
     preview = (await service.message(1, 3, "clb lvl 3", reference))[0]
-    assert "Location: Vivo" in preview.text.split("After:")[0]
-    assert "Location: clb lvl 3" in preview.text.split("After:")[1]
-    await service.callback(1, tap(preview, "Confirm update"))
+    assert "📍 clb lvl 3" in preview.text
+    assert preview.parse_mode == "HTML"
     assert next(iter(repo.events.values())).location == "clb lvl 3"
 
 
 async def test_a_time_like_reply_is_not_taken_as_a_venue(service_factory, reference):
     service, repo = service_factory(extraction(), extraction(**UNCHANGED))
     confirmed = await going_dinner(service, reference)
-    await service.callback(1, tap(confirmed[0], "Edit"))
+    menu = (await service.callback(1, tap(confirmed[0], "Edit details")))[0]
+    await service.callback(1, tap(menu, "Date & time"))
     reply = (await service.message(1, 3, "8pm", reference))[0]
     # Nothing changed and it is not a place: ask again, never save "8pm" as the venue.
     assert "couldn't tell what to change" in reply.text and "Location: 8pm" not in reply.text
@@ -226,6 +227,7 @@ async def test_a_bare_end_hour_is_read_as_the_first_time_after_the_start(
 async def test_small_talk_is_not_saved_as_a_venue(service_factory, reference):
     service, _ = service_factory(extraction(), extraction(**UNCHANGED))
     confirmed = await going_dinner(service, reference)
-    await service.callback(1, tap(confirmed[0], "Edit"))
+    menu = (await service.callback(1, tap(confirmed[0], "Edit details")))[0]
+    await service.callback(1, tap(menu, "Date & time"))
     preview = (await service.message(1, 3, "ok thanks", reference))[0]
     assert "Location: ok" not in preview.text

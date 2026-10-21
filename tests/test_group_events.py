@@ -198,7 +198,7 @@ async def test_going_from_a_group_card_blocks_later_checks(service_factory, refe
     linked = next(e for e in repo.events.values() if e.group_event_id == event.id)
     await service.callback(2, f"go:{linked.id}:{linked.version}")
     other = (await service.message(2, 71, "Other Friday 7–9pm", reference))[0]
-    assert other.text.startswith("⚠️ Clashes with CCA dinner")
+    assert other.text.startswith("⚠️ Overlaps with CCA dinner")
     linked = next(e for e in repo.events.values() if e.group_event_id == event.id)
     edit = await service.callback(2, f"edit:{linked.id}:{linked.version}")
     assert "Only the organiser" in edit[0].text

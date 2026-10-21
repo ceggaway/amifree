@@ -72,7 +72,7 @@ async def test_a_forwarded_picture_with_no_caption_is_read(chat, reference):
     assert service.image_reader.calls[0][0].startswith(b"\xff\xd8")
     assert service.extractor.calls[0][0] == POSTER
     assert "Creative Seminar" in transport.sent[-1]["text"]
-    assert "assumes a 120-minute duration" in transport.sent[-1]["text"]
+    assert "End time estimated." in transport.sent[-1]["text"]
     assert len(repo.events) == 1
 
 
@@ -101,6 +101,53 @@ async def test_a_picture_with_no_event_text_says_so(chat):
     async with bot:
         await feed(bot, photo_payload(None, 7))
     assert transport.sent[-1]["text"] == NO_TEXT and not repo.events
+
+
+@pytest.mark.parametrize("caption_first", [True, False])
+async def test_album_decorations_do_not_send_a_false_failure(chat, reference, caption_first):
+    bot, service, repo, transport = await chat(extraction(), reader=FakeReader(""))
+    caption = photo_payload(
+        "CCA dinner Friday 7–9pm at Vivo", 7, forward_timestamp=int(reference.timestamp())
+    )
+    decoration = photo_payload(None, 8, forward_timestamp=int(reference.timestamp()))
+    for payload in (caption, decoration):
+        payload["message"]["media_group_id"] = "album-1"
+    async with bot:
+        for payload in (caption, decoration) if caption_first else (decoration, caption):
+            await feed(bot, payload)
+    assert len(repo.events) == 1
+    assert len(service.extractor.calls) == 1
+    assert len(transport.sent) == 1
+    assert "CCA dinner" in transport.sent[0]["text"]
+    assert NO_TEXT not in transport.sent[0]["text"]
+
+
+async def test_album_picture_with_event_text_is_still_read(chat, reference):
+    bot, service, repo, transport = await chat(
+        extraction(
+            title="Creative Seminar",
+            date_text="Wed 21 Oct",
+            start_time_text="7pm",
+            end_time_text=None,
+            location="JustCo Marina Square",
+        ),
+        default_event_duration_minutes=120,
+    )
+    payload = photo_payload(None, 7, forward_timestamp=int(reference.timestamp()))
+    payload["message"]["media_group_id"] = "album-2"
+    async with bot:
+        await feed(bot, payload)
+    assert service.extractor.calls[0][0] == POSTER
+    assert len(repo.events) == 1 and len(transport.sent) == 1
+
+
+async def test_album_picture_read_errors_are_not_hidden(chat):
+    bot, _, repo, transport = await chat(reader=FakeReader(PictureError("model refused")))
+    payload = photo_payload(None, 7)
+    payload["message"]["media_group_id"] = "album-3"
+    async with bot:
+        await feed(bot, payload)
+    assert transport.sent[-1]["text"] == PICTURE_UNREADABLE and not repo.events
 
 
 async def test_an_unreadable_picture_falls_back_to_the_caption(chat, reference):
@@ -225,7 +272,7 @@ async def test_quick_messages_get_an_assumed_length(
     event = next(iter(repo.events.values()))
     assert event.start_at.hour == start_hour
     assert (event.end_at - event.start_at).seconds == 7200
-    assert "assumes a 120-minute duration" in card.text
+    assert "End time estimated." in card.text
 
 
 async def test_without_a_default_length_the_end_time_is_asked(service_factory, reference):

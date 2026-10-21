@@ -36,19 +36,19 @@ def event_keyboard(
         # A personal plan: it's in your plans (blocks your time, goes to your calendar)
         # or it isn't. Save and Maybe were removed in favour of one Add to plans.
         add = button("Add anyway" if clash else "Add to plans", add_action)
-        edit = button("Edit", "edit")
+        edit = button("Edit details", "edit")
         if event.status == Status.GOING:
-            rows = [[edit, button("Remove", "decline")]]
+            rows = [[edit, button("Remove from plans", "decline")]]
             if not synced:
                 rows.append(calendar_row())
         elif event.status == Status.PREVIEW:
-            rows = [[add], [button("Skip", "decline"), edit]]
+            rows = [[add], [edit, button("Skip", "decline")]]
         else:
             # Declined, or a legacy Saved/Maybe plan: offer to add it to your plans.
             rows = [[add, edit]]
             if event.status == Status.SAVED and not synced:
                 rows.append(calendar_row())
-    if possible:
+    if possible and event.group_event_id:
         # Choosing one never deletes the other; it only commits the chosen plan.
         rows.append([button("Attend this one", add_action)])
         rows.extend([button(f"Attend {other.title[:40]}", "go", other)] for other in possible[:3])
@@ -173,8 +173,31 @@ def confirm_keyboard(nonce: str, label="Confirm update") -> InlineKeyboardMarkup
     )
 
 
-def change_keyboard(nonce: str) -> InlineKeyboardMarkup:
+def personal_change_confirmation(nonce: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Save changes", callback_data=f"confirm:{nonce}"),
+                InlineKeyboardButton("Revise", callback_data=f"revise:{nonce}"),
+                InlineKeyboardButton("Discard changes", callback_data=f"discard:{nonce}"),
+            ],
+        ]
+    )
+
+
+def change_keyboard(nonce: str, *, personal: bool = False) -> InlineKeyboardMarkup:
     """What to change on a plan: venue and title are typed as-is, without the AI."""
+    if personal:
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("Event name", callback_data=f"chg:title:{nonce}"),
+                    InlineKeyboardButton("Date & time", callback_data=f"chg:time:{nonce}"),
+                    InlineKeyboardButton("Venue", callback_data=f"chg:venue:{nonce}"),
+                ],
+                [InlineKeyboardButton("Keep unchanged", callback_data=f"dismiss:{nonce}")],
+            ]
+        )
     return InlineKeyboardMarkup(
         [
             [

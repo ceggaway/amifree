@@ -16,27 +16,27 @@ async def saved_dinner(service, reference):
 async def test_venue_button_sets_the_venue_as_typed(service_factory, reference):
     service, repo = service_factory(extraction())
     card = await saved_dinner(service, reference)
-    ask = (await service.callback(1, tap(card, "Edit")))[0]
-    assert ask.text.startswith("What do you want to change?")
-    prompt = (await service.callback(1, tap(ask, "📍 Venue")))[0]
+    ask = (await service.callback(1, tap(card, "Edit details")))[0]
+    assert ask.text.startswith("What would you like to change?")
+    prompt = (await service.callback(1, tap(ask, "Venue")))[0]
     assert prompt.text.startswith("Send the new venue.")
     done = (await service.message(1, 5, "clb lvl 3", reference))[0]
     # Applied at once: a venue cannot cause a clash, so there is no preview to confirm.
-    assert done.text.startswith("✏️ Updated the venue.") and "Location: clb lvl 3" in done.text
+    assert done.text.startswith("✅ No clashes found") and "📍 clb lvl 3" in done.text
     assert [e.location for e in repo.events.values()] == ["clb lvl 3"]
     assert len(service.extractor.calls) == 1  # only the original message used the AI
     back = (await service.callback(1, tap(done, "↩️ Undo")))[0]
-    assert back.text.startswith("↩️ Changed back.") and "Location: Vivo" in back.text
+    assert back.text.startswith("✅ No clashes found") and "📍 Vivo" in back.text
     assert [e.location for e in repo.events.values()] == ["Vivo"]
 
 
 async def test_title_button(service_factory, reference):
     service, repo = service_factory(extraction())
     card = await saved_dinner(service, reference)
-    ask = (await service.callback(1, tap(card, "Edit")))[0]
-    await service.callback(1, tap(ask, "✏️ Title"))
+    ask = (await service.callback(1, tap(card, "Edit details")))[0]
+    await service.callback(1, tap(ask, "Event name"))
     done = (await service.message(1, 5, "Hall dinner", reference))[0]
-    assert done.text.startswith("✏️ Updated the title.") and "Hall dinner" in done.text
+    assert done.text.startswith("✅ No clashes found") and "<b>Hall dinner</b>" in done.text
     assert [e.title for e in repo.events.values()] == ["Hall dinner"]
     await service.callback(1, tap(done, "↩️ Undo"))
     assert [e.title for e in repo.events.values()] == ["CCA dinner"]
@@ -47,10 +47,11 @@ async def test_a_change_that_changes_nothing_asks_again(service_factory, referen
     same = extraction(date_text="2026-10-09", start_time_text="19:00", end_time_text="21:00")
     service, _ = service_factory(extraction(), same)
     card = await saved_dinner(service, reference)
-    await service.callback(1, tap(card, "Edit"))
+    menu = (await service.callback(1, tap(card, "Edit details")))[0]
+    await service.callback(1, tap(menu, "Date & time"))
     reply = (await service.message(1, 5, "clb lvl 3", reference))[0]
     assert reply.text.startswith("I couldn't tell what to change")
-    assert tap(reply, "📍 Venue")
+    assert tap(reply, "Venue")
     assert "Before:" not in reply.text
 
 
@@ -83,7 +84,7 @@ async def test_end_time_answers_in_any_format(service_factory, reference):
         ask = (await service.message(1, 2, "CCA dinner Friday 7pm at Vivo", reference))[0]
         assert ask.text.startswith("What time does this event end? For example 9pm or 21:00.")
         card = (await service.message(1, 3, answer, reference))[0]
-        assert "19:00 → 09 Oct 20:00 SGT" in card.text, answer
+        assert "7PM–8PM SGT" in card.text, answer
         assert len(service.extractor.calls) == 1, answer
 
 
@@ -149,7 +150,7 @@ async def test_weekday_after_the_date(service_factory, reference):
     )
     await onboard(service, reference)
     card = (await service.message(1, 2, POSTER, reference))[0]
-    assert "Thu, 22 Oct 2026 · 18:00 → 22 Oct 21:00 SGT" in card.text
+    assert "22 Oct 2026 (Thursday) · 6PM–9PM SGT" in card.text
 
 
 async def test_date_answer_needs_no_ai(service_factory, reference):
@@ -158,15 +159,15 @@ async def test_date_answer_needs_no_ai(service_factory, reference):
     ask = (await service.message(1, 2, "CCA dinner 7-9pm at Vivo", reference))[0]
     assert "date" in ask.text
     card = (await service.message(1, 3, "2026-10-22", reference))[0]
-    assert "Thu, 22 Oct 2026" in card.text
+    assert "22 Oct 2026 (Thursday)" in card.text
     assert len(service.extractor.calls) == 1
 
 
 async def test_a_bare_end_hour_means_the_next_one(service_factory, reference):
-    for answer, shown in (("8", "20:00"), ("9.30", "21:30"), ("10", "22:00")):
+    for answer, shown in (("8", "8PM"), ("9.30", "9:30PM"), ("10", "10PM")):
         service, _ = service_factory(extraction(start_time_text="7pm", end_time_text=None))
         await onboard(service, reference)
         await service.message(1, 2, "CCA dinner Friday 7pm at Vivo", reference)
         card = (await service.message(1, 3, answer, reference))[0]
-        assert f"→ 09 Oct {shown} SGT" in card.text, answer
+        assert f"–{shown} SGT" in card.text, answer
         assert len(service.extractor.calls) == 1

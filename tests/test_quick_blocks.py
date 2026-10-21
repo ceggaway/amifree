@@ -74,7 +74,7 @@ async def test_weekly_block_clashes_and_survives_reimport(service_factory, refer
     done = await service.callback(1, preview.keyboard.inline_keyboard[0][0].callback_data)
     assert "Blocked" in done[0].text
     clash = (await service.message(1, 3, "Dinner Wednesday 19:00 20:00", reference))[0]
-    assert clash.text.startswith("⚠️ Clashes with Work")
+    assert clash.text.startswith("⚠️ Overlaps with Work")
     free = (await service.message(1, 4, "Dinner Tuesday 19:00 20:00", reference))[0]
     assert free.text.startswith("✅ No clashes found")
     edge = (await service.message(1, 5, "Supper Wednesday 22:00 23:00", reference))[0]
@@ -87,7 +87,7 @@ async def test_weekly_block_clashes_and_survives_reimport(service_factory, refer
     )
     assert len(await repo.list_blocks(user.id)) == 1
     again = (await service.message(1, 7, "Dinner Wednesday 19:00 20:00", reference))[0]
-    assert again.text.startswith("⚠️ Clashes with Work")
+    assert again.text.startswith("⚠️ Overlaps with Work")
 
 
 async def test_block_command_list_remove_and_isolation(service_factory, reference):

@@ -6,18 +6,24 @@ from app.schemas.event import Status
 from tests.conftest import extraction, onboard, tap
 
 
-async def test_removing_a_plan_can_be_undone(service_factory, reference):
+async def test_removing_a_plan_can_be_added_back(service_factory, reference):
     service, repo = service_factory(extraction())
     await onboard(service, reference)
     card = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     added = (await service.callback(1, tap(card, "Add to plans")))[0]
-    removed = (await service.callback(1, tap(added, "Remove")))[0]
-    assert "Removed from your plans" in removed.text and removed.edit
-    assert [b.text for row in removed.keyboard.inline_keyboard for b in row] == ["↩️ Undo"]
-    back = (await service.callback(1, tap(removed, "↩️ Undo")))[0]
+    removed = (await service.callback(1, tap(added, "Remove from plans")))[0]
+    assert "Not in your plans" in removed.text and removed.edit
+    assert [b.text for row in removed.keyboard.inline_keyboard for b in row] == [
+        "Add to plans",
+        "Edit details",
+    ]
+    back = (await service.callback(1, tap(removed, "Add to plans")))[0]
     assert "Added to your plans" in back.text
     assert next(iter(repo.events.values())).status == Status.GOING
-    assert [b.text for row in back.keyboard.inline_keyboard for b in row][:2] == ["Edit", "Remove"]
+    assert [b.text for row in back.keyboard.inline_keyboard for b in row][:2] == [
+        "Edit details",
+        "Remove from plans",
+    ]
 
 
 async def test_skipping_a_preview_has_no_undo_button(service_factory, reference):
@@ -25,7 +31,7 @@ async def test_skipping_a_preview_has_no_undo_button(service_factory, reference)
     await onboard(service, reference)
     card = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     skipped = (await service.callback(1, tap(card, "Skip")))[0]
-    assert "Skipped" in skipped.text
+    assert "Not in your plans" in skipped.text
     assert "↩️ Undo" not in [b.text for row in skipped.keyboard.inline_keyboard for b in row]
 
 

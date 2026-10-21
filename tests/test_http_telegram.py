@@ -65,6 +65,8 @@ async def test_webhook_to_telegram_complete_flow(service_factory, reference):
         # Going updates the tapped card in place rather than sending a new message.
         edits = [p for name, p in transport.calls if name == "editMessageText"]
         assert any("Added to your plans" in e["text"] for e in edits)
+        assert edits[-1]["parse_mode"] == "HTML"
+        assert "<b>CCA dinner</b>" in edits[-1]["text"]
         assert int(edits[-1]["message_id"]) == 100
         await client.post(
             "/telegram/webhook",
@@ -72,7 +74,7 @@ async def test_webhook_to_telegram_complete_flow(service_factory, reference):
                 "CCA dinner Friday 7–9pm at Vivo", 4, forward_timestamp=int(reference.timestamp())
             ),
         )
-        assert "Clashes with" in transport.sent[-1]["text"]
+        assert "Overlaps with" in transport.sent[-1]["text"]
         assert len(repo.events) == 2
         assert service.extractor.calls[0][1] == reference
         assert any(name == "answerCallbackQuery" for name, _ in transport.calls)

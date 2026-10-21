@@ -25,7 +25,7 @@ from app.bot.keyboards import (
     menu_keyboard,
     page_keyboard,
     personal_calendars_keyboard,
-    plan_undo_keyboard,
+    personal_change_confirmation,
     recurring_keyboard,
     reminder_keyboard,
     remove_block_keyboard,
@@ -40,6 +40,9 @@ from app.bot.messages import (
     clock,
     details,
     event_card,
+    personal_availability,
+    personal_calendar_note,
+    personal_details,
     time_range,
     verdict_line,
 )
@@ -74,7 +77,7 @@ from app.services.deadlines import when as deadline_when
 from app.services.detection import DetectionService
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
-from app.services.free_time import free_gaps, parse_free, weekend
+from app.services.free_time import RANGE, free_gaps, parse_free, weekend
 from app.services.google_calendar import EMAIL as GOOGLE_EMAIL
 from app.services.google_calendar import GCAL_PREFIX
 from app.services.google_sync import GoogleSyncService
@@ -178,13 +181,16 @@ def synced(user: User) -> bool:
 def decided_card(event: Event, availability, note: str, user: User) -> Reply:
     """The tapped card, updated in place: same verdict and details, new status and buttons."""
     card = event_card(event, availability, synced(user))
+    if not event.group_event_id:
+        card.edit = True
+        return card
     if (
         event.status in (Status.SAVED, Status.GOING)
         and not user.calendar_feed_token
         and not user.google_connected
     ):
         note += "\nTip: /calendar puts every plan in your iPhone calendar automatically."
-    return Reply(f"{card.text}\n{note}", card.keyboard, edit=True)
+    return Reply(f"{card.text}\n{note}", card.keyboard, edit=True, parse_mode=card.parse_mode)
 
 
 UNDO_WINDOW = timedelta(minutes=30)
@@ -308,7 +314,13 @@ class SchedulingService:
             coverage_end=user.coverage_end,
             busy_day_threshold=self.settings.busy_day_threshold,
         )
-        synced = [c.synced_at for c in await self.repo.list_calendars(user.id) if c.synced_at]
+        calendars = await self.repo.list_calendars(user.id)
+        result = replace(
+            result,
+            timetable_connected=user.onboarding_status == "READY",
+            personal_connected=bool(calendars) or user.google_connected,
+        )
+        synced = [c.synced_at for c in calendars if c.synced_at]
         if synced:
             seen = window_covers(min(synced), event.start_at, event.end_at)
             result = replace(
@@ -576,7 +588,7 @@ class SchedulingService:
             card = event_card(
                 result, await self.availability(user, result, result.id), synced(user)
             )
-            return [Reply("↩️ Changed back.\n\n" + card.text, card.keyboard, edit=True)]
+            return [Reply(card.text, card.keyboard, edit=True, parse_mode=card.parse_mode)]
         rule = await self.repo.create_block(user.id, BlockRule.model_validate(fields))
         return [Reply("↩️ Restored.\n" + describe(rule), remove_block_keyboard(rule.id), edit=True)]
 
@@ -668,7 +680,7 @@ class SchedulingService:
         if choice == "once":
             event = await self.repo.create_preview(user.id, pending["message_id"], draft)
             card = event_card(event, await self.availability(user, event, event.id))
-            return [Reply(card.text, card.keyboard, edit=True)]
+            return [Reply(card.text, card.keyboard, edit=True, parse_mode=card.parse_mode)]
         rule = BlockRule(
             title=draft.title,
             kind="WEEKLY",
@@ -772,8 +784,11 @@ class SchedulingService:
         now = self.clock()
         today = now.astimezone(SG).date()
         items: list[tuple[datetime, str, str, str]] = []
+        personal_items: dict[str, str] = {}
         for e in await self.repo.recent_events(user.id):
             if e.end_at >= now and e.status in (Status.GOING, Status.SAVED, Status.MAYBE):
+                if not e.group_event_id:
+                    personal_items[e.id] = personal_details(e, compact=True)
                 venue = f", {e.location[:40]}" if e.location else ""
                 items.append(
                     (
@@ -827,7 +842,10 @@ class SchedulingService:
                 lines.append(("" if last is None else "\n") + label)
                 last = rank
             day_prefix = f"{when:%a %-d %b} " if rank >= 2 else ""
-            lines.append(f"{n}. {day_prefix}{text}")
+            if kind == "pc" and item_id in personal_items:
+                lines.append(f"{n}. {personal_items[item_id]}\n")
+            else:
+                lines.append(html.escape(f"{n}. {day_prefix}{text}"))
             buttons.append((str(n), kind, item_id))
         footer = f"\n\nPage {page + 1} of {pages}" if pages > 1 else ""
         return [
@@ -835,6 +853,7 @@ class SchedulingService:
                 "Coming up — tap a number to open it.\n\n" + "\n".join(lines) + footer,
                 agenda_keyboard(buttons, page, pages),
                 edit=page > 0,
+                parse_mode="HTML",
             )
         ]
 
@@ -921,6 +940,13 @@ class SchedulingService:
             return [
                 Reply(
                     "That message is too long. Send the event title, date, time and venue in a shorter message."
+                )
+            ]
+        if user.pending and user.pending.get("stage") == "edit_menu":
+            return [
+                Reply(
+                    "Choose a detail below to edit.",
+                    change_keyboard(user.pending["nonce"], personal=True),
                 )
             ]
         try:
@@ -1015,7 +1041,19 @@ class SchedulingService:
             source = text
             await self.safe_action(user.id, "forward", metadata={"message_id": message_id})
         extracted = None
-        if pending and pending.get("asked") and previous:
+        if pending and pending.get("event_id") and not pending.get("group") and previous:
+            # A complete time range is an explicit edit, not an invitation for the
+            # model to copy the original hours. Keep the existing date and details.
+            times = RANGE.fullmatch(text.strip().rstrip(".!"))
+            if times:
+                extracted = Extraction.model_validate(previous).model_copy(
+                    update={
+                        "start_time_text": times["a"].strip(),
+                        "end_time_text": times["b"].strip(),
+                        "ambiguity": None,
+                    }
+                )
+        if extracted is None and pending and pending.get("asked") and previous:
             # A short answer to our own question ("8PM", "2000") needs no AI, which could
             # rewrite it into text that isn't in the message and ask the same question again.
             extracted = fill_answer(
@@ -1063,6 +1101,7 @@ class SchedulingService:
                     "event_id": pending["event_id"],
                     "base_version": pending["base_version"],
                     "group": pending.get("group", False),
+                    "revision": pending.get("revision", False),
                 }
             )
             existing = await self.load_target(user, state)
@@ -1230,17 +1269,25 @@ class SchedulingService:
         return target.id
 
     async def begin_change(
-        self, user: User, event: Event | GroupEvent, cancel: bool = False
+        self, user: User, event: Event | GroupEvent, cancel: bool = False, *, revision: bool = False
     ) -> list[Reply]:
         group = isinstance(event, GroupEvent)
-        state = {"event_id": event.id, "base_version": event.version, "group": group}
+        state = {
+            "event_id": event.id,
+            "base_version": event.version,
+            "group": group,
+            "revision": revision,
+        }
         if cancel:
             state.update({"stage": "confirm", "cancel": True, "nonce": secrets.token_hex(8)})
             await self.repo.set_pending(user.id, state)
             return [
                 Reply(
-                    "Cancel this event for everyone?\n\n" + details(event),
+                    ("Cancel this event for everyone?\n\n" + details(event))
+                    if group
+                    else "Cancel this event?\n\n" + personal_details(event),
                     confirm_keyboard(state["nonce"], "Confirm cancellation"),
+                    parse_mode=None if group else "HTML",
                 )
             ]
         # A complete baseline allows the extractor to retain unchanged fields.
@@ -1258,7 +1305,7 @@ class SchedulingService:
         )
         state.update(
             {
-                "stage": "clarify",
+                "stage": "clarify" if group else "edit_menu",
                 "source": details(event) + "\n" + base.model_dump_json(),
                 "reference": self.clock().astimezone(SG).isoformat(),
                 "use_next_message_reference": True,
@@ -1271,18 +1318,27 @@ class SchedulingService:
         scope = "\nEveryone who saved it will be told what changed." if group else ""
         return [
             Reply(
-                "What do you want to change?\n\n"
-                + details(event)
-                + "\n\nTap one, or type the change (like: move to 8pm). I'll show a preview first."
+                (
+                    "What do you want to change?\n\n"
+                    if group
+                    else "What would you like to change?\n\n"
+                )
+                + (details(event) if group else personal_details(event))
+                + (
+                    "\n\nTap one, or type the change (like: move to 8pm). I'll show a preview first."
+                    if group
+                    else "\n\nChoose a detail below to edit."
+                )
                 + scope,
-                change_keyboard(state["nonce"]),
+                change_keyboard(state["nonce"], personal=not group),
+                parse_mode=None if group else "HTML",
             )
         ]
 
     async def choose_field(self, user: User, field: str, nonce: str) -> list[Reply]:
         pending = user.pending
         if not pending or pending.get("nonce") != nonce or not pending.get("event_id"):
-            return [Reply("That edit expired. Use /plans and tap Edit again.")]
+            return [Reply("That edit expired. Use /plans and tap Edit details again.")]
         pending = {k: v for k, v in pending.items() if k not in ("field", "asked")}
         if field == "time":
             pending["stage"] = "clarify"
@@ -1290,11 +1346,14 @@ class SchedulingService:
             return [
                 Reply(
                     "Send the new date or time, like: sat 7-9pm, or 20:00-22:00.\n/cancel to keep it unchanged."
+                    if pending.get("group")
+                    else "Send the new date, time, or both. Anything you don’t mention stays unchanged."
+                    "\n\nI’ll show you a preview before saving."
                 )
             ]
         pending.update(stage="edit_field", field=field)
         await self.repo.set_pending(user.id, pending)
-        word = "venue" if field == "venue" else "title"
+        word = "venue" if field == "venue" else ("title" if pending.get("group") else "event name")
         return [Reply(f"Send the new {word}.\n/cancel to keep it unchanged.")]
 
     async def edit_field(self, user: User, pending: dict, text: str) -> list[Reply]:
@@ -1311,7 +1370,7 @@ class SchedulingService:
                 )
             ]
         key = "location" if pending["field"] == "venue" else "title"
-        if not pending.get("group") and isinstance(existing, Event):
+        if not pending.get("group") and not pending.get("revision") and isinstance(existing, Event):
             return await self.apply_text_edit(user, existing, key, value)
         extraction = Extraction.model_validate(pending["extraction"]).model_copy(
             update={key: value, "ambiguity": None}
@@ -1338,9 +1397,8 @@ class SchedulingService:
         token = self.remember_removed(
             user, "plan_edit", {"event_id": result.id, "key": key, "value": before}
         )
-        word = "venue" if key == "location" else "title"
         card = event_card(result, await self.availability(user, result, result.id), synced(user))
-        return [Reply(f"✏️ Updated the {word}.\n\n{card.text}", with_undo(card.keyboard, token))]
+        return [Reply(card.text, with_undo(card.keyboard, token), parse_mode=card.parse_mode)]
 
     async def prepare(
         self, user: User, extraction: Extraction, state: dict, existing: Event | GroupEvent
@@ -1351,8 +1409,10 @@ class SchedulingService:
             await self.repo.set_pending(user.id, state)
             return [
                 Reply(
-                    "Cancel this event?\n\n" + details(existing),
+                    "Cancel this event?\n\n"
+                    + (details(existing) if state.get("group") else personal_details(existing)),
                     confirm_keyboard(state["nonce"], "Confirm cancellation"),
+                    parse_mode=None if state.get("group") else "HTML",
                 )
             ]
         try:
@@ -1371,12 +1431,16 @@ class SchedulingService:
             for key in ("title", "start_at", "end_at", "location", "notes")
         )
         if unchanged:
-            state.update(stage="clarify", asked=None, nonce=secrets.token_hex(8))
+            state.update(
+                stage="clarify" if state.get("group") else "edit_menu",
+                asked=None,
+                nonce=secrets.token_hex(8),
+            )
             await self.repo.set_pending(user.id, state)
             return [
                 Reply(
                     "I couldn't tell what to change. Tap what you want to change, or type it again.",
-                    change_keyboard(state["nonce"]),
+                    change_keyboard(state["nonce"], personal=not state.get("group")),
                 )
             ]
         state.update(
@@ -1390,6 +1454,18 @@ class SchedulingService:
         availability = await self.availability(user, draft, await self.own_id(user, existing))
         state["availability_snapshot"] = self.availability_snapshot(availability)
         await self.repo.set_pending(user.id, state)
+        if not state.get("group"):
+            text = (
+                personal_availability(availability)
+                + "\n\nReview this change before I apply it:\n\n<u>Before:</u>\n"
+                + personal_details(existing)
+                + "\n\n<u>After:</u>\n"
+                + personal_details(draft)
+            )
+            note = personal_calendar_note(availability)
+            if note:
+                text += "\n\n<i>" + note + "</i>"
+            return [Reply(text, personal_change_confirmation(state["nonce"]), parse_mode="HTML")]
         clash = (
             "\n⚠️ The new time clashes with: "
             + ", ".join(b.title[:100] for b in availability.conflicts[:5])
@@ -1786,7 +1862,7 @@ class SchedulingService:
         await self.safe_action(user.id, "calendar_export", event.id, {"target": "ics"})
         return [
             Reply(
-                "Tap the file, then Add to Calendar. Works with Apple Calendar and Outlook.",
+                "Open the file above to add this event to Apple Calendar.",
                 document=(ics_filename(event), build_ics(event, now=self.clock())),
             )
         ]
@@ -1905,6 +1981,33 @@ class SchedulingService:
                 return [Reply("That block is already gone.")]
             token = self.remember_removed(user, "block", rule.model_dump(mode="json"))
             return [Reply("Busy block removed.", undo_keyboard(token), edit=True)]
+        if action in ("revise", "discard") and len(parts) == 2:
+            pending = user.pending
+            if not pending or pending.get("nonce") != parts[1]:
+                return [Reply("That preview expired. Open the plan and tap Edit details again.")]
+            if (
+                pending.get("stage") != "confirm"
+                or pending.get("group")
+                or pending.get("cancel")
+                or not pending.get("draft")
+            ):
+                return [Reply("That action is no longer available.")]
+            event = await self.load_target(user, pending)
+            if not isinstance(event, Event) or event.version != pending["base_version"]:
+                await self.repo.set_pending(user.id, None)
+                return [Reply("That event changed. Use /plans to review its latest state.")]
+            if action == "discard":
+                await self.repo.set_pending(user.id, None)
+                card = event_card(
+                    event, await self.availability(user, event, event.id), synced(user)
+                )
+                card.text += "\n\nChanges discarded."
+                card.edit = True
+                return [card]
+            # Keep the proposed values in a draft. Nothing is persisted until Save changes.
+            draft = EventDraft.model_validate(pending["draft"])
+            proposed = event.model_copy(update=draft.model_dump())
+            return await self.begin_change(user, proposed, revision=True)
         if action in ("confirm", "dismiss") and len(parts) == 2:
             pending = user.pending
             if not pending or pending.get("nonce") != parts[1]:
@@ -2039,25 +2142,5 @@ class SchedulingService:
                 Status.GOING: "Added to your plans. This time is now blocked.",
                 Status.MAYBE: "Marked Maybe. This won't block your time.",
             }[statuses[action]]
-        if statuses[action] == Status.GOING and was_preview and not result.group_event_id:
-            going = [e for e in await self.repo.recent_events(user.id) if e.status == Status.GOING]
-            if len(going) == 1:
-                calendars = await self.repo.list_calendars(user.id)
-                connected = (
-                    user.onboarding_status == "READY" or bool(calendars) or user.google_connected
-                )
-                if connected:
-                    note += "\nNext, try /free tomorrow to see your day."
-                else:
-                    # Nothing connected yet: now that they've seen it work, offer to make it
-                    # schedule-aware. One-off, because it only fires on the very first plan.
-                    note += (
-                        "\n\n🎉 First plan saved! I'll remind you the night before and flag "
-                        "clashes with your other plans.\nWant me to check your classes and your "
-                        "own schedule too? Tap /calendar."
-                    )
         card = decided_card(result, availability, note, user)
-        if statuses[action] == Status.DECLINED and not was_preview and not result.group_event_id:
-            # One tap brings it back: Undo is just "add to my plans" again.
-            card.keyboard = plan_undo_keyboard(result)
         return [card]

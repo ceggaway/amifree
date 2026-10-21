@@ -5,7 +5,7 @@ import pytest
 from app.schemas.event import SG, Status
 from app.services.date_resolution import Clarification, resolve_date
 from app.services.nusmods import academic_year_for
-from tests.conftest import extraction, onboard
+from tests.conftest import extraction, onboard, tap
 
 
 async def test_edit_tomorrow_uses_correction_message_time(service_factory, reference):
@@ -14,10 +14,11 @@ async def test_edit_tomorrow_uses_correction_message_time(service_factory, refer
     )
     await onboard(service, reference)
     card = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-    await service.callback(1, card.keyboard.inline_keyboard[1][1].callback_data)
+    menu = (await service.callback(1, tap(card, "Edit details")))[0]
+    await service.callback(1, tap(menu, "Date & time"))
     reply_time = reference + timedelta(days=1)
     preview = (await service.message(1, 3, "Move to tomorrow 8pm–10pm", reply_time))[0]
-    assert "06 Oct 2026" in preview.text
+    assert "6 Oct 2026 (Tuesday)" in preview.text
     assert next(iter(repo.events.values())).start_at.day == 9
     assert service.extractor.calls[-1][1] == reply_time
     await service.callback(1, preview.keyboard.inline_keyboard[0][0].callback_data)

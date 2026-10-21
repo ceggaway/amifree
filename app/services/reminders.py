@@ -1,8 +1,9 @@
 """Night-before summary: one message listing tomorrow's Going plans with venues."""
 
 from datetime import datetime, time, timedelta
+from html import escape
 
-from app.bot.messages import clock
+from app.bot.messages import clock, personal_details
 from app.schemas.event import SG, Deadline, Event, Status
 
 
@@ -34,18 +35,28 @@ def summary(day: datetime, events: list[Event], deadlines: list[Deadline] = ()) 
     if not going:
         return None
 
-    def line(e: Event) -> str:
-        venue = f" @ {e.location[:80]}" if e.location else ""
-        return f"• {e.start_at:%H:%M}–{e.end_at:%H:%M} {e.title[:80]}{venue}"
+    html_mode = any(not e.group_event_id for e in going)
+    limit = 10 if html_mode else 15
 
-    text = f"Tomorrow, {day:%a %-d %b}:\n" + "\n".join(line(e) for e in going[:15])
-    if len(going) > 15:
-        text += f"\n+ {len(going) - 15} more"
+    def line(e: Event) -> str:
+        if not e.group_event_id:
+            return personal_details(e, compact=True)
+        venue = f" @ {e.location[:80]}" if e.location else ""
+        text = f"• {e.start_at:%H:%M}–{e.end_at:%H:%M} {e.title[:80]}{venue}"
+        return escape(text) if html_mode else text
+
+    separator = "\n\n" if html_mode else "\n"
+    text = f"Tomorrow, {day:%a %-d %b}:\n" + separator.join(line(e) for e in going[:limit])
+    if len(going) > limit:
+        text += f"\n+ {len(going) - limit} more"
     undecided = [e for e in events if e.status == Status.SAVED]
     if undecided:
-        text += "\n\nStill undecided: " + ", ".join(e.title[:40] for e in undecided[:5])
+        text += "\n\nStill undecided: " + ", ".join(
+            (escape(e.title[:40]) if html_mode else e.title[:40]) for e in undecided[:5]
+        )
     if deadlines:
         text += "\n\n📌 Due: " + ", ".join(
-            f"{d.title[:40]} ({clock(d.due_at)})" for d in deadlines[:5]
+            f"{escape(d.title[:40]) if html_mode else d.title[:40]} ({clock(d.due_at)})"
+            for d in deadlines[:5]
         )
     return text + "\n\n/plans for details. /reminders off stops these summaries."

@@ -54,7 +54,7 @@ async def test_just_the_next_one_makes_a_normal_card(service_factory, reference)
     service, repo = service_factory(BHID)
     offer = (await service.message(1, 1, BHID_POST, reference))[0]
     card = (await service.callback(1, tap(offer, "Just the next one (Sat 10 Oct)")))[0]
-    assert card.edit and "Sat, 10 Oct 2026 · 09:30 → 10 Oct 11:30" in card.text
+    assert card.edit and "10 Oct 2026 (Saturday) · 9:30AM–11:30AM" in card.text
     assert "Add to plans" in [b.text for row in card.keyboard.inline_keyboard for b in row]
     assert not (await repo.ensure_user(1)).pending
 
@@ -76,7 +76,7 @@ async def test_every_week_becomes_a_weekly_busy_block(service_factory, reference
     saved = (await service.callback(1, tap(confirm, "Save block")))[0]
     assert "Blocked" in saved.text
     brunch = (await service.message(1, 2, "Brunch Saturday 10am-12pm", reference))[0]
-    assert brunch.text.startswith("⚠️ Clashes with Project BHID volunteering")
+    assert brunch.text.startswith("⚠️ Overlaps with Project BHID volunteering")
 
 
 async def test_neither_and_expired_choices(service_factory, reference):

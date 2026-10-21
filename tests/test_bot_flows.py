@@ -19,7 +19,7 @@ async def test_complete_mvp_and_user_isolation(service_factory, reference):
     committed = await service.callback(1, button.callback_data)
     assert "Added" in committed[0].text
     second = (await service.message(1, 3, TEXT, reference))[0]
-    assert "Clashes with" in second.text
+    assert "Overlaps with" in second.text
     assert second.keyboard.inline_keyboard[0][0].text == "Add anyway"
     await onboard(service, reference, 2)
     third = (await service.message(2, 2, TEXT, reference))[0]
@@ -44,7 +44,7 @@ async def test_timetable_clash(service_factory, reference):
         )
     ]
     reply = (await service.message(1, 2, TEXT, reference))[0]
-    assert "Clash" in reply.text and "CS3216 Lecture" in reply.text
+    assert "Overlaps with" in reply.text and "CS3216 Lecture" in reply.text
 
 
 async def test_clarification_survives_service_restart(service_factory, reference):
@@ -57,7 +57,7 @@ async def test_clarification_survives_service_restart(service_factory, reference
     assert not repo.events
     restarted = SchedulingService(repo, service.extractor, service.importer, service.settings)
     card = (await restarted.message(1, 3, "7–9pm", reference + timedelta(days=10)))[0]
-    assert "09 Oct 2026" in card.text
+    assert "9 Oct 2026 (Friday)" in card.text
     assert "No clashes found" in card.text
     assert len(service.extractor.calls) == 1  # "7–9pm" answers the question without the AI
 
@@ -74,7 +74,7 @@ async def test_repeat_callback_and_duplicate_message(service_factory, reference)
     assert len([a for a in repo.actions if a[1] == "going"]) == 1
 
 
-@pytest.mark.parametrize("row,col,status", [(1, 0, Status.DECLINED)])
+@pytest.mark.parametrize("row,col,status", [(1, 1, Status.DECLINED)])
 async def test_non_going_does_not_block(service_factory, reference, row, col, status):
     service, repo = service_factory(extraction(), extraction())
     await onboard(service, reference)
@@ -174,7 +174,8 @@ async def test_edit_keeps_commitment_until_confirmed(service_factory, reference)
     await onboard(service, reference)
     card = (await service.message(1, 2, TEXT, reference))[0]
     confirmed = await service.callback(1, card.keyboard.inline_keyboard[0][0].callback_data)
-    await service.callback(1, tap(confirmed[0], "Edit"))
+    menu = (await service.callback(1, tap(confirmed[0], "Edit details")))[0]
+    await service.callback(1, tap(menu, "Date & time"))
     preview = (await service.message(1, 3, "20:00–22:00", reference))[0]
     e = next(iter(repo.events.values()))
     assert e.status == Status.GOING and e.start_at.hour == 19
@@ -197,21 +198,21 @@ async def test_new_user_saves_without_nusmods(service_factory, reference):
     assert "forward me a plan" in (await service.command(1, "start"))[0].text.lower()
     card = (await service.message(1, 2, TEXT, reference))[0]
     assert card.text.startswith("✅ No clashes found")
-    assert "No NUSMods timetable covers this date" in card.text
+    assert "Connect your timetable and personal calendar for a fuller clash check." in card.text
     assert "Nothing coming up" in (await service.command(1, "plans"))[0].text
     add = card.keyboard.inline_keyboard[0][0]
     assert add.text == "Add to plans"
     added = await service.callback(1, add.callback_data)
     assert len(added) == 1 and added[0].edit  # the tapped card is updated in place
-    assert "In your plans" in added[0].text and "Added to your plans" in added[0].text
-    # nothing connected, so the first plan nudges toward classes and calendar
-    assert "classes and your own schedule" in added[0].text and "/calendar" in added[0].text
+    assert "Added to your plans" in added[0].text
+    # Export controls explain the one-off add and how to enable future syncing.
+    assert "connect calendar syncing through /calendar" in added[0].text
     event = next(iter(repo.events.values()))
     assert event.status == Status.GOING
     assert "CCA dinner" in (await service.command(1, "events"))[0].text
 
 
-async def test_overlapping_saved_plans_ask_which_to_attend(service_factory, reference):
+async def test_overlapping_saved_plans_do_not_duplicate_actions(service_factory, reference):
     service, repo = service_factory(extraction(), extraction(title="Hall supper"))
     await service.message(1, 2, TEXT, reference)
     saved = next(iter(repo.events.values()))
@@ -219,16 +220,19 @@ async def test_overlapping_saved_plans_ask_which_to_attend(service_factory, refe
     second = (await service.message(1, 3, "Hall supper Friday 7–9pm", reference))[0]
     # A saved plan is undecided, so it is reported without being a clash.
     assert second.text.startswith("✅ No clashes found")
-    assert "Possible overlap with CCA dinner. Which will you attend?" in second.text
-    choices = [row[0] for row in second.keyboard.inline_keyboard[2:]]
-    assert [b.text for b in choices] == ["Attend this one", "Attend CCA dinner"]
-    await service.callback(1, choices[1].callback_data)
+    assert "Which will you attend?" not in second.text
+    assert [b.text for row in second.keyboard.inline_keyboard for b in row] == [
+        "Add to plans",
+        "Edit details",
+        "Skip",
+    ]
+    await service.callback(1, tap(second, "Add to plans"))
     dinner, supper = repo.events.values()
-    assert dinner.status == Status.GOING
-    assert supper.status == Status.PREVIEW and len(repo.events) == 2
+    assert dinner.status == Status.SAVED
+    assert supper.status == Status.GOING and len(repo.events) == 2
 
 
-async def test_busy_day_warning_is_not_a_clash(service_factory, reference):
+async def test_busy_day_does_not_add_a_notice(service_factory, reference):
     plans = [
         extraction(title=f"Plan {n}", start_time_text=f"{hour}:00", end_time_text=f"{hour + 1}:00")
         for n, hour in enumerate((9, 11, 13, 15))
@@ -240,7 +244,8 @@ async def test_busy_day_warning_is_not_a_clash(service_factory, reference):
         ]
         await service.callback(1, card.keyboard.inline_keyboard[0][0].callback_data)
     fourth = (await service.message(1, 9, "Plan Friday 15:00 16:00", reference))[0]
-    assert fourth.text.startswith("ℹ️ Busy day")
+    assert fourth.text.startswith("✅ No clashes found")
+    assert "Busy day" not in fourth.text
     assert fourth.keyboard.inline_keyboard[0][0].text == "Add to plans"
 
 
@@ -248,7 +253,7 @@ async def test_plans_excludes_previews_and_declined(service_factory, reference):
     service, repo = service_factory(extraction(), extraction(title="Other"))
     await service.message(1, 2, TEXT, reference)
     declined = (await service.message(1, 3, "Other Friday 7–9pm", reference))[0]
-    await service.callback(1, declined.keyboard.inline_keyboard[1][0].callback_data)
+    await service.callback(1, declined.keyboard.inline_keyboard[1][1].callback_data)
     assert "Nothing coming up" in (await service.command(1, "plans"))[0].text
 
 
@@ -260,11 +265,11 @@ async def test_card_buttons_follow_the_plans_status(service_factory, reference):
         return [b.text for row in reply.keyboard.inline_keyboard for b in row]
 
     card = (await service.message(1, 2, TEXT, reference))[0]
-    assert labels(card) == ["Add to plans", "Skip", "Edit"]
+    assert labels(card) == ["Add to plans", "Edit details", "Skip"]
     added = await service.callback(1, tap(card, "Add to plans"))
     cal = ["📅 Google Calendar", "🍎 Apple Calendar"]
-    assert labels(added[0]) == ["Edit", "Remove", *cal]
+    assert labels(added[0]) == ["Edit details", "Remove from plans", *cal]
     assert next(iter(repo.events.values())).status == Status.GOING
-    removed = await service.callback(1, tap(added[0], "Remove"))
-    assert labels(removed[0]) == ["↩️ Undo"]  # one tap brings it back
+    removed = await service.callback(1, tap(added[0], "Remove from plans"))
+    assert labels(removed[0]) == ["Add to plans", "Edit details"]
     assert next(iter(repo.events.values())).status == Status.DECLINED

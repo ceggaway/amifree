@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from html import escape
 
 from telegram import InlineKeyboardMarkup, LinkPreviewOptions
 
@@ -214,8 +215,103 @@ def group_card(
     return Reply(body, group_keyboard(event, app_url))
 
 
+def personal_time(value: datetime) -> str:
+    return value.astimezone(SG).strftime("%-I:%M%p").replace(":00", "")
+
+
+def personal_when(start: datetime, end: datetime) -> str:
+    start, end = start.astimezone(SG), end.astimezone(SG)
+    if start.date() == end.date():
+        return f"{start:%-d %b %Y (%A)} · {personal_time(start)}–{personal_time(end)} SGT"
+    return (
+        f"{start:%-d %b %Y (%A)} · {personal_time(start)} – "
+        f"{end:%-d %b %Y (%A)} · {personal_time(end)} SGT"
+    )
+
+
+def personal_details(event: EventDraft, *, compact: bool = False) -> str:
+    title = event.title[:80] if compact else event.title
+    text = f"<b>{escape(title)}</b>\n📅 {personal_when(event.start_at, event.end_at)}"
+    if event.location:
+        text += "\n📍 " + escape(event.location[:80] if compact else event.location)
+    if event.assumed_duration:
+        text += "\nEnd time estimated."
+    return text
+
+
+def personal_availability(availability: Availability) -> str:
+    def conflict_line(plan):
+        start, end = plan.start_at.astimezone(SG), plan.end_at.astimezone(SG)
+        when = (
+            f"{personal_time(start)}–{personal_time(end)} SGT"
+            if start.date() == end.date()
+            else personal_when(start, end)
+        )
+        return f"{escape(plan.title)} · {when}"
+
+    conflicts = availability.conflicts
+    if len(conflicts) == 1:
+        return "⚠️ Overlaps with " + conflict_line(conflicts[0])
+    if conflicts:
+        return f"⚠️ Overlaps with {len(conflicts)} plans\n" + "\n".join(
+            "• " + conflict_line(plan) for plan in conflicts
+        )
+    return "✅ No clashes found"
+
+
+def personal_calendar_note(availability: Availability) -> str | None:
+    timetable = availability.timetable_connected
+    if timetable is None:
+        timetable = availability.covered if availability.nusmods is None else availability.nusmods
+    personal = availability.personal_connected
+    if personal is None:
+        personal = availability.personal
+    if not timetable and not personal:
+        note = "Connect your timetable and personal calendar for a fuller clash check."
+    elif not timetable:
+        note = "Connect your NUSMods calendar to check for clashes with your classes."
+    elif not personal:
+        note = "Connect your personal calendar to check for clashes with your other plans."
+    else:
+        note = None
+    return note
+
+
+def personal_event_card(event: Event, availability: Availability, synced: bool) -> Reply:
+    if event.status == Status.CANCELLED:
+        return Reply("Cancelled\n\n" + personal_details(event), parse_mode="HTML")
+    text = personal_availability(availability) + "\n\n" + personal_details(event)
+    added = event.status in (Status.GOING, Status.SAVED)
+    personal_connected = availability.personal_connected
+    if personal_connected is None:
+        personal_connected = availability.personal
+    hide_exports = synced or personal_connected
+    note = personal_calendar_note(availability)
+    if note and not added:
+        text += "\n\n<i>" + note + "</i>"
+    if added:
+        text += "\n\n☑️ <b>Added to your plans.</b>"
+        if synced:
+            text += "\nSyncing to your calendar."
+        if not hide_exports:
+            text += (
+                "\n\nWant this event in your personal calendar? Tap <b>Google Calendar</b> "
+                "or <b>Apple Calendar</b> below, then confirm to add it."
+                "\n\nTo add future plans automatically, connect calendar syncing through /calendar."
+            )
+    elif event.status in (Status.DECLINED, Status.MAYBE):
+        text += "\n\n❌ <b>Not in your plans.</b>"
+    return Reply(
+        text,
+        event_keyboard(event, bool(availability.conflicts), synced=hide_exports),
+        parse_mode="HTML",
+    )
+
+
 def event_card(event: Event, availability: Availability, synced: bool = False) -> Reply:
     """synced: the user's calendar app subscribes to their AmIFree feed."""
+    if not event.group_event_id:
+        return personal_event_card(event, availability, synced)
     if event.status == Status.CANCELLED:
         return Reply("Cancelled\n" + details(event))
     body = verdict_line(availability) + "\n\n" + details(event)

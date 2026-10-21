@@ -74,7 +74,7 @@ async def test_tapping_a_number_opens_the_item(service_factory, reference):
     plan_card = (await service.callback(1, cb_for("CCA dinner")))[0]
     assert "CCA dinner" in plan_card.text
     labels = [b.text for row in plan_card.keyboard.inline_keyboard for b in row]
-    assert "Edit" in labels and "Remove" in labels
+    assert "Edit details" in labels and "Remove from plans" in labels
 
 
 async def test_declined_and_past_plans_are_not_listed(service_factory, reference):
@@ -127,7 +127,7 @@ async def test_agenda_pages_ten_at_a_time(service_factory, reference):
     assert (await service.callback(1, "plans:99"))[0].text.startswith("Coming up")  # clamped
 
 
-async def test_first_plan_gets_one_tip(service_factory, reference):
+async def test_cards_do_not_repeat_first_plan_tips(service_factory, reference):
     service, _ = service_factory(
         extraction(),
         extraction(title="Study group", start_time_text="2", end_time_text="4pm", location=None),
@@ -135,7 +135,7 @@ async def test_first_plan_gets_one_tip(service_factory, reference):
     await onboard(service, reference)
     first = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     added = (await service.callback(1, tap(first, "Add to plans")))[0]
-    assert "Next, try /free tomorrow" in added.text
+    assert "Next, try /free tomorrow" not in added.text
     second = (await service.message(1, 3, "Study group Friday 2–4pm", reference))[0]
     added = (await service.callback(1, tap(second, "Add to plans")))[0]
     assert "Next, try /free tomorrow" not in added.text

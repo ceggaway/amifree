@@ -103,7 +103,7 @@ async def test_apple_button_sends_the_ics_file(service_factory, reference):
     reply = (await service.callback(1, calendar_row(saved[0])[1].callback_data))[0]
     name, content = reply.document
     assert name.endswith(".ics") and b"SUMMARY:CCA dinner" in content
-    assert "Add to Calendar" in reply.text
+    assert reply.text == "Open the file above to add this event to Apple Calendar."
     assert any(a[1] == "calendar_export" for a in repo.actions)
 
 
@@ -121,7 +121,7 @@ async def test_other_users_and_dropped_plans_get_no_file(service_factory, refere
     data = calendar_row(saved[0])[1].callback_data
     assert (await service.callback(2, data))[0].document is None  # not your plan
     assert "isn't valid" in (await service.callback(1, "ics:not-a-uuid"))[0].text
-    decline = tap(saved[0], "Remove")
+    decline = tap(saved[0], "Remove from plans")
     await service.callback(1, decline)
     assert (await service.callback(1, data))[0].document is None
 

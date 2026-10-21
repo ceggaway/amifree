@@ -71,9 +71,7 @@ async def test_card_says_how_much_of_the_plan_is_lost(service_factory, reference
     lab = (await service.message(1, 1, "CS2040 Lab Friday 6pm-8pm", reference))[0]
     await service.callback(1, tap(lab, "Add to plans"))
     card = (await service.message(1, 2, "CCA dinner Friday 7–9pm", reference))[0]
-    assert card.text.startswith(
-        "⚠️ Clashes with CS2040 Lab: it ends at 8pm, so you'd miss the first 1 hr"
-    )
+    assert card.text.startswith("⚠️ Overlaps with CS2040 Lab · 6PM–8PM SGT")
     assert "Add anyway" in [b.text for row in card.keyboard.inline_keyboard for b in row]
 
 

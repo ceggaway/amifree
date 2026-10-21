@@ -432,13 +432,13 @@ async def test_new_plans_edits_and_removals_follow_the_student(with_google, refe
     assert google.calls[-1] == ("upsert", "CCA dinner", True)
     assert next(iter(google.events.values())).location == "UTown"
 
-    removed = (await service.callback(1, tap(edited, "Remove")))[0]
-    assert "Removed" in removed.text
+    removed = (await service.callback(1, tap(edited, "Remove from plans")))[0]
+    assert "Not in your plans" in removed.text
     await service.google_sync.sync(user_id)
     assert google.calls[-1][0] == "delete" and not google.events
     assert not await repo.google_links(user_id)
 
-    await service.callback(1, tap(removed, "↩️ Undo"))  # Undo puts it back in Google as well
+    await service.callback(1, tap(removed, "Add to plans"))  # Undo puts it back in Google as well
     await service.google_sync.sync(user_id)
     assert google.calls[-1] == ("upsert", "CCA dinner", False) and len(google.events) == 1
 
@@ -575,7 +575,7 @@ async def test_cards_say_plans_sync_once_connected(with_google, reference):
     await onboard(service, reference)
     await connect(service, 1, "me@gmail.com", reference, 9)
     added = await add_dinner(service, reference)
-    assert "Syncing to your calendar automatically" in added.text
+    assert "Syncing to your calendar" in added.text
     assert "/calendar puts every plan in your iPhone calendar" not in added.text
 
 

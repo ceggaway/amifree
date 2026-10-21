@@ -188,7 +188,8 @@ async def test_stale_organiser_edit_is_rejected(service_factory, reference):
 async def test_personal_edits_do_not_alert_anyone(service_factory, reference):
     service, repo = service_factory(extraction(), MOVED)
     card = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
-    await service.callback(1, card.keyboard.inline_keyboard[1][1].callback_data)
+    menu = (await service.callback(1, tap(card, "Edit details")))[0]
+    await service.callback(1, tap(menu, "Date & time"))
     preview = (await service.message(1, 3, "20:00–22:00", reference))[0]
     await service.callback(1, preview.keyboard.inline_keyboard[0][0].callback_data)
     assert repo.notifications == []
@@ -237,7 +238,7 @@ async def test_two_plans_tomorrow_make_one_nightly_message(service_factory, refe
     ((telegram_id, text),) = outbox.sent
     assert telegram_id == 1
     assert text.startswith(
-        "Tomorrow, Mon 5 Oct:\n• 12:00–13:00 Lunch @ Vivo\n• 19:00–21:00 Dinner @ Vivo"
+        "Tomorrow, Mon 5 Oct:\n<b>Lunch</b>\n📅 5 Oct 2026 (Monday) · 12PM–1PM SGT\n📍 Vivo"
     )
     assert "Still undecided: Movie" in text
     # Repeating the job the same night, or just after midnight, sends nothing more.
@@ -272,7 +273,7 @@ async def test_reminder_opt_out_and_cancelled_plans(service_factory, reference):
     from app.services.reminders import enqueue_nightly
 
     assert await enqueue_nightly(repo, service.clock(), 18) == 1
-    await service.callback(2, tap(going[0], "Remove"))
+    await service.callback(2, tap(going[0], "Remove from plans"))
     assert (await service.notifier.run())["skipped"] == 1 and outbox.sent == []
 
 

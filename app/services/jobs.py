@@ -87,7 +87,8 @@ class Notifier:
             )
             due = await self.repo.deadlines_between(start, start + timedelta(days=1), user.id)
             text = summary(start, events, due)
-            return Reply(text) if text else None
+            html_mode = any(not e.group_event_id and e.status == Status.GOING for e in events)
+            return Reply(text, parse_mode="HTML" if html_mode else None) if text else None
         if row["kind"] == "CONFIRM":
             event = await self.repo.get_group_event(payload["id"])
             now = self.scheduling.clock()

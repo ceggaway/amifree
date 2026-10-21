@@ -235,6 +235,38 @@ def agenda_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def plans_keyboard(
+    items: list[tuple[str, str, str]], page: int, pages: int
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(label, callback_data=f"fp:{page}:{kind}:{item_id}")]
+        for label, kind, item_id in items
+    ]
+    navigation = []
+    if page:
+        navigation.append(InlineKeyboardButton("← Previous", callback_data=f"plans:{page - 1}"))
+    if page + 1 < pages:
+        navigation.append(InlineKeyboardButton("Next →", callback_data=f"plans:{page + 1}"))
+    if navigation:
+        rows.append(navigation)
+    return InlineKeyboardMarkup(rows)
+
+
+def with_plans_navigation(markup: InlineKeyboardMarkup | None, page: int) -> InlineKeyboardMarkup:
+    rows = []
+    for row in markup.inline_keyboard if markup else ():
+        buttons = []
+        for button in row:
+            data = button.callback_data
+            if isinstance(data, str) and not data.startswith(("fp:", "plans:")):
+                buttons.append(InlineKeyboardButton(button.text, callback_data=f"fp:{page}:{data}"))
+            else:
+                buttons.append(button)
+        rows.append(buttons)
+    rows.append([InlineKeyboardButton("← Back to plans", callback_data=f"plans:{page}")])
+    return InlineKeyboardMarkup(rows)
+
+
 def remove_block_keyboard(block_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("Remove", callback_data=f"unblock:{block_id}")]]

@@ -59,8 +59,10 @@ async def test_typed_reminder_is_saved_and_listed_but_not_busy(service_factory, 
     assert len(repo.reminders) == 1 and not repo.events and not repo.deadlines
 
     plans = (await service.command(1, "plans"))[0]
-    assert "⏰ Buy milk" in plans.text
-    opened = (await service.callback(1, tap(plans, "1")))[0]
+    assert any(
+        "Reminder: Buy milk" in b.text for row in plans.keyboard.inline_keyboard for b in row
+    )
+    opened = (await service.callback(1, tap(plans, "4 Oct · Reminder: Buy milk")))[0]
     assert "Buy milk" in opened.text and "Rings today at 5pm" in opened.text
 
     # It does not make 5pm busy.

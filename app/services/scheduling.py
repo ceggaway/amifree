@@ -26,11 +26,13 @@ from app.bot.keyboards import (
     page_keyboard,
     personal_calendars_keyboard,
     personal_change_confirmation,
+    plans_keyboard,
     recurring_keyboard,
     reminder_keyboard,
     remove_block_keyboard,
     settings_keyboard,
     undo_keyboard,
+    with_plans_navigation,
     with_undo,
 )
 from app.bot.messages import (
@@ -195,6 +197,7 @@ def decided_card(event: Event, availability, note: str, user: User) -> Reply:
 
 UNDO_WINDOW = timedelta(minutes=30)
 AGENDA_PAGE = 10
+PLANS_PAGE = 7
 
 # Menu button -> the command it runs.
 MENU_COMMANDS = {
@@ -780,82 +783,57 @@ class SchedulingService:
         return "\n\n⚠️ This clashes with your plans:\n" + "\n".join(lines) + more
 
     async def agenda(self, user: User, page: int = 0) -> list[Reply]:
-        """One message: plans, deadlines and busy time, grouped by day with a button each."""
+        """Seven upcoming items per page, each opened by its date-and-name button."""
         now = self.clock()
-        today = now.astimezone(SG).date()
         items: list[tuple[datetime, str, str, str]] = []
-        personal_items: dict[str, str] = {}
-        for e in await self.repo.recent_events(user.id):
-            if e.end_at >= now and e.status in (Status.GOING, Status.SAVED, Status.MAYBE):
-                if not e.group_event_id:
-                    personal_items[e.id] = personal_details(e, compact=True)
-                venue = f", {e.location[:40]}" if e.location else ""
-                items.append(
-                    (
-                        e.start_at,
-                        "pc",
-                        e.id,
-                        f"{time_range(e.start_at, e.end_at)}  {e.title[:60]}{venue}",
-                    )
-                )
-        for d in await self.repo.deadlines_between(now, now + timedelta(days=120), user.id):
-            items.append((d.due_at, "dc", d.id, f"due {clock(d.due_at)}  {d.title[:60]}"))
-        for r in await self.repo.reminders_between(now, now + timedelta(days=60), user.id):
-            items.append((r.remind_at, "rc", r.id, f"{clock(r.remind_at)}  ⏰ {r.text[:60]}"))
+        for event in await self.repo.recent_events(user.id):
+            if event.end_at >= now and event.status in (Status.GOING, Status.SAVED, Status.MAYBE):
+                items.append((event.start_at, "pc", event.id, event.title))
+        for deadline in await self.repo.deadlines_between(now, now + timedelta(days=120), user.id):
+            items.append((deadline.due_at, "dc", deadline.id, "Due: " + deadline.title))
+        for reminder in await self.repo.reminders_between(now, now + timedelta(days=60), user.id):
+            items.append((reminder.remind_at, "rc", reminder.id, "Reminder: " + reminder.text))
         for rule in await self.repo.list_blocks(user.id):
-            occ = expand_blocks([rule], now, now + timedelta(days=60))
-            upcoming = [b for b in occ if b.end_at > now]
+            upcoming = [
+                b for b in expand_blocks([rule], now, now + timedelta(days=60)) if b.end_at > now
+            ]
             if upcoming:
-                b = min(upcoming, key=lambda b: b.start_at)
-                weekly = " (weekly)" if rule.kind == "WEEKLY" else ""
-                items.append(
-                    (
-                        b.start_at,
-                        "bc",
-                        rule.id,
-                        f"{time_range(b.start_at, b.end_at)}  {rule.title[:50]} · busy{weekly}",
-                    )
-                )
+                block = min(upcoming, key=lambda b: b.start_at)
+                items.append((block.start_at, "bc", rule.id, "Busy: " + rule.title))
         if not items:
             return [Reply("Nothing coming up. Forward a plan, or add a deadline with /deadline.")]
-        items.sort(key=lambda it: it[0])
-        pages = (len(items) + AGENDA_PAGE - 1) // AGENDA_PAGE
+        items.sort(key=lambda item: (item[0], item[1], item[2]))
+        pages = (len(items) + PLANS_PAGE - 1) // PLANS_PAGE
         page = max(0, min(page, pages - 1))
-        shown = items[page * AGENDA_PAGE : (page + 1) * AGENDA_PAGE]
-
-        def bucket(when: datetime) -> tuple[int, str]:
-            day = when.astimezone(SG).date()
-            if day <= today:
-                return 0, "Today"
-            if day == today + timedelta(days=1):
-                return 1, "Tomorrow"
-            if day <= today + timedelta(days=7):
-                return 2, "This week"
-            return 3, "Later"
-
-        lines: list[str] = []
-        buttons: list = []
-        last = None
-        for n, (when, kind, item_id, text) in enumerate(shown, 1):
-            rank, label = bucket(when)
-            if rank != last:
-                lines.append(("" if last is None else "\n") + label)
-                last = rank
-            day_prefix = f"{when:%a %-d %b} " if rank >= 2 else ""
-            if kind == "pc" and item_id in personal_items:
-                lines.append(f"{n}. {personal_items[item_id]}\n")
-            else:
-                lines.append(html.escape(f"{n}. {day_prefix}{text}"))
-            buttons.append((str(n), kind, item_id))
-        footer = f"\n\nPage {page + 1} of {pages}" if pages > 1 else ""
+        buttons = []
+        for when, kind, item_id, title in items[page * PLANS_PAGE : (page + 1) * PLANS_PAGE]:
+            title = " ".join(title.split())
+            if len(title) > 32:
+                short = title[:31]
+                if not title[31].isspace() and " " in short:
+                    short = short.rsplit(" ", 1)[0]
+                title = short.rstrip(" ,.:;·-–—") + "…"
+            buttons.append((f"{when.astimezone(SG):%-d %b} · {title}", kind, item_id))
         return [
             Reply(
-                "Coming up — tap a number to open it.\n\n" + "\n".join(lines) + footer,
-                agenda_keyboard(buttons, page, pages),
-                edit=page > 0,
+                f"<b>Your plans</b>\nSelect a plan to view its details.\n\n<i>Page {page + 1} of {pages}</i>",
+                plans_keyboard(buttons, page, pages),
                 parse_mode="HTML",
             )
         ]
+
+    async def _plans_replies(self, user: User, replies: list[Reply], page: int) -> list[Reply]:
+        # Retain the originating list page through edits, confirmations and removals.
+        latest = await self.repo.ensure_user(user.telegram_user_id)
+        if latest.pending and latest.pending.get("event_id"):
+            await self.repo.set_pending(user.id, {**latest.pending, "plans_page": page})
+        for index, reply in enumerate(replies):
+            if reply.document or reply.photos:
+                continue
+            if reply.keyboard or index == len(replies) - 1:
+                reply.keyboard = with_plans_navigation(reply.keyboard, page)
+            reply.edit = index == len(replies) - 1
+        return replies
 
     async def open_item(self, user: User, kind: str, item_id: str) -> list[Reply]:
         """Open one agenda item as its own card, so it can be edited or removed."""
@@ -934,6 +912,15 @@ class SchedulingService:
         self, telegram_id: int, message_id: int, text: str, reference: datetime
     ) -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
+        page = (user.pending or {}).get("plans_page")
+        replies = await self._message(user, telegram_id, message_id, text, reference)
+        if isinstance(page, int) and page >= 0:
+            return await self._plans_replies(user, replies, page)
+        return replies
+
+    async def _message(
+        self, user: User, telegram_id: int, message_id: int, text: str, reference: datetime
+    ) -> list[Reply]:
         if user.pending and user.pending.get("stage") == "feedback_text":
             return await self.receive_feedback_text(user, text)
         if len(text) > 8000:
@@ -1868,7 +1855,25 @@ class SchedulingService:
         ]
 
     async def callback(self, telegram_id: int, data: str) -> list[Reply]:
+        page = None
+        if data.startswith("fp:"):
+            parts = data.split(":", 2)
+            if (
+                len(parts) != 3
+                or not parts[1].isascii()
+                or not parts[1].isdigit()
+                or len(parts[1]) > 8
+                or parts[2].startswith("fp:")
+            ):
+                return [Reply("That button isn't valid. Use /plans.")]
+            page, data = int(parts[1]), parts[2]
         user = await self.repo.ensure_user(telegram_id)
+        replies = await self._callback(user, telegram_id, data)
+        if page is not None:
+            return await self._plans_replies(user, replies, page)
+        return replies
+
+    async def _callback(self, user: User, telegram_id: int, data: str) -> list[Reply]:
         if data.startswith("g:"):
             return await self.groups.from_private(telegram_id, data)
         if data.startswith("c:"):
@@ -1884,7 +1889,7 @@ class SchedulingService:
             if not page.isascii() or not page.isdigit() or len(page) > 8:
                 return [Reply(f"That page isn't valid. Use /{prefix}.")]
             if prefix == "plans":
-                return await self.agenda(user, int(page))
+                return [replace(reply, edit=True) for reply in await self.agenda(user, int(page))]
             if prefix == "deadline":
                 return [replace(r, edit=True) for r in await self.list_deadlines(user, int(page))]
             return await self.list_events(user, int(page))

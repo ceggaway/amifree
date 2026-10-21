@@ -1,5 +1,8 @@
-"""/plans: one message grouping plans, deadlines and busy time, with a button per item."""
+"""/plans: seven date-and-name buttons per page, with item details and return navigation."""
 
+from datetime import timedelta
+
+from app.schemas.event import EventDraft, Status
 from tests.conftest import extraction, onboard, tap
 
 DINNER = "CCA dinner Friday 7–9pm at Vivo"
@@ -26,55 +29,42 @@ async def test_empty_agenda(service_factory, reference):
     assert reply.text.startswith("Nothing coming up")
 
 
-async def test_agenda_groups_plans_deadlines_and_blocks(service_factory, reference):
+async def test_agenda_labels_plans_deadlines_and_blocks(service_factory, reference):
     service, repo = service_factory(extraction(), due())
     await onboard(service, reference)
-    await add_dinner(service, reference)  # Fri 9 Oct 7–9pm
-    await service.command(1, "deadline", "CS3244 report fri 11:59pm")  # Fri 9 Oct
+    await add_dinner(service, reference)
+    await service.command(1, "deadline", "CS3244 report fri 11:59pm")
     block = (await service.message(1, 5, "work every wed 6-10pm", reference))[0]
-    await service.callback(1, tap(block, "Save block"))  # weekly, next Wed 8 Oct
-
+    await service.callback(1, tap(block, "Save block"))
     reply = (await service.command(1, "plans"))[0]
-    text = reply.text
-    assert text.startswith("Coming up — tap a number to open it.")
-    # Three items, numbered, soonest first (Wed block, then Fri dinner + deadline).
-    assert "1. " in text and "2. " in text and "3. " in text
-    assert (
-        "CCA dinner" in text
-        and "CS3244 report" in text
-        and "work · busy (weekly)".lower() in text.lower()
+    assert reply.text == (
+        "<b>Your plans</b>\nSelect a plan to view its details.\n\n<i>Page 1 of 1</i>"
     )
-    assert "This week" in text  # all within 7 days of Sun 4 Oct
-    labels = [b.text for row in reply.keyboard.inline_keyboard for b in row]
-    assert labels == ["1", "2", "3"]
+    labels = [row[0].text for row in reply.keyboard.inline_keyboard]
+    assert labels == ["7 Oct · Busy: Work", "9 Oct · CCA dinner", "9 Oct · Due: CS3244 report"]
+    assert all(len(row) == 1 for row in reply.keyboard.inline_keyboard)
 
 
-async def test_tapping_a_number_opens_the_item(service_factory, reference):
+async def test_tapping_a_label_opens_the_item_and_back_returns(service_factory, reference):
     service, repo = service_factory(extraction(), due())
     await onboard(service, reference)
     await add_dinner(service, reference)
     await service.command(1, "deadline", "CS3244 report fri 11:59pm")
     reply = (await service.command(1, "plans"))[0]
-
-    # The deadline button opens its card with Done / Remove.
-    def cb_for(title_hint):
-        lines = reply.text.split("\n")
-        n = next(line.split(".")[0] for line in lines if title_hint in line)
-        return next(
-            b.callback_data for row in reply.keyboard.inline_keyboard for b in row if b.text == n
-        )
-
-    dl_card = (await service.callback(1, cb_for("CS3244")))[0]
-    assert "CS3244 report" in dl_card.text
+    dl_card = (await service.callback(1, tap(reply, "9 Oct · Due: CS3244 report")))[0]
+    assert "CS3244 report" in dl_card.text and dl_card.edit
     assert [b.text for row in dl_card.keyboard.inline_keyboard for b in row] == [
         "✅ Done",
         "🗑 Remove",
+        "← Back to plans",
     ]
-
-    plan_card = (await service.callback(1, cb_for("CCA dinner")))[0]
-    assert "CCA dinner" in plan_card.text
+    back = (await service.callback(1, tap(dl_card, "← Back to plans")))[0]
+    assert back.text == reply.text and back.edit
+    plan_card = (await service.callback(1, tap(back, "9 Oct · CCA dinner")))[0]
+    assert "<b>CCA dinner</b>" in plan_card.text and plan_card.edit
     labels = [b.text for row in plan_card.keyboard.inline_keyboard for b in row]
     assert "Edit details" in labels and "Remove from plans" in labels
+    assert labels[-1] == "← Back to plans"
 
 
 async def test_declined_and_past_plans_are_not_listed(service_factory, reference):
@@ -105,7 +95,7 @@ async def test_start_menu_buttons_run_the_matching_command(service_factory, refe
     assert await service.callback(1, tap(menu, "🕒 Am I free?"))
 
 
-async def test_agenda_pages_ten_at_a_time(service_factory, reference):
+async def test_agenda_pages_seven_at_a_time(service_factory, reference):
     service, repo = service_factory()
     await onboard(service, reference)
     for n in range(13):
@@ -113,18 +103,17 @@ async def test_agenda_pages_ten_at_a_time(service_factory, reference):
             1, 10 + n, f"remind me at {n % 9 + 1}pm tomorrow to task {n}", reference
         )
     first = (await service.command(1, "plans"))[0]
-    labels = [b.text for row in first.keyboard.inline_keyboard for b in row]
-    assert labels == [str(n) for n in range(1, 11)] + ["Next"]
+    rows = first.keyboard.inline_keyboard
+    assert len(rows) == 8 and all(len(row) == 1 for row in rows)
+    assert rows[-1][0].text == "Next →"
     assert "Page 1 of 2" in first.text and not first.edit
-    second = (await service.callback(1, tap(first, "Next")))[0]
+    second = (await service.callback(1, tap(first, "Next →")))[0]
     assert second.edit and "Page 2 of 2" in second.text
-    assert [b.text for row in second.keyboard.inline_keyboard for b in row] == [
-        "1",
-        "2",
-        "3",
-        "Previous",
-    ]
-    assert (await service.callback(1, "plans:99"))[0].text.startswith("Coming up")  # clamped
+    assert len(second.keyboard.inline_keyboard) == 7
+    assert second.keyboard.inline_keyboard[-1][0].text == "← Previous"
+    back = (await service.callback(1, tap(second, "← Previous")))[0]
+    assert back.edit and back.text == first.text
+    assert (await service.callback(1, "plans:99"))[0].text.endswith("<i>Page 2 of 2</i>")
 
 
 async def test_cards_do_not_repeat_first_plan_tips(service_factory, reference):
@@ -136,6 +125,125 @@ async def test_cards_do_not_repeat_first_plan_tips(service_factory, reference):
     first = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     added = (await service.callback(1, tap(first, "Add to plans")))[0]
     assert "Next, try /free tomorrow" not in added.text
+
     second = (await service.message(1, 3, "Study group Friday 2–4pm", reference))[0]
     added = (await service.callback(1, tap(second, "Add to plans")))[0]
     assert "Next, try /free tomorrow" not in added.text
+
+
+async def populate_plans(service_factory, reference, count):
+    service, repo = service_factory()
+    user = await repo.ensure_user(1)
+    for index in range(count):
+        start = reference + timedelta(days=index + 1)
+        event = await repo.create_preview(
+            user.id,
+            index + 1,
+            EventDraft(
+                title=f"Plan {index + 1}",
+                start_at=start,
+                end_at=start + timedelta(hours=2),
+                location="Clementi Mall",
+            ),
+        )
+        await repo.rsvp(user.id, event, Status.GOING)
+    return service, repo
+
+
+async def test_plan_pages_and_back_restore_same_page(service_factory, reference):
+    service, _ = await populate_plans(service_factory, reference, 16)
+    first = (await service.command(1, "plans"))[0]
+    assert "Page 1 of 3" in first.text
+    second = (await service.callback(1, tap(first, "Next →")))[0]
+    assert "Page 2 of 3" in second.text and second.edit
+    assert [b.text for b in second.keyboard.inline_keyboard[-1]] == ["← Previous", "Next →"]
+    label = second.keyboard.inline_keyboard[0][0].text
+    assert label == "12 Oct · Plan 8"
+    card = (await service.callback(1, tap(second, label)))[0]
+    assert "<b>Plan 8</b>" in card.text and "📍 Clementi Mall" in card.text
+    assert card.edit and card.parse_mode == "HTML"
+    back = (await service.callback(1, tap(card, "← Back to plans")))[0]
+    assert back.edit and back.text == second.text
+    assert back.keyboard == second.keyboard
+    for row in card.keyboard.inline_keyboard:
+        for button in row:
+            if button.callback_data:
+                assert len(button.callback_data.encode()) <= 64
+
+
+async def test_back_after_removing_last_item_clamps_page(service_factory, reference):
+    service, _ = await populate_plans(service_factory, reference, 8)
+    second = (await service.callback(1, "plans:1"))[0]
+    card = (await service.callback(1, second.keyboard.inline_keyboard[0][0].callback_data))[0]
+    removed = (await service.callback(1, tap(card, "Remove from plans")))[0]
+    assert "Not in your plans" in removed.text
+    back = (await service.callback(1, tap(removed, "← Back to plans")))[0]
+    assert "Page 1 of 1" in back.text and back.edit
+    assert len(back.keyboard.inline_keyboard) == 7
+
+
+async def test_list_page_survives_edits_and_service_restart(service_factory, reference):
+    service, repo = await populate_plans(service_factory, reference, 9)
+    second = (await service.callback(1, "plans:1"))[0]
+    card = (await service.callback(1, second.keyboard.inline_keyboard[0][0].callback_data))[0]
+    edit = (await service.callback(1, tap(card, "Edit details")))[0]
+    await service.callback(1, tap(edit, "Date & time"))
+    assert (await repo.ensure_user(1)).pending["plans_page"] == 1
+    restarted, _ = service_factory()
+    restarted.repo = repo
+    preview = (await restarted.message(1, 30, "7-9pm", reference))[0]
+    assert "After:" in preview.text
+    saved = (await restarted.callback(1, tap(preview, "Save changes")))[-1]
+    assert "7PM–9PM SGT" in saved.text
+    back = (await restarted.callback(1, tap(saved, "← Back to plans")))[0]
+    assert back.edit and "Page 2 of 2" in back.text
+
+
+async def test_long_titles_are_shortened_only_in_list(service_factory, reference):
+    service, repo = await populate_plans(service_factory, reference, 1)
+    event = next(iter(repo.events.values()))
+    event.title = "A very long workshop title with <tags> & more information for everyone"
+    agenda = (await service.command(1, "plans"))[0]
+    button = agenda.keyboard.inline_keyboard[0][0]
+    assert button.text == "5 Oct · A very long workshop title with…"
+    card = (await service.callback(1, button.callback_data))[0]
+    assert "&lt;tags&gt; &amp; more information for everyone</b>" in card.text
+
+
+async def test_workshop_button_does_not_end_in_partial_word(service_factory, reference):
+    service, repo = await populate_plans(service_factory, reference, 1)
+    event = next(iter(repo.events.values()))
+    event.title = "Halloween Workshop: Amigurumi Ghost"
+    agenda = (await service.command(1, "plans"))[0]
+    button = agenda.keyboard.inline_keyboard[0][0]
+    assert button.text == "5 Oct · Halloween Workshop: Amigurumi…"
+    card = (await service.callback(1, button.callback_data))[0]
+    assert "<b>Halloween Workshop: Amigurumi Ghost</b>" in card.text
+
+
+async def test_plans_sort_by_event_date_and_time_not_creation(service_factory, reference):
+    service, repo = await populate_plans(service_factory, reference, 3)
+    events = list(repo.events.values())
+    starts = [
+        reference + timedelta(days=3, hours=7),
+        reference + timedelta(days=1, hours=8),
+        reference + timedelta(days=1),
+    ]
+    for event, start in zip(events, starts, strict=True):
+        event.start_at, event.end_at = start, start + timedelta(hours=1)
+    agenda = (await service.command(1, "plans"))[0]
+    assert [row[0].text for row in agenda.keyboard.inline_keyboard] == [
+        "5 Oct · Plan 3",
+        "5 Oct · Plan 2",
+        "7 Oct · Plan 1",
+    ]
+
+
+async def test_list_buttons_keep_ownership_checks(service_factory, reference):
+    service, _ = await populate_plans(service_factory, reference, 1)
+    agenda = (await service.command(1, "plans"))[0]
+    response = (await service.callback(2, agenda.keyboard.inline_keyboard[0][0].callback_data))[0]
+    assert "isn't in your plans" in response.text
+    assert "Clementi Mall" not in response.text
+    for data in ("fp:no:pc:any", "fp:-1:pc:any", "fp:1:fp:0:pc:any"):
+        assert "isn't valid" in (await service.callback(1, data))[0].text

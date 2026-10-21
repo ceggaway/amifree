@@ -239,8 +239,9 @@ async def test_details_match_in_plans_edit_and_change_confirmation(service_facto
     event = next(iter(repo.events.values()))
     expected = personal_details(event)
     agenda = (await service.command(1, "plans"))[0]
-    assert expected in agenda.text and agenda.parse_mode == "HTML"
-    opened = (await service.callback(1, tap(agenda, "1")))[0]
+    assert agenda.parse_mode == "HTML"
+    assert agenda.keyboard.inline_keyboard[0][0].text == "9 Oct · CCA dinner"
+    opened = (await service.callback(1, tap(agenda, "9 Oct · CCA dinner")))[0]
     assert expected in opened.text and opened.parse_mode == "HTML"
     edit = (await service.callback(1, tap(added, "Edit details")))[0]
     assert expected in edit.text and edit.parse_mode == "HTML"

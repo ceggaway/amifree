@@ -18,17 +18,22 @@ EVERYDAY_HELP = (
 )
 
 WELCOME = (
-    "👋 <b>Hi! I’m AmIFree.</b> Forward me any plan and I’ll tell you if you’re free.\n\n"
-    "<b>Get set up in about a minute:</b>\n"
-    "1️⃣ <b>Connect your calendar</b> so I can see when you’re busy.\n"
-    "2️⃣ <b>Add your NUSMods</b> if your classes aren’t in your calendar.\n"
-    "3️⃣ <b>Forward me a plan</b>, like “Dinner Fri 7–9pm at Vivo”, then tap "
-    "<b>Add to plans</b> to save it.\n\n"
-    "Want to skip 1 and 2? Just start forwarding plans. You can set up any time with /calendar.\n\n"
-    + EVERYDAY_HELP
-    + "\n\n👥 Organising for a group? Add me to the chat and reply /event to a plan.\n\n"
-    "🔒 I only see <i>when</i> you’re busy, never what your events are. I never read your "
-    "group chats."
+    "👋 <b>Hi! I’m AmIFree, your Telegram planning assistant.</b> Send me an event to check "
+    "if you’re free, then save it with me to sync it to your connected personal calendar.\n\n"
+    "<b>1. Connect your schedule</b>\n"
+    "Connect your <b>personal calendar</b> so I can check for clashes with existing events. "
+    "If your classes aren’t included, I’ll help you connect your NUSMods timetable separately.\n\n"
+    "<b>2. Send me a plan</b>\n"
+    "Forward an event message or photo, or type the details. I’ll show "
+    "<b>whether you’re free or have any clashes</b>.\n\n"
+    "<b>3. Save with a tap</b>\n"
+    "Tap <b>Add to plans</b> to save the event. With calendar syncing enabled, I’ll "
+    "<b>automatically add it to your personal calendar</b>.\n\n"
+    "See /help for all features and instructions.\n\n"
+    "🔒 <b>Your privacy matters.</b> I only check your calendar’s busy times, not event "
+    "details. I never read your group chats.\n\n"
+    "Choose <b>Connect personal calendar</b> to include your existing schedule, or "
+    "<b>Skip calendar setup</b> to try the bot first."
 )
 
 PICK_CALENDAR = (
@@ -56,13 +61,17 @@ GUIDES = {
         "there. To have me check your classes, paste your NUSMods Share/Sync link instead."
     ),
     "nusmods": (
-        "📚 <b>Your NUSMods link</b> · about 1 minute\n\n"
-        "1. Tap <b>Open NUSMods</b> below and go to your timetable.\n"
-        "2. Check every class type is chosen: lecture, tutorial, lab…\n"
-        "3. Tap <b>Share/Sync</b>, then <b>Copy link</b>.\n\n"
-        "✅ You'll know it's right: the link starts with <code>https://nusmods.com/timetable</code>.\n\n"
-        "I'll add your classes and exams as busy times. Send a new link whenever your "
-        "timetable changes." + PASTE_NEXT
+        "📚 <b>Connect your NUSMods timetable</b>\n"
+        "I’ll check for clashes with your classes and exams.\n\n"
+        "<b>1. Open your timetable</b>\n"
+        "Tap <b>Open NUSMods</b> below and select the correct semester.\n\n"
+        "<b>2. Check your classes</b>\n"
+        "Make sure you’ve selected all your lectures, tutorials and labs.\n\n"
+        "<b>3. Copy the link</b>\n"
+        "Tap <b>Share/Sync</b>, then <b>Copy link</b>.\n\n"
+        "<b>4. Send it here</b>\n"
+        "Paste the link into this chat and send it.\n\n"
+        "Timetable changed? Send me the updated link."
     ),
     "ios": (
         "🍎 <b>iPhone · iCloud Calendar</b> · about 1 minute\n"
@@ -125,9 +134,35 @@ GUIDES = {
     ),
 }
 
+PLAN_ACTIONS = (
+    "When the event card appears, tap <b>Add to plans</b> to save it, or <b>Skip</b> "
+    "if you don’t want to save it."
+)
+
 SKIPPED = (
-    "✅ All set. Forward me any plan to start.\n"
-    "Add your schedule any time with /calendar, so I can check your classes and calendar too."
+    "<b>Send me your first plan</b>\n\n"
+    "Forward an event message or photo, or type the details.\n\n"
+    "I’ll check for clashes with plans you’ve saved with me. Your timetable and personal "
+    "calendar events won’t be included until you connect them through /calendar.\n\n" + PLAN_ACTIONS
+)
+
+SEND_PLAN = (
+    "✅ <b>You’re ready to send a plan</b>\n\n"
+    "Forward an event message or photo, or type the details. I’ll check for clashes with "
+    "your connected calendar and plans you’ve saved with me.\n\n" + PLAN_ACTIONS + "\n\n"
+    "You can add NUSMods later with /calendar if your classes are missing."
+)
+
+CLASSES_QUESTION = (
+    "<b>Are your classes included in this calendar?</b>\n\n"
+    "Tap <b>Add NUSMods</b> if your classes are missing. Tap <b>Continue</b> if they’re "
+    "already included or you don’t have classes to add."
+)
+
+SCHEDULE_READY = (
+    "✅ <b>You’re ready to send a plan</b>\n\n"
+    "Forward an event message or photo, or type the details. I’ll check your connected "
+    "calendar, timetable and saved plans for clashes.\n\n" + PLAN_ACTIONS
 )
 
 NOT_A_SCHEDULE_LINK = (
@@ -149,20 +184,23 @@ def _your(label: str) -> str:
     return "your " + (label if label.lower().endswith("calendar") else f"{label} calendar")
 
 
-def calendar_added(label: str, busy_count: int) -> str:
-    """Shown right after the first calendar link: what just happened, and what to do next."""
-    name = _your(label)
-    if not busy_count:
-        return (
-            f"✅ Connected to {name}, but I don't see any events in it for the next few "
-            "months.\n\nIf you keep your plans in a different calendar, send /start and I'll "
-            "show you how to add that one instead. You can still forward me plans any time."
-        )
-    return (
-        f"✅ Schedule added! I can now see when you're busy in {name}.\n\n"
-        + TRY_IT
-        + "\n\n🔒 I only see when you're busy, never what your events are."
+def calendar_added(
+    label: str, busy_count: int, *, timetable_connected: bool = False, sync_enabled: bool = False
+) -> str:
+    text = (
+        "✅ <b>Personal calendar connected</b>\n"
+        "I can now check for clashes with events in this calendar."
     )
+    if not busy_count:
+        text += (
+            f"\n\nI don’t see any events in {html.escape(_your(label))} for the next few months. "
+            "If you use another calendar for your plans, add it through /calendar."
+        )
+    if sync_enabled:
+        text += "\n\nEvents you save with me will automatically sync to this calendar."
+    if timetable_connected:
+        return text + "\n\n" + SCHEDULE_READY
+    return text + "\n\n" + CLASSES_QUESTION
 
 
 def another_calendar_added(label: str, total: int) -> str:
@@ -172,10 +210,15 @@ def another_calendar_added(label: str, total: int) -> str:
     )
 
 
-def nusmods_added(academic_year: str, semester: int) -> str:
+def nusmods_added(academic_year: str, semester: int, *, personal_connected: bool = True) -> str:
+    sources = (
+        "your personal calendar events" if personal_connected else "plans you’ve saved with me"
+    )
     return (
-        f"✅ Schedule added! Your classes and exams for {academic_year} semester {semester} "
-        "are in.\n\n" + TRY_IT
+        "✅ <b>Timetable connected</b>\n"
+        f"I can now check for clashes with your classes and exams, alongside {sources}.\n\n"
+        "<b>Send me your first plan</b>\n"
+        "Forward an event message or photo, or type the details.\n\n" + PLAN_ACTIONS
     )
 
 
@@ -188,16 +231,19 @@ def _button(label: str, screen: str) -> InlineKeyboardButton:
 
 
 def welcome_keyboard() -> InlineKeyboardMarkup:
-    """Setup is optional, so the four everyday buttons are on the first screen too."""
     return InlineKeyboardMarkup(
         [
             [
-                _button("📅 Connect my calendar", "calendar"),
-                _button("📚 Add my NUSMods", "nusmods"),
+                _button("📅 Connect personal calendar", "calendar"),
+                _button("Skip calendar setup", "skip"),
             ],
-            [_menu("📋 My plans", "plans"), _menu("🕒 Am I free?", "free")],
-            [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
         ]
+    )
+
+
+def classes_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[_button("📚 Add NUSMods", "nusmods")], [_button("Continue", "sendplan")]]
     )
 
 
@@ -364,7 +410,7 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("Open NUSMods ↗", url=NUSMODS_URL)],
-                [_button("Classes in my own calendar?", "export"), _button("« Back", "home")],
+                [_button("‹ Back", "classes")],
             ]
         )
     if screen == "export":
@@ -395,7 +441,20 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
 
 
-HTML_SCREENS = frozenset({"home", "nusmods", "ios", "mac", "google", "googlelink", "outlook"})
+HTML_SCREENS = frozenset(
+    {
+        "home",
+        "nusmods",
+        "ios",
+        "mac",
+        "google",
+        "googlelink",
+        "outlook",
+        "classes",
+        "skip",
+        "sendplan",
+    }
+)
 
 
 def parse_mode(name: str) -> str | None:
@@ -413,8 +472,12 @@ def screen(name: str, google: bool = False) -> tuple[str, InlineKeyboardMarkup |
         return GOOGLE_CHOOSE, google_choose_keyboard()
     if name == "googlelink":
         return GUIDES["google"], guide_keyboard("google")
+    if name == "classes":
+        return CLASSES_QUESTION, classes_keyboard()
     if name == "skip":
         return SKIPPED, None
+    if name == "sendplan":
+        return SEND_PLAN, None
     if name in GUIDES:
         return GUIDES[name], guide_keyboard(name)
     return None

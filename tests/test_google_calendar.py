@@ -376,7 +376,7 @@ async def test_connecting_adds_current_plans_and_counts_busy_time(with_google, r
 
     reply = await connect(service, 1, "Me@Gmail.com", reference, 9)
 
-    assert "Connected to me@gmail.com" in reply.text and "added your 1 current plan" in reply.text
+    assert "Personal calendar connected" in reply.text and "added your 1 current plan" in reply.text
     assert google.calls == [("code", "me@gmail.com"), ("upsert", "CCA dinner", False)]
     connection = repo.google[repo.users[1].id]
     assert connection.calendar_email == "me@gmail.com" and repo.users[1].google_connected
@@ -541,7 +541,7 @@ async def test_connecting_needs_the_code_from_that_calendar(with_google, referen
     # The real owner reads the code in their calendar and sends it back.
     await service.message(1, 31, "me@gmail.com", reference)
     done = (await service.message(1, 32, f" {google.code} ", reference))[0]
-    assert "Connected to me@gmail.com" in done.text and repo.users[1].id in repo.google
+    assert "Personal calendar connected" in done.text and repo.users[1].id in repo.google
     assert google.code is None
 
 

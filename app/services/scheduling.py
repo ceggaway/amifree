@@ -413,8 +413,10 @@ class SchedulingService:
             await self.repo.set_pending(user.id, {"stage": "delete", "nonce": nonce})
             return [
                 Reply(
-                    "Delete all your AmIFree timetable, plans, busy blocks, reminders, pending messages and analytics? This cannot be undone.",
-                    confirm_keyboard(nonce, "Delete my data"),
+                    "Delete all your AmIFree data, including your timetable, saved plans and reminders?"
+                    "\n\n<b>This cannot be undone.</b>",
+                    confirm_keyboard(nonce, "Delete my data", cancel_label="Cancel"),
+                    parse_mode="HTML",
                 )
             ]
         if command == "events":
@@ -954,8 +956,14 @@ class SchedulingService:
             await self.repo.import_timetable(user.id, result)
             return [
                 Reply(
-                    onboarding.nusmods_added(result.academic_year, result.semester),
-                    onboarding.try_it_keyboard(),
+                    onboarding.nusmods_added(
+                        result.academic_year,
+                        result.semester,
+                        personal_connected=bool(
+                            user.google_connected or await self.repo.list_calendars(user.id)
+                        ),
+                    ),
+                    parse_mode="HTML",
                 )
             ]
         if CALENDAR_URL.fullmatch(text.strip()):
@@ -1715,13 +1723,18 @@ class SchedulingService:
             return [
                 Reply(f"✅ {calendar.label} was already connected. I've refreshed it just now.")
             ]
-        total = len(calendars) + 1
-        if total == 1:
-            keyboard = (
-                onboarding.try_it_keyboard() if data.busy else onboarding.link_help_keyboard()
+        return [
+            Reply(
+                onboarding.calendar_added(
+                    calendar.label,
+                    len(data.busy),
+                    timetable_connected=user.onboarding_status == "READY",
+                    sync_enabled=synced(user),
+                ),
+                onboarding.classes_keyboard() if user.onboarding_status != "READY" else None,
+                parse_mode="HTML",
             )
-            return [Reply(onboarding.calendar_added(calendar.label, len(data.busy)), keyboard)]
-        return [Reply(onboarding.another_calendar_added(calendar.label, total))]
+        ]
 
     async def remove_calendar(self, user: User, calendar_id: str) -> list[Reply]:
         try:

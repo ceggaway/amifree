@@ -46,7 +46,8 @@ async def test_webhook_to_telegram_complete_flow(service_factory, reference):
             "/telegram/webhook",
             json=message_payload("https://nusmods.com/timetable/sem-1/share?CS3216=LEC:1", 2),
         )
-        assert "✅ Schedule added" in transport.sent[-1]["text"]
+        assert "✅ <b>Timetable connected</b>" in transport.sent[-1]["text"]
+        assert transport.sent[-1]["parse_mode"] == "HTML"
         # Original forward timestamp, not the time the forward is received.
         await client.post(
             "/telegram/webhook",

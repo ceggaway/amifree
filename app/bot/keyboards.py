@@ -162,12 +162,14 @@ def series_keyboard(event: GroupEvent, cancelled: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[button("Apply to all future sessions", "all")]])
 
 
-def confirm_keyboard(nonce: str, label="Confirm update") -> InlineKeyboardMarkup:
+def confirm_keyboard(
+    nonce: str, label="Confirm update", cancel_label="Keep unchanged"
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(label, callback_data=f"confirm:{nonce}"),
-                InlineKeyboardButton("Keep unchanged", callback_data=f"dismiss:{nonce}"),
+                InlineKeyboardButton(cancel_label, callback_data=f"dismiss:{nonce}"),
             ]
         ]
     )

@@ -201,17 +201,19 @@ class GoogleSyncService:
         await s.repo.save_google_connection(user.id, email, calendar.id)
         added = await self.sync(user.id)
         await s.safe_action(user.id, "google_calendar_connected", metadata={"plans": added})
-        got = (
-            f"I added your {added} current plan{'s' if added != 1 else ''} just now."
-            if added
-            else "Plans you've already said Going to will appear there too."
+        text = onboarding.calendar_added(
+            "Google Calendar",
+            len(busy),
+            timetable_connected=user.onboarding_status == "READY",
+            sync_enabled=True,
         )
+        if added:
+            text += f"\n\nI added your {added} current plan{'s' if added != 1 else ''} just now."
         return [
             Reply(
-                f"✅ Connected to {email}.\n\nWhen you tap Going on a plan I'll add it to this "
-                "calendar and keep it up to date. I only change events I added, and I only "
-                f"read when you're busy.\n\n{got}\n\nTo stop, tap Remove under Google Calendar "
-                "in /calendar."
+                text,
+                onboarding.classes_keyboard() if user.onboarding_status != "READY" else None,
+                parse_mode="HTML",
             )
         ]
 

@@ -225,8 +225,8 @@ async def connected(repo, telegram_id=1):
 async def test_pasting_a_link_connects_and_counts_busy_times(with_calendar, reference):
     service, repo = with_calendar(extraction())
     reply = (await service.message(1, 1, GOOGLE, reference))[0]
-    assert reply.text.startswith("✅ Schedule added! I can now see when you're busy in your Google")
-    assert "forward me any plan" in reply.text and "never what your events are" in reply.text
+    assert reply.text.startswith("✅ <b>Personal calendar connected</b>")
+    assert "Are your classes included" in reply.text and reply.parse_mode == "HTML"
     [calendar] = await connected(repo)
     assert "google" not in calendar.sealed_url and "private-abc123" not in calendar.url_hash
     card = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
@@ -239,9 +239,9 @@ async def test_several_calendars_are_all_checked(with_calendar, reference):
     service, repo = with_calendar(extraction(), labels={ICLOUD_CCA: "CCA", ICLOUD_EVENTS: "Events"})
     service.calendar_reader.per_link = {ICLOUD_CCA: [FRIDAY_DINNER], ICLOUD_EVENTS: [FRIDAY_LUNCH]}
     first = (await service.message(1, 1, ICLOUD_CCA, reference))[0]
-    assert "your CCA calendar" in first.text
+    assert "Personal calendar connected" in first.text
     second = (await service.message(1, 2, ICLOUD_EVENTS, reference))[0]
-    assert second.text.startswith("✅ Added your Events calendar. I'm now checking 2 calendars.")
+    assert "Personal calendar connected" in second.text
     assert [c.label for c in await connected(repo)] == ["CCA", "Events"]
     card = (await service.message(1, 3, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     assert card.text.startswith("⚠️ Overlaps with CCA calendar · 7:30PM–8:30PM SGT")

@@ -73,9 +73,6 @@ export function App() {
       </main>
       <nav aria-label="Main navigation">
         <NavLink to="/" end><Icon name="home" size={19} /><span>Home</span></NavLink>
-        <NavLink to="/week"><Icon name="calendar" size={19} /><span>Week</span></NavLink>
-        <NavLink to="/plans"><Icon name="plans" size={19} /><span>Plans</span></NavLink>
-        <NavLink to="/busy"><Icon name="block" size={19} /><span>Busy</span></NavLink>
       </nav>
     </HashRouter>
   );

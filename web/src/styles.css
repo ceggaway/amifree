@@ -30,7 +30,7 @@
 .row.between { justify-content: space-between; align-items: center; }
 .row.between h2 { margin: 0; }
 button.danger { color: var(--danger); }
-input { width: 100%; padding: 10px; border: 1px solid var(--hint); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+input, select { width: 100%; padding: 10px; border: 1px solid var(--hint); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
 .banner-stack { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
 .banner.clash { border-left: 4px solid var(--danger); }
 .banner.info { border-left: 4px solid var(--accent); }
@@ -126,7 +126,7 @@ button.on { background: var(--accent); color: var(--accent-text); border-color: 
 button:hover:not(:disabled), .action:hover { filter: brightness(0.96); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 :where(a, button, input, textarea):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-input, textarea { border-color: var(--border); background: var(--panel); border-radius: 7px; padding: 11px 12px; min-width: 0; }
+input, select, textarea { border-color: var(--border); background: var(--panel); border-radius: 7px; padding: 11px 12px; min-width: 0; }
 label { display: flex; flex-direction: column; font-size: 12px; font-weight: 550; gap: 6px; }
 label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
 .stack { display: flex; flex-direction: column; margin-top: 8px; gap: 14px; }

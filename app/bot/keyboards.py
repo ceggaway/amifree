@@ -114,10 +114,17 @@ def poll_keyboard(poll: Poll, app_url: str | None = None) -> InlineKeyboardMarku
 
     open_app = [InlineKeyboardButton("📱 Open", url=app_url)] if app_url else []
     if poll.status == "COLLECTING":
-        rows = [[button("✋ Count me in", "join"), *open_app]]
-        if not app_url:
-            rows.append([button("Suggest slots (organiser)", "suggest"), button("Nudge", "nudge")])
-        return InlineKeyboardMarkup(rows)
+        if app_url:
+            # One button: filling in your times in the app also counts you in.
+            return InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🗓 Fill in my availabilities", url=app_url)]]
+            )
+        return InlineKeyboardMarkup(
+            [
+                [button("✋ Count me in", "join")],
+                [button("Suggest slots (organiser)", "suggest"), button("Nudge", "nudge")],
+            ]
+        )
     rows = [[button(f"✅ {index + 1}", "t", str(index)) for index in range(len(poll.slots))]]
     if app_url:
         rows.append(open_app)

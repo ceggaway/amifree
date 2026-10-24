@@ -628,7 +628,7 @@ class GroupHub:
         )
         if poll.message_id:
             return {"id": poll.id}
-        # As with /whosfree, asking for the poll is the organiser's own Count me in.
+        # As with /whosfree, asking for the poll is the organiser joining it.
         posted = await self.post(chat_id, await self.scheduling.polls.render(poll))
         await self.scheduling.polls.posted(poll.id, posted)
         await self.scheduling.safe_action(user.id, "poll", metadata={"from": "app"})

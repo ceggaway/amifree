@@ -127,7 +127,7 @@ function PollRow({ poll }: { poll: GroupPoll }) {
         {poll.deadline_at ? ` · reply by ${day(poll.deadline_at)}` : ""}
         {poll.status === "OPEN" ? " · times suggested" : ""}
       </p>
-      <p>{poll.status === "OPEN" ? "Answer ›" : poll.joined_by_me ? "You're in ›" : "Count me in ›"}</p>
+      <p>{poll.status === "OPEN" ? "Answer ›" : poll.joined_by_me ? "You're in ›" : "Fill in my availabilities ›"}</p>
     </Link>
   );
 }

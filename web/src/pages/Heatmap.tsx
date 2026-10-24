@@ -15,7 +15,7 @@ export function Heatmap() {
     const notJoined = /not found/i.test(error);
     return (
       <p className="error">
-        {notJoined ? "Only people in this poll can see its grid. Tap Count me in on the poll first." : error}
+        {notJoined ? "Only people in this poll can see its grid. Fill in your availabilities on the poll first." : error}
       </p>
     );
   }

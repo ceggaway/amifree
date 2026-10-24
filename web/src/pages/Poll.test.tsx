@@ -63,6 +63,7 @@ function show(poll: PollDetail) {
       <Routes>
         <Route path="/poll/:id" element={<Poll />} />
         <Route path="/e/:id" element={<p>Event page</p>} />
+        <Route path="/poll/:id/mine" element={<p>My times page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -91,11 +92,18 @@ describe("poll page", () => {
     expect(screen.queryByText("Pick this time")).toBeNull();
   });
 
-  it("lets a member count themselves in while times are being collected", async () => {
+  it("sends a member to fill in their times while times are being collected", async () => {
     show({ ...base, status: "COLLECTING", slots: [], joined: 2 });
-    fireEvent.click(await screen.findByRole("button", { name: "Count me in" }));
+    expect(screen.queryByRole("button", { name: "Count me in" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Fill in my availabilities" }));
+    expect(await screen.findByText("My times page")).toBeTruthy();
+    expect(calls).toEqual([]);
+  });
+
+  it("shows a member who already filled in that they're in", async () => {
+    show({ ...base, status: "COLLECTING", slots: [], joined: 3, joined_by_me: true });
     expect(await screen.findByText("You're in.")).toBeTruthy();
-    expect(calls).toEqual([["join"]]);
+    expect(screen.getByRole("button", { name: "Update my availabilities" })).toBeTruthy();
   });
 
   it("lets the organiser pick a time, which opens the posted event", async () => {

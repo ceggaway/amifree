@@ -63,6 +63,6 @@ describe("Heatmap", () => {
 
   it("shows the error when the poll isn't theirs", async () => {
     show(new Error("Not found"));
-    expect(await screen.findByText(/Tap Count me in on the poll first/)).toBeTruthy();
+    expect(await screen.findByText(/Fill in your availabilities on the poll first/)).toBeTruthy();
   });
 });

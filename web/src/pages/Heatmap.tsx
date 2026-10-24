@@ -49,7 +49,7 @@ export function Heatmap() {
       )}
       <div className="heat-scroll" role="grid" aria-label="Members free by half hour">
         <div className="heat-grid" style={{ gridTemplateColumns: `3.2rem repeat(${data.days.length}, minmax(22%, 1fr))` }}>
-          <div />
+          <div className="heat-corner" />
           {data.days.map((day) => (
             <div key={day.date} className="heat-head">
               {dayLabel(day.date)}
@@ -81,7 +81,7 @@ function Row({
 }) {
   return (
     <>
-      <div className="heat-time">{time.endsWith(":00") ? time : ""}</div>
+      <div className={`heat-time${time.endsWith(":00") ? " hour" : ""}`}>{time}</div>
       {data.days.map((day, index) => {
         const free = lookups[index].get(time);
         if (free === undefined) return <div key={day.date} className="heat-cell gone" />;

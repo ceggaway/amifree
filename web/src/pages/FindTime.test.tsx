@@ -34,9 +34,10 @@ afterEach(() => {
 });
 
 describe("FindTime", () => {
-  it("checks the next 7 days and explains the deadline", () => {
+  it("explains the days and the deadline", () => {
     show();
-    expect(screen.queryByText("When")).toBeNull();
+    expect(screen.getByText("Which days can the meeting be on?")).toBeTruthy();
+    expect(screen.getByText(/for these days only/)).toBeTruthy();
     expect(screen.getByText(/Deadline to fill in availabilities/)).toBeTruthy();
     expect(screen.getByText(/Then AmIFree suggests the best times/)).toBeTruthy();
   });
@@ -56,5 +57,18 @@ describe("FindTime", () => {
       reply_by: null,
     });
     expect(await screen.findByText("My times page")).toBeTruthy();
+  });
+
+  it("posts the dates picked by hand", async () => {
+    show();
+    fireEvent.change(screen.getByPlaceholderText("Project meeting"), { target: { value: "Dinner" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pick dates" }));
+    const from = shiftKey(todayKey(), 2);
+    const to = shiftKey(todayKey(), 4);
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: from } });
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: to } });
+    fireEvent.click(screen.getByRole("button", { name: "Post the poll to the group" }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({ first: from, last: to });
   });
 });

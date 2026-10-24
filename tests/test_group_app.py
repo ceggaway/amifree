@@ -332,14 +332,17 @@ async def test_running_a_poll_from_its_page(hub, reference):
     assert maybe.status_code == 422
     bad = await client.post(f"{page}/vote", headers=bearer(2), json={"slot": 5, "answer": "FREE"})
     assert bad.status_code == 422
-    assert (await client.post(f"{page}/nudge", headers=bearer(1))).status_code == 200
+    # Results are out: nobody is left to nudge, the organiser just chooses.
+    assert (await client.post(f"{page}/nudge", headers=bearer(1))).status_code == 409
     assert (
         await client.post(f"{page}/pick", headers=bearer(2), json={"slot": 1})
     ).status_code == 409
     picked = await client.post(f"{page}/pick", headers=bearer(1), json={"slot": 1})
     event = repo.group_events[picked.json()["event_id"]]
-    assert event.message_id and event.start_at.isoformat() == opened["slots"][1]["start_at"]
-    assert posted[-1][1].text.startswith("📅") and repo.polls[poll_id].status == "CLOSED"
+    assert event.start_at.isoformat() == opened["slots"][1]["start_at"]
+    # The group gets the announcement, with buttons to add it to a calendar.
+    assert posted[-1][1].text.startswith("📣 Sync is confirmed!")
+    assert repo.polls[poll_id].status == "CLOSED"
     again = await client.post(f"{page}/pick", headers=bearer(1), json={"slot": 0})
     assert again.status_code == 409 and len(repo.group_events) == 1
 

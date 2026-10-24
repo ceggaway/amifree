@@ -133,20 +133,12 @@ class Notifier:
             )
         if row["kind"] == "NUDGE":
             poll = await self.repo.get_poll(payload["id"])
-            if not poll or poll.status == "CLOSED":
+            # Once results are out, only the organiser has anything left to do.
+            if not poll or poll.status != "COLLECTING":
                 return None
-            answered = (
-                await self.repo.poll_voter_ids(poll.id)
-                if poll.status == "OPEN"
-                else await self.repo.poll_participants(poll.id)
-            )
-            if user.id in answered:
+            if user.id in await self.repo.poll_participants(poll.id):
                 return None
-            ask = (
-                "tap the time that works best for you"
-                if poll.status == "OPEN"
-                else "fill in your availabilities so your free time is counted"
-            )
+            ask = "fill in your availabilities so your free time is counted"
             return Reply(
                 f"🗳 Your group is choosing a time for {poll.title}. Open the poll and {ask}."
                 + card_link(poll)

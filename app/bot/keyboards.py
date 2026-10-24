@@ -103,7 +103,7 @@ def nudge_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(group_keyboard(event).inline_keyboard[:1])
 
 
-def poll_keyboard(poll: Poll, app_url: str | None = None) -> InlineKeyboardMarkup:
+def poll_keyboard(poll: Poll, app_url: str | None = None) -> InlineKeyboardMarkup | None:
     """Members tap the times that work; everything else is in the app (📱 Open).
 
     Without the app, the organiser's buttons stay on the card, since there's nowhere else."""
@@ -125,15 +125,8 @@ def poll_keyboard(poll: Poll, app_url: str | None = None) -> InlineKeyboardMarku
                 [button("Suggest slots (organiser)", "suggest"), button("Nudge", "nudge")],
             ]
         )
-    rows = [[button(f"✅ {index + 1}", "t", str(index)) for index in range(len(poll.slots))]]
-    if app_url:
-        rows.append(open_app)
-    else:
-        rows.append(
-            [button(f"Pick {index + 1}", "pick", str(index)) for index in range(len(poll.slots))]
-            + [button("Nudge", "nudge")]
-        )
-    return InlineKeyboardMarkup(rows)
+    # Results are out: the organiser chooses privately, so the group card has nothing to tap.
+    return InlineKeyboardMarkup([open_app]) if app_url else None
 
 
 def attendance_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:

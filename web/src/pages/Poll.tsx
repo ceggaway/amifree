@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
 import { day, span } from "../format";
 import { confirm, haptic } from "../telegram";
-import type { PollAnswer, PollDetail } from "../types";
+import type { PollDetail } from "../types";
 import { useLoad } from "../useLoad";
 import { Heatmap } from "./Heatmap";
 
@@ -46,7 +46,7 @@ export function Poll() {
   }
 
   async function pick(slot: number) {
-    if (!(await confirm("Post this time as the event? The poll closes for everyone."))) return;
+    if (!(await confirm("Choose this time? It's posted in the group and the poll closes."))) return;
     setBusy(true);
     try {
       const { event_id } = await api.pick(p!.id, slot);
@@ -68,17 +68,17 @@ export function Poll() {
       <h1>{p.title}</h1>
       <p className="hint">
         {Number.isInteger(hours * 2) ? `${hours}h` : `${p.duration_minutes} min`}
-        {p.deadline_at && p.status !== "CLOSED" ? ` · reply by ${day(p.deadline_at)}` : ""}
+        {p.deadline_at && p.status === "COLLECTING" ? ` · fill in by ${day(p.deadline_at)}` : ""}
       </p>
       {note && <p className="banner ok">{note}</p>}
       {error && <p className="banner clash">{error}</p>}
 
-      {p.status === "CLOSED" && <p className="banner info">This poll is closed. The event is in the group.</p>}
+      {p.status === "CLOSED" && <p className="banner info">The time is chosen. It's posted in the group.</p>}
 
       {p.status === "COLLECTING" && (
         <section className="card">
           <p>
-            {p.joined} joined. Times are suggested from everyone's schedules when the reply time passes
+            {p.joined} joined. When the deadline passes, the organiser gets the best times and chooses one
             {p.joined < p.min_joined ? ` (at least ${p.min_joined} need to join)` : ""}.
           </p>
           <p className="hint">The group only sees how many people are free, never who is busy or why.</p>
@@ -90,55 +90,43 @@ export function Poll() {
         </section>
       )}
 
+      {p.status === "OPEN" && (
+        <p className="banner info">
+          {p.organiser
+            ? "Results are in. Choose the time that works, and it's posted in the group for everyone."
+            : "Results are in. The organiser is choosing the time, and it will be posted in the group."}
+        </p>
+      )}
+
       {p.status === "OPEN" &&
         p.slots.map((slot, index) => (
           <section key={slot.start_at} className="card">
-            <div className="row between">
-              <h3>
-                {index + 1}. {day(slot.start_at)} · {span(slot.start_at, slot.end_at)}
-              </h3>
-            </div>
+            <h3>
+              {index + 1}. {day(slot.start_at)} · {span(slot.start_at, slot.end_at)}
+            </h3>
             <p className="hint">
-              {slot.yes} vote{slot.yes === 1 ? "" : "s"} · {slot.free} of {slot.of} have no known clash
+              {slot.free} of {slot.of} free
             </p>
-            {(() => {
-              // One vote each: voting here moves it from any other time; tapping again takes it back.
-              const mine = p.mine[String(index)] === "FREE";
-              const answer: PollAnswer = mine ? "BUSY" : "FREE";
-              return (
-                <button
-                  type="button"
-                  className={`big${mine ? " on" : ""}`}
-                  aria-pressed={mine}
-                  disabled={busy}
-                  onClick={() => run(() => api.vote(p.id, index, answer))}
-                >
-                  {mine ? "✓ Your vote" : "Vote for this time"}
-                </button>
-              );
-            })()}
             {p.organiser && (
-              <button type="button" disabled={busy} onClick={() => pick(index)}>
-                Pick this time
+              <button type="button" className="on big" disabled={busy} onClick={() => pick(index)}>
+                Choose this time
               </button>
             )}
           </section>
         ))}
 
-      {p.organiser && p.status !== "CLOSED" && (
+      {p.organiser && p.status === "COLLECTING" && (
         <section className="card organiser">
           <h2>You're the organiser</h2>
           <div className="row">
-            {p.status === "COLLECTING" && (
-              <button type="button" className="on" disabled={busy} onClick={() => run(() => api.suggest(p.id))}>
-                Suggest times now
-              </button>
-            )}
+            <button type="button" className="on" disabled={busy} onClick={() => run(() => api.suggest(p.id))}>
+              See results now
+            </button>
             <button type="button" disabled={busy} onClick={() => run(() => api.nudgePoll(p.id))}>
               Nudge
             </button>
           </div>
-          {p.status === "OPEN" && <p className="hint">Pick a time above to post it as an event card.</p>}
+          <p className="hint">Results also arrive by themselves when the deadline passes.</p>
         </section>
       )}
 

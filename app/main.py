@@ -287,6 +287,24 @@ def create_app(
             },
         )
 
+    @app.get("/ics/event/{event_id}.ics")
+    async def event_ics(event_id: str):
+        """A confirmed group time as a calendar file. The id is an unguessable UUID, and the file
+        holds only what the group card already shows."""
+        if not app.state.ready or not app.state.service:
+            raise HTTPException(503, "Calendar unavailable")
+        content = await app.state.service.group_event_ics(event_id)
+        if content is None:
+            raise HTTPException(404, "Not found")
+        return Response(
+            content,
+            media_type="text/calendar; charset=utf-8",
+            headers={
+                "Cache-Control": "private, max-age=300",
+                "Content-Disposition": 'inline; filename="event.ics"',
+            },
+        )
+
     @app.get("/healthz")
     async def health():
         return {"status": "ok", "service": "amifree", "bot_mode": settings.bot_mode}

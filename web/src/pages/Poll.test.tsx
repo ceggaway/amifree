@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PollDetail } from "../types";
@@ -75,21 +75,12 @@ afterEach(() => {
 });
 
 describe("poll page", () => {
-  it("gives one vote that moves between times, and comes back on a second tap", async () => {
+  it("shows members the results while the organiser chooses", async () => {
     show(base);
-    const votes = await screen.findAllByRole("button", { name: "Vote for this time" });
-    expect(votes).toHaveLength(3);
-    fireEvent.click(votes[1]);
-    expect(await screen.findByRole("button", { name: "✓ Your vote" })).toBeTruthy();
-    // Times 1 and 3 are left to vote for; moving the vote to time 3 (index 2).
-    fireEvent.click(screen.getAllByRole("button", { name: "Vote for this time" })[1]);
-    await waitFor(() => expect(calls).toEqual([["vote", 1, "FREE"], ["vote", 2, "FREE"]]));
-    // Only one time shows as voted.
-    expect(screen.getAllByRole("button", { name: "✓ Your vote" })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "✓ Your vote" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "✓ Your vote" })).toBeNull());
-    expect(calls[calls.length - 1]).toEqual(["vote", 2, "BUSY"]);
-    expect(screen.queryByText("Pick this time")).toBeNull();
+    expect(await screen.findByText(/The organiser is choosing the time/)).toBeTruthy();
+    expect(screen.getAllByText("4 of 5 free")).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: "Choose this time" })).toBeNull();
+    expect(screen.queryByText("Vote for this time")).toBeNull();
   });
 
   it("sends a member to fill in their times while times are being collected", async () => {
@@ -106,10 +97,10 @@ describe("poll page", () => {
     expect(screen.getByRole("button", { name: "Update my availabilities" })).toBeTruthy();
   });
 
-  it("lets the organiser pick a time, which opens the posted event", async () => {
+  it("lets the organiser choose a time, which opens the posted event", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     show({ ...base, organiser: true });
-    const picks = await screen.findAllByRole("button", { name: "Pick this time" });
+    const picks = await screen.findAllByRole("button", { name: "Choose this time" });
     fireEvent.click(picks[2]);
     expect(await screen.findByText("Event page")).toBeTruthy();
     expect(calls).toEqual([["pick", 2]]);

@@ -9,7 +9,7 @@ from telegram import Update
 
 from app.schemas.event import SG, Suggestion
 from app.services.detection import DetectionService
-from app.services.polls import STEP, PollService, parse_request
+from app.services.polls import PollService, parse_request
 from tests.conftest import extraction
 from tests.test_group_events import CHAT, alerts, buttons, group_tap, make_bot
 from tests.test_group_reports import PLAN, run
@@ -48,31 +48,16 @@ async def open_poll(service, repo, slots):
     )
 
 
-async def test_fill_mine_respects_the_members_own_grid(service_factory):
+async def test_old_fill_button_records_no_vote(service_factory):
+    """Cards from before the organiser chose privately still carry Fill mine: it does nothing."""
     service, repo = service_factory()
-    morning, evening = datetime(2026, 10, 5, 10, tzinfo=SG), datetime(2026, 10, 5, 19, tzinfo=SG)
-    poll = await open_poll(service, repo, [morning, evening])
-    member = await repo.ensure_user(2)
-    # No timetable or calendar: only "Set my times", ticking the morning hour.
-    await repo.poll_join(poll.id, member.id)
-    await repo.set_availability(
-        poll.id, member.id, [morning.isoformat(), (morning + STEP).isoformat()]
-    )
-    result = await PollService(service).callback(2, CHAT, f"p:fill:{poll.id}")
-    assert "Voted for time 1" in result.alert
-    assert repo.poll_votes[(poll.id, member.id, 0)] == "FREE"
-    assert repo.poll_votes[(poll.id, member.id, 1)] == "BUSY"
-
-
-async def test_fill_mine_respects_usual_times(service_factory):
-    service, repo = service_factory()
-    morning, evening = datetime(2026, 10, 5, 10, tzinfo=SG), datetime(2026, 10, 5, 19, tzinfo=SG)
-    poll = await open_poll(service, repo, [morning, evening])
+    morning = datetime(2026, 10, 5, 10, tzinfo=SG)
+    poll = await open_poll(service, repo, [morning])
     member = await repo.ensure_user(2)
     await repo.poll_join(poll.id, member.id)
-    await repo.replace_usual(member.id, [(0, 18 * 60, 22 * 60)])  # only free Monday evenings
     result = await PollService(service).callback(2, CHAT, f"p:fill:{poll.id}")
-    assert "Voted for time 2" in result.alert
+    assert "organiser is choosing" in result.alert
+    assert not repo.poll_votes
 
 
 async def test_stopping_a_series_leaves_sessions_already_held(service_factory, reference):

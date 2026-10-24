@@ -17,7 +17,7 @@ from telegram.ext import (
 
 from app.bot.delivery import telegram_profile, webhook_delivery
 from app.bot.keyboards import links_keyboard
-from app.bot.messages import GROUP_HELP, Reply, send_reply
+from app.bot.messages import GROUP_HELP, GROUP_WELCOME, Reply, send_reply
 from app.services.app_links import group_links
 from app.services.image_reader import MAX_BYTES, PictureError
 from app.services.jobs import Notifier, Undeliverable
@@ -406,6 +406,16 @@ async def callback(update, context):
     await dispatch(update, context, "callback")
 
 
+async def added_to_group(update, context):
+    """Say hello once, when this bot itself is added to a group (not when anyone else joins)."""
+    message = update.effective_message
+    if message is None or update.effective_chat.type == ChatType.PRIVATE:
+        return
+    if not any(member.id == context.bot.id for member in message.new_chat_members or []):
+        return
+    await send(update, [Reply(GROUP_WELCOME)])
+
+
 async def unsupported(update, context):
     if update.effective_chat and update.effective_chat.type == ChatType.PRIVATE:
         await send(
@@ -663,5 +673,6 @@ def register_handlers(application: Application, service):
         )
     )
     application.add_handler(MessageHandler(filters.COMMAND, command))
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, added_to_group))
     application.add_handler(MessageHandler(filters.ALL, unsupported))
     application.add_error_handler(error_handler)

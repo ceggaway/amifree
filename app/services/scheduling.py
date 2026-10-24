@@ -1837,6 +1837,17 @@ class SchedulingService:
             )
         ]
 
+    async def group_event_ics(self, group_event_id: str) -> bytes | None:
+        """One group event as a calendar file, for the 🍎 button on a confirmed time."""
+        try:
+            UUID(group_event_id)
+        except ValueError:
+            return None
+        event = await self.repo.get_group_event(group_event_id)
+        if not event:
+            return None
+        return build_ics(event, now=self.clock(), cancelled=event.status == "CANCELLED")
+
     async def calendar_feed(self, token: str, user_agent: str = "") -> bytes | None:
         """The private feed a calendar app subscribes to. None for an unknown link."""
         user = await self.repo.user_by_feed_token(token)
@@ -1888,6 +1899,8 @@ class SchedulingService:
         return replies
 
     async def _callback(self, user: User, telegram_id: int, data: str) -> list[Reply]:
+        if data.startswith("pr:"):
+            return await self.polls.choose_from_report(user, data)
         if data.startswith("g:"):
             return await self.groups.from_private(telegram_id, data)
         if data.startswith("c:"):

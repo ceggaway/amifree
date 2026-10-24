@@ -36,10 +36,14 @@ input { width: 100%; padding: 10px; border: 1px solid var(--hint); border-radius
 .banner.info { border-left: 4px solid var(--accent); }
 .slot { display: grid; grid-template-columns: 96px 1fr auto; gap: 8px; padding: 6px 0; border-top: 1px solid var(--bg); }
 
-.heat-scroll { overflow-x: auto; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+/* scroll-padding keeps snapped day columns clear of the pinned time column. */
+.heat-scroll { overflow-x: auto; scroll-snap-type: x proximity; scroll-padding-left: 3.2rem; -webkit-overflow-scrolling: touch; }
 .heat-grid { display: grid; gap: 2px; min-width: 100%; }
 .heat-head { position: sticky; top: 0; text-align: center; font-size: 12px; padding: 4px 0; background: var(--bg); scroll-snap-align: start; }
-.heat-time { font-size: 11px; color: var(--hint); align-self: center; }
+/* The time column and its corner stay pinned on the left while the days scroll. */
+.heat-time { position: sticky; left: 0; z-index: 1; align-self: stretch; display: flex; align-items: center; font-size: 10px; color: var(--hint); background: var(--bg); }
+.heat-time.hour { font-size: 11px; font-weight: 600; color: var(--text); }
+.heat-corner { position: sticky; left: 0; top: 0; z-index: 2; background: var(--bg); }
 .heat-cell.gone { background: transparent; }
 .heat-actions { display: flex; gap: 2px; justify-content: center; }
 .heat-actions button { min-height: 22px; padding: 0 6px; font-size: 11px; }

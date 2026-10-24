@@ -111,7 +111,7 @@ export function MyTimes() {
         onPointerCancel={() => (drag.current = null)}
       >
         <div className="heat-grid" style={{ gridTemplateColumns: `3.2rem repeat(${grid.days.length}, minmax(22%, 1fr))` }}>
-          <div />
+          <div className="heat-corner" />
           {grid.days.map((day) => (
             <div key={day.date} className="heat-head">
               {dayLabel(day.date)}
@@ -153,7 +153,7 @@ function Row({
 }) {
   return (
     <>
-      <div className="heat-time">{time.endsWith(":00") ? time : ""}</div>
+      <div className={`heat-time${time.endsWith(":00") ? " hour" : ""}`}>{time}</div>
       {grid.days.map((day, index) => {
         const cell = lookup[index].get(time);
         if (!cell) return <div key={day.date} className="heat-cell gone" />;

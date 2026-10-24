@@ -80,7 +80,7 @@ button.switch.on span { transform: translateX(20px); }
 /* Shared workspace design: quiet surfaces, consistent line icons and clear hierarchy. */
 
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
-main { margin: 0 auto; max-width: 960px; padding: 36px 32px calc(110px + env(safe-area-inset-bottom)); }
+main { margin: 0 auto; max-width: 960px; padding: 36px 32px calc(36px + env(safe-area-inset-bottom)); }
 h1 { font-size: clamp(25px, 4vw, 32px); line-height: 1.2; font-weight: 650; letter-spacing: -0.035em; margin: 8px 0 10px; overflow-wrap: anywhere; }
 h2 { font-size: 15px; font-weight: 650; letter-spacing: -0.015em; margin: 30px 0 12px; }
 h3 { margin: 0 0 5px; font-size: 14px; font-weight: 650; }
@@ -121,9 +121,6 @@ a.card.organiser-link { display: flex; align-items: center; gap: 15px; }
 .chip { border-radius: 999px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 550; padding: 3px 9px; background: var(--muted); border: 1px solid var(--border); }
 .chip.going { background: rgba(49, 154, 116, 0.14); color: #2a8a66; border-color: rgba(49, 154, 116, 0.3); background: color-mix(in srgb, #319a74 12%, var(--panel)); color: color-mix(in srgb, #319a74 30%, var(--text)); border-color: color-mix(in srgb, #319a74 25%, var(--panel)); }
 .chip.maybe { background: rgba(186, 137, 47, 0.14); color: #9a7020; background: color-mix(in srgb, #ba892f 12%, var(--panel)); color: color-mix(in srgb, #ba892f 30%, var(--text)); }
-nav { position: fixed; inset: auto 0 0 0; display: flex; z-index: 10; justify-content: center; gap: 4px; border-top: 1px solid var(--border); background: var(--panel); padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); }
-nav a { text-align: center; color: var(--hint); text-decoration: none; flex: 0 1 160px; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 12px; font-size: 12px; border-radius: 7px; }
-nav a.active { font-weight: 600; background: var(--accent-soft); color: var(--link); }
 button { padding: 9px 12px; color: var(--text); font: inherit; min-height: 40px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); cursor: pointer; font-size: 13px; transition: background 150ms, border-color 150ms; }
 button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button:hover:not(:disabled), .action:hover { filter: brightness(0.96); }
@@ -144,7 +141,7 @@ label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 4
 button.switch { flex: none; width: 50px; min-height: 30px; height: 30px; padding: 3px; border-radius: 999px; background: var(--hint); position: relative; border: 0; }
 .heat-cell { min-height: 28px; padding: 0; border-radius: 4px; background: var(--accent); color: var(--accent-text); font-size: 12px; border: 0; }
 @media (max-width: 600px) {
-  main { padding: 26px 18px calc(100px + env(safe-area-inset-bottom)); }
+  main { padding: 26px 18px calc(26px + env(safe-area-inset-bottom)); }
   input, textarea { font-size: 16px; }
   .app-header { padding: 14px 18px; }
   .brand-caption { display: none; }
@@ -156,7 +153,6 @@ button.switch { flex: none; width: 50px; min-height: 30px; height: 30px; padding
   .event-row > .icon { display: none; }
   .event-content h3 { font-size: 15px; }
   .date-tile { flex-basis: 46px; width: 46px; }
-  nav a { flex-direction: column; gap: 4px; padding: 6px 10px; }
   .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {

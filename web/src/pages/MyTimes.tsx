@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { dragState, paint, setDay, ticked } from "../availability";
 import { time } from "../format";
@@ -10,6 +10,7 @@ import { useLoad } from "../useLoad";
 /** A member's own times for a poll: busy cells are blocked, the rest can be ticked or cleared. */
 export function MyTimes() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const { data, error } = useLoad(() => api.myGrid(id), [id]);
   const [grid, setGrid] = useState<MyGrid | null>(null);
   const [status, setStatus] = useState("");
@@ -74,9 +75,9 @@ export function MyTimes() {
     setStatus("");
     try {
       const done = await api.saveGrid(id, ticked(grid));
-      setStatus(`Saved ${done.saved} half hours.${done.dropped ? ` ${done.dropped} were blocked and left out.` : ""}`);
-      // The button now updates the saved answer rather than submitting a first one.
-      setGrid((current) => (current ? { ...current, submitted: true } : current));
+      const note = `Saved ${done.saved} half hours.${done.dropped ? ` ${done.dropped} were blocked and left out.` : ""} You're counted in.`;
+      // Back to the poll, which now shows "You're in." and the new count.
+      navigate(`/poll/${id}`, { replace: true, state: { note } });
     } catch (e) {
       setStatus((e as Error).message || "Couldn't save. Try again.");
     } finally {

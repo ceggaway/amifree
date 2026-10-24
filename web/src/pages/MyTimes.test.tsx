@@ -55,6 +55,7 @@ function show(g: MyGrid | Error) {
     <MemoryRouter initialEntries={["/poll/p1/mine"]}>
       <Routes>
         <Route path="/poll/:id/mine" element={<MyTimes />} />
+        <Route path="/poll/:id" element={<p>Poll page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -75,7 +76,8 @@ describe("MyTimes", () => {
     expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
     fireEvent.click(screen.getByText("Submit my times"));
     await waitFor(() => expect(saved).toEqual([["2026-10-13T08:00:00+08:00"]]));
-    expect(await screen.findByText(/Saved 1 half hours/)).toBeTruthy();
+    // Saving counts the member in and returns to the poll.
+    expect(await screen.findByText("Poll page")).toBeTruthy();
   });
 
   it("paints many cells with one drag, and never touches a busy cell", async () => {

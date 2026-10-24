@@ -1,7 +1,7 @@
 """/whosfree: a poll that fills itself from the schedules of members who opt in.
 
 Privacy rules, enforced here rather than left to the caller:
-- only people who tapped "Count me in" have their schedule read;
+- only people who joined (filled in their times, or tapped "Count me in") have their schedule read;
 - slots are suggested only once MIN_PARTICIPANTS have joined;
 - the group sees counts per slot, never who is busy or what with.
 """
@@ -209,8 +209,13 @@ def poll_card(
             head
             + f"\nLooking at {poll.window_start:%a %-d %b} to {last:%a %-d %b}, 08:00–22:00."
             + deadline
-            + "\n\nTap Count me in to let AmIFree use your schedule for this poll. The group only"
-            + " sees how many people are free in each slot, never who is busy or why."
+            + (
+                "\n\nTap Fill in my availabilities to add your free times for this poll."
+                if app_url
+                else "\n\nTap Count me in to let AmIFree use your schedule for this poll."
+            )
+            + " The group only sees how many people are free in each slot, never who is busy"
+            + " or why."
             + when,
             poll_keyboard(poll, app_url),
         )

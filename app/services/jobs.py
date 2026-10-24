@@ -145,7 +145,7 @@ class Notifier:
             ask = (
                 "tap the time that works best for you"
                 if poll.status == "OPEN"
-                else "tap Count me in so your free time is counted"
+                else "fill in your availabilities so your free time is counted"
             )
             return Reply(
                 f"🗳 Your group is choosing a time for {poll.title}. Open the poll and {ask}."

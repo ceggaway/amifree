@@ -131,5 +131,5 @@ async def test_poll_card_links_to_the_mini_app_when_configured(service_factory):
     # One way into the app per card; the organiser's Suggest and Nudge live there.
     assert urls == [f"https://t.me/AmIFreeBot/free?startapp=poll_{poll.id}"]
     labels = [b["text"] for row in markup["inline_keyboard"] for b in row]
-    assert labels == ["✋ Count me in", "📱 Open"]
+    assert labels == ["🗓 Fill in my availabilities"]
     assert alerts(transport) == []

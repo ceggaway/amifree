@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
 import { day, span } from "../format";
 import { confirm, haptic } from "../telegram";
@@ -13,7 +13,9 @@ export function Poll() {
   const navigate = useNavigate();
   const loaded = useLoad(() => api.poll(id), [id]);
   const [poll, setPoll] = useState<PollDetail | null>(null);
-  const [note, setNote] = useState("");
+  // MyTimes sends a note back here after a save.
+  const location = useLocation();
+  const [note, setNote] = useState((location.state as { note?: string } | null)?.note ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const p = poll ?? loaded.data;
@@ -80,16 +82,11 @@ export function Poll() {
             {p.joined < p.min_joined ? ` (at least ${p.min_joined} need to join)` : ""}.
           </p>
           <p className="hint">The group only sees how many people are free, never who is busy or why.</p>
-          {p.joined_by_me ? (
-            <p className="banner ok">You're in.</p>
-          ) : (
-            <button type="button" className="on big" disabled={busy} onClick={() => run(() => api.joinPoll(p.id))}>
-              Count me in
-            </button>
-          )}
-          <p>
-            <Link to={`/poll/${p.id}/mine`}>Set my free times by hand</Link>
-          </p>
+          {p.joined_by_me && <p className="banner ok">You're in.</p>}
+          {/* Submitting the grid also counts the member in. */}
+          <button type="button" className="on big" onClick={() => navigate(`/poll/${p.id}/mine`)}>
+            {p.joined_by_me ? "Update my availabilities" : "Fill in my availabilities"}
+          </button>
         </section>
       )}
 

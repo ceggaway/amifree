@@ -1,7 +1,7 @@
 import { BackButton } from "./components/BackButton";
 import { Icon } from "./components/Icon";
 import { useEffect, useRef } from "react";
-import { HashRouter, Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { HashRouter, Link, Route, Routes, useNavigate } from "react-router-dom";
 import { mockMode } from "./api";
 import { Blocks } from "./pages/Blocks";
 import { Calendar } from "./pages/Calendar";
@@ -71,9 +71,6 @@ export function App() {
           <Route path="/e/:id" element={<GroupEvent />} />
         </Routes>
       </main>
-      <nav aria-label="Main navigation">
-        <NavLink to="/" end><Icon name="home" size={19} /><span>Home</span></NavLink>
-      </nav>
     </HashRouter>
   );
 }

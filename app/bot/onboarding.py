@@ -154,12 +154,18 @@ GUIDES = {
 }
 
 APPLE_PART1 = (
-    "🍎 <b>Apple Calendar</b> · 2 quick parts\n\n"
-    "<b>Part 1 of 2 · Add your plans to your calendar automatically</b>\n"
-    "Every event you save with me will show up in your iPhone calendar by itself, and "
-    "update if it changes. No more adding them by hand.\n\n"
-    "Tap <b>Add to Calendar</b> below, then tap <b>Subscribe</b>. Your plans will appear in "
-    "a calendar called <b>AmIFree</b>. I'll message you here once it's working."
+    "🍎 <b>Apple Calendar · Part 1 of 2</b>\n"
+    "<b>Add your plans to your calendar automatically</b>\n\n"
+    "Every event you save with me will show up in your calendar by itself, and update if it "
+    "changes. No more adding them by hand.\n\n"
+    "<b>1.</b> Tap <b>Add to Calendar</b> below, then tap <b>Subscribe</b>. A calendar called "
+    "<b>AmIFree</b> appears.\n\n"
+    "<b>2.</b> Make changes show up faster:\n"
+    "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → "
+    "<b>Every 15 Minutes</b> (the fastest an iPhone allows)\n"
+    "• Mac: in Calendar, right-click AmIFree → Get Info → Auto-refresh → "
+    "<b>Every 5 minutes</b>\n\n"
+    "I'll message you here once your calendar has subscribed, then we'll do part 2."
 )
 APPLE_ALREADY_GOOGLE = (
     "\n\nℹ️ Your plans already go to your Google Calendar. If that's the calendar on your "
@@ -171,7 +177,7 @@ APPLE_NO_FEED = (
     "add it. This part lets me check when you're busy."
 )
 APPLE_PART1_DONE = "✅ <b>Part 1 done</b>: your plans will appear in your AmIFree calendar."
-APPLE_PART2 = "<b>Part 2 of 2 · Let me check when you're busy</b>\n"
+APPLE_PART2 = "🍎 <b>Apple Calendar · Part 2 of 2</b>\n<b>Let me check when you're busy</b>\n\n"
 APPLE_SKIPPED = (
     "OK, skipped. Your plans still go to your AmIFree calendar, but I won't know when you're "
     "busy with other things. Finish it any time in /calendar."
@@ -477,31 +483,36 @@ def screen_photos(name: str) -> tuple[bytes, ...]:
         return ()
 
 
-# Google step 1 (sharing), one small step per message, each with the picture of that
-# screen. {email} is AmIFree's Google account, shown in <code> so a tap copies it.
+# Google step 1 (sharing), one small part per message, each with the picture of that
+# screen: (picture, short title, what to do). {email} is AmIFree's Google account, in <code>
+# so a tap copies it.
 GOOGLE_STEPS = {
     "phone": (
         "google_phone",
         (
             (
                 "gphone_step1.png",
-                "Open the <b>Google Calendar</b> app and tap <b>☰</b> (top left).",
+                "Open the menu",
+                "Open the <b>Google Calendar</b> app on your phone and tap <b>☰</b> (top left).",
             ),
-            ("gphone_step2.png", "Scroll down and tap <b>Settings</b>."),
+            ("gphone_step2.png", "Open Settings", "Scroll down and tap <b>Settings</b>."),
             (
                 "gphone_step3.png",
-                "Tap your calendar (usually <b>My calendar</b>), then <b>Shared with</b>.",
+                "Choose your calendar",
+                "Tap your calendar (usually <b>My calendar</b>), then tap <b>Shared with</b>.",
             ),
             (
                 "gphone_step4.png",
-                "Tap <b>Add people or groups</b> and paste this email (tap it to copy):\n"
+                "Add AmIFree",
+                "Tap <b>Add people or groups</b> and paste this email (tap it to copy):\n\n"
                 "<code>{email}</code>",
             ),
             (
                 "gphone_step5.png",
-                "Set the permission to <b>Make changes (see private events as free/busy)</b>, "
-                "then tap <b>Save</b>.\n\n"
-                "🔒 I only read your busy times, and only change events I add.",
+                "Let AmIFree add your plans",
+                "Tap the permission under AmIFree and choose\n"
+                "<b>Make changes (see private events as free/busy)</b>\n\n"
+                "Then tap <b>Save</b> (top right).",
             ),
         ),
     ),
@@ -510,30 +521,33 @@ GOOGLE_STEPS = {
         (
             (
                 "step1_gear.png",
+                "Open settings",
                 "On a computer, go to <b>calendar.google.com</b> and click the <b>⚙️ gear</b> "
                 "(top right).",
             ),
-            ("step2_settings.png", "Click <b>Settings</b>."),
+            ("step2_settings.png", "Open Settings", "Click <b>Settings</b>."),
             (
                 "step3_calendar.png",
+                "Choose your calendar",
                 "Under <b>Settings for my calendars</b> on the left, click your calendar.",
             ),
             (
                 "step4_add.png",
-                "Scroll to <b>Share with specific people or groups</b> and click "
-                "<b>Add people and groups</b>.",
+                "Start sharing",
+                "Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.",
             ),
             (
                 "step5_dialog.png",
-                "Paste this email (tap it to copy):\n<code>{email}</code>\n"
-                "Set the permission to <b>Make changes (see private events as free/busy)</b>, "
-                "then click <b>Send</b>.\n\n"
-                "🔒 I only read your busy times, and only change events I add.",
+                "Add AmIFree",
+                "In the box that opens:\n\n"
+                "<b>①</b> Paste this email (tap it to copy):\n<code>{email}</code>\n\n"
+                "<b>②</b> Permission: <b>Make changes (see private events as free/busy)</b>\n\n"
+                "<b>③</b> Click <b>Send</b>.",
             ),
         ),
     ),
 }
-GOOGLE_STEP1 = "📅 <b>Google Calendar · Step 1 of 3 · Share your calendar with me</b>\n"
+GOOGLE_STEP1 = "📅 <b>Google Calendar · Step 1 of 3</b>\n<b>Share your calendar with me</b>\n\n"
 
 
 def google_step(
@@ -541,10 +555,17 @@ def google_step(
 ) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
     """One part of Google step 1: its text, its picture (None if it can't be read), buttons."""
     folder, steps = GOOGLE_STEPS[device]
-    picture, body = steps[n - 1]
-    text = GOOGLE_STEP1 + f"<b>{n} of {len(steps)}</b> · " + body.format(email=html.escape(email))
+    picture, title, body = steps[n - 1]
+    text = (
+        GOOGLE_STEP1
+        + f"<b>{n} of {len(steps)} · {title}</b>\n"
+        + body.format(email=html.escape(email))
+    )
     if n == len(steps):
-        text += "\n\nThen tap <b>Done</b> below."
+        text += (
+            "\n\nThen tap <b>Done</b> below.\n\n"
+            "🔒 I only read your busy times, and only change events I add."
+        )
     try:
         photo = (Path(__file__).resolve().parent.parent / "assets" / folder / picture).read_bytes()
     except OSError:
@@ -558,7 +579,11 @@ def google_step(
     if n == len(steps):
         rows.insert(0, [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")])
     if n == 1:
-        rows.append([InlineKeyboardButton("Open Google Calendar ↗", url=GOOGLE_CALENDAR_URL)])
+        if device == "computer":
+            # The text says to go to calendar.google.com, so the button goes exactly there.
+            rows.append(
+                [InlineKeyboardButton("Open calendar.google.com ↗", url=GOOGLE_CALENDAR_URL)]
+            )
         rows.append(
             [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
             if device == "phone"
@@ -568,9 +593,9 @@ def google_step(
     return text, photo, InlineKeyboardMarkup(rows)
 
 
-GOOGLE_CALENDAR_URL = "https://calendar.google.com/calendar/r/settings"
+GOOGLE_CALENDAR_URL = "https://calendar.google.com"
 GOOGLE_EMAIL_ASK = (
-    "<b>Step 2 of 3 · What's your Google email?</b>\n"
+    "📅 <b>Google Calendar · Step 2 of 3</b>\n<b>What's your Google email?</b>\n\n"
     "The one that owns the calendar you just shared. Just type it here, like "
     "<code>you@gmail.com</code>.\n\n/cancel to stop."
 )
@@ -586,10 +611,21 @@ GOOGLE_SHARING_BLOCKED = (
 
 def google_code_ask(email: str) -> str:
     return (
-        "<b>Step 3 of 3 · Show me it's yours</b>\n"
+        "📅 <b>Google Calendar · Step 3 of 3</b>\n<b>Show me it's yours</b>\n\n"
         f'I\'ve put an event called "AmIFree code" in the calendar for {html.escape(email)} '
         "today. Open Google Calendar and send me the 6-digit number in it. I'll delete the "
         "event after.\n\n/cancel to stop."
+    )
+
+
+def google_unshare(email: str) -> str:
+    """AmIFree can't take itself off a calendar: only its owner can. Said whenever it stops."""
+    return (
+        "⚠️ <b>One more step in Google Calendar.</b> I still have access until you remove me, "
+        "and only you can do that:\n"
+        "Settings → your calendar → <b>Shared with</b> → tap ✕ next to\n"
+        f"<code>{html.escape(email)}</code>\n\n"
+        "Events I added stay in your calendar. Delete them there if you don't want them."
     )
 
 

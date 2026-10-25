@@ -1691,23 +1691,20 @@ class SchedulingService:
         part 2 of Apple setup if nothing tells me yet when they're busy. Best effort."""
         if not self.send_private:
             return
-        tip = "\n\n" + onboarding.FEED_REFRESH_TIP
+        # Part 1 already asked them to set the refresh time; here it's only for anyone who
+        # subscribed some other way.
         if user.google_connected:
-            replies = [
-                Reply("✅ Your AmIFree calendar is subscribed. Your plans now appear in it." + tip)
-            ]
+            reply = Reply(
+                "✅ Your AmIFree calendar is subscribed. Your plans now appear in it.\n\n"
+                + onboarding.FEED_REFRESH_TIP
+            )
         elif await self.repo.list_calendars(user.id):
-            replies = [Reply(onboarding.APPLE_ALL_SET + tip, parse_mode="HTML")]
+            reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
         else:
-            # The tip first, then part 2's first step on its own, so the step stays short.
-            text, photo, keyboard = onboarding.apple_step()
-            replies = [
-                Reply(onboarding.APPLE_PART1_DONE + tip, parse_mode="HTML"),
-                Reply(text, keyboard, parse_mode="HTML", photo=photo),
-            ]
+            text, photo, keyboard = onboarding.apple_step(lead=onboarding.APPLE_PART1_DONE)
+            reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
         try:
-            for reply in replies:
-                await self.send_private(user.telegram_user_id, reply)
+            await self.send_private(user.telegram_user_id, reply)
         except Exception as exc:
             log.warning("feed_working_dm_failed error_type=%s", type(exc).__name__)
 
@@ -1881,11 +1878,12 @@ class SchedulingService:
             f"Removed {calendars[calendar_id].label}. I've deleted its link and every busy time I "
             "read from it."
         )
-        if was_google:
-            removed += (
-                " Events I already added stay in your calendar; delete them there if you like, "
-                "and remove AmIFree from Shared with so I can't see it."
-            )
+        if was_google and self.google_sync.enabled:
+            # A new message: the status screen below stays a plain-text edit.
+            return [
+                Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True),
+                Reply(onboarding.google_unshare(self.google.email), parse_mode="HTML"),
+            ]
         return [Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True)]
 
     async def disconnect_calendar(self, user: User) -> list[Reply]:
@@ -1894,12 +1892,13 @@ class SchedulingService:
         if user.google_connected:
             await self.repo.set_user_flags(user.id, google_connected=False)
         await self.safe_action(user.id, "personal_calendar_disconnected")
-        return [
-            Reply(
-                "All calendars disconnected. I've deleted their links and every busy time I "
-                "read from them."
-            )
-        ]
+        text = (
+            "All calendars disconnected. I've deleted their links and every busy time I "
+            "read from them."
+        )
+        if user.google_connected and self.google_sync.enabled:
+            text += "\n\n" + onboarding.google_unshare(self.google.email)
+        return [Reply(text, parse_mode="HTML")]
 
     def google_sync_soon(self, telegram_id: int):
         self.google_sync.sync_soon(telegram_id)
@@ -2184,7 +2183,16 @@ class SchedulingService:
                 return [Reply("Kept unchanged.")]
             if pending["stage"] == "delete":
                 await self.repo.delete_user(user.id)
-                return [Reply("Your AmIFree data has been deleted. Use /start to set up again.")]
+                text = "Your AmIFree data has been deleted. Use /start to set up again."
+                if user.calendar_feed_token:
+                    text += (
+                        "\n\nThe AmIFree calendar on your phone stops updating. To remove it: "
+                        "Settings → Apps → Calendar → Calendar Accounts → AmIFree → Delete "
+                        "Account."
+                    )
+                if user.google_connected and self.google_sync.enabled:
+                    text += "\n\n" + onboarding.google_unshare(self.google.email)
+                return [Reply(text, parse_mode="HTML")]
             if pending["stage"] == "block":
                 rule = BlockRule.model_validate(pending["rule"])
                 await self.repo.create_block(user.id, rule)

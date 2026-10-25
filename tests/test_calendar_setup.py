@@ -78,7 +78,7 @@ async def test_google_is_three_steps(service_factory, reference):
     service.google = FakeGoogle()
     await onboard(service, reference)
     step1 = (await service.callback(1, "setup:google"))[0]
-    assert "Step 1 of 3" in step1.text and "Open Google Calendar ↗" in labels(step1)
+    assert "Step 1 of 3" in step1.text and "Next ›" in labels(step1)
     last = (await service.callback(1, "gs:phone:5"))[0]
     step2 = (await service.callback(1, tap(last, "✅ Done, I've shared it")))[0]
     assert "Step 2 of 3" in step2.text and not step2.edit  # the steps stay readable above
@@ -119,6 +119,8 @@ async def test_apple_part_one_is_one_tap_to_subscribe(service_factory, reference
     await onboard(service, reference)
     part1 = (await service.callback(1, "setup:apple"))[0]
     assert "Part 1 of 2" in part1.text and part1.parse_mode == "HTML"
+    # The refresh setting is part of part 1, before moving on.
+    assert "Fetch New Data" in part1.text and "Every 5 minutes" in part1.text
     token = repo.users[1].calendar_feed_token
     add = part1.keyboard.inline_keyboard[0][0]
     assert add.text == "➕ Add to Calendar ↗" and add.url == f"{BASE}/cal/{token}/add"
@@ -137,14 +139,13 @@ async def test_first_feed_fetch_moves_on_to_part_two(service_factory, reference)
     await service.calendar_feed(token, "TelegramBot (like TwitterBot)")  # a preview isn't it
     assert sent.messages == []
     await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
-    [(telegram_id, done), (_, step)] = sent.messages
-    assert telegram_id == 1 and "Part 1 done" in done.text
-    assert onboarding.FEED_REFRESH_TIP in done.text
+    [(telegram_id, step)] = sent.messages
+    assert telegram_id == 1 and step.text.startswith(onboarding.APPLE_PART1_DONE)
     assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text and step.photo
     assert "⏭ Skip this part" in labels(step)
     service.clock = lambda: reference + timedelta(hours=1)
     await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
-    assert len(sent.messages) == 2  # only the first fetch announces
+    assert len(sent.messages) == 1  # only the first fetch announces
     # Coming back to Apple setup now starts at part 2.
     again = (await service.callback(1, "setup:apple"))[0]
     assert "Part 1 done" in again.text and "Part 2 of 2" in again.text
@@ -158,8 +159,7 @@ async def test_feed_after_a_link_says_all_set(service_factory, reference):
     await service.message(1, 5, ICLOUD_CCA, reference)
     await service.callback(1, "setup:apple")
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
-    text = sent.messages[0][1].text
-    assert text.startswith(onboarding.APPLE_ALL_SET) and "Every 5 minutes" in text
+    assert sent.messages[0][1].text == onboarding.APPLE_ALL_SET
 
 
 async def test_half_done_apple_setup_shows_in_calendar(service_factory, reference):
@@ -247,3 +247,19 @@ async def test_a_step_swaps_its_picture_in_place():
     on_picture.delete.assert_awaited_once()
     message.reply_text.assert_awaited_once()
     query.edit_message_text.assert_not_awaited()
+
+
+async def test_deleting_data_says_how_to_take_amifree_off_the_calendars(service_factory, reference):
+    from tests.test_google_calendar import BOT, connect
+
+    service, repo = service_factory(app_base_url=BASE)
+    service.google = FakeGoogle()
+    await onboard(service, reference)
+    await connect(service, 1, "me@gmail.com", reference)
+    await service.callback(1, "setup:apple")
+    asked = (await service.command(1, "deletemydata"))[0]
+    done = (await service.callback(1, tap(asked, "Delete my data")))[0]
+    assert "has been deleted" in done.text and done.parse_mode == "HTML"
+    # Deleting here can't unshare in Google or unsubscribe the phone, so both are spelled out.
+    assert "Shared with" in done.text and f"<code>{BOT}</code>" in done.text
+    assert "Calendar Accounts → AmIFree → Delete Account" in done.text

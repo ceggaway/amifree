@@ -210,8 +210,8 @@ def poll_card(
             )
         else:
             when = (
-                f"\n\nJoined: {joined}. When the reply time passes, the organiser gets the best"
-                f" times privately and chooses one ({MIN_PARTICIPANTS} must have joined)."
+                f"\n\nJoined: {joined}. When the reply time passes, the best times are posted"
+                f" here and the organiser chooses one ({MIN_PARTICIPANTS} must have joined)."
             )
         return Reply(
             head
@@ -242,41 +242,53 @@ def length_text(minutes: int) -> str:
     return f"{hours:g}h" if minutes % 30 == 0 else f"{minutes}min"
 
 
+def length_words(minutes: int) -> str:
+    """90 -> "1.5 hours", 150 -> "2 hours 30 minutes", for messages people read."""
+    hours, rest = divmod(minutes, 60)
+    if rest == 30 and hours:
+        return f"{hours}.5 hours"
+    if not hours:
+        return f"{minutes} minutes"
+    text = f"{hours} hour{'s' if hours != 1 else ''}"
+    return text + (f" {rest} minutes" if rest else "")
+
+
 def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Reply:
-    """Sent privately to the organiser: the best times, with one button to choose each."""
+    """Posted in the group: the best times, with one button for each. Only the organiser's tap
+    confirms one; anyone else who taps is told so privately. Counts only, never names."""
     lines = []
     for index, slot in enumerate(poll.slots):
         start = datetime.fromisoformat(slot["start_at"]).astimezone(SG)
         end = datetime.fromisoformat(slot["end_at"]).astimezone(SG)
         lines.append(
-            f"{index + 1}. {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M} · "
-            f"{slot['free']} of {slot.get('of', joined)} free"
+            f"{index + 1}. {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M} "
+            f"({slot['free']} of {slot.get('of', joined)} available)"
         )
     unknown = max((s.get("unknown", 0) for s in poll.slots), default=0)
     missing = (
-        f"\n{unknown} member{'s' if unknown != 1 else ''} had no schedule to check, so"
-        " they aren't counted."
+        f"\n{unknown} member{'s' if unknown != 1 else ''} had no schedule to check and"
+        f" {'is' if unknown == 1 else 'are'} not included."
         if unknown
         else ""
     )
     text = (
-        f"📊 Results for {poll.title} ({length_text(poll.duration_minutes)})\n"
-        f"{joined} {'person' if joined == 1 else 'people'} filled in their availabilities.\n\n"
-        "Best times:\n"
+        f"Results for {poll.title} ({length_words(poll.duration_minutes)})\n"
+        f"{joined} {'person has' if joined == 1 else 'people have'} submitted their"
+        " availability.\n\n"
+        "Suggested times:\n"
         + "\n".join(lines)
         + missing
-        + "\n\nTap a time to confirm it, or open 📱 See all"
-        " times to choose any other time. I'll post"
-        " it in the group so everyone can add it to their calendar."
+        + "\n\nThe organiser can select an option to confirm the meeting time, or view all"
+        " times to choose a different one. The confirmed time will be announced here."
     )
     rows = [
         [
-            InlineKeyboardButton(f"Choose {index + 1}", callback_data=f"pr:{poll.id}:{index}")
+            InlineKeyboardButton(f"Option {index + 1}", callback_data=f"p:choose:{poll.id}:{index}")
             for index in range(len(poll.slots))
         ]
     ]
     if app_url:
-        rows.append([InlineKeyboardButton("📱 See all times", url=app_url)])
+        rows.append([InlineKeyboardButton("View all times", url=app_url)])
     return Reply(text, InlineKeyboardMarkup(rows))
 
 
@@ -432,19 +444,17 @@ class PollService:
         if not opened:
             return None, "Results are already out."
         await self.send_report(opened, len(people))
-        return opened, "Results are ready. I've sent them to you privately to choose a time."
+        return opened, "Results are posted in the group. Choose a time there."
 
     async def send_report(self, poll: Poll, joined: int):
-        """Message the organiser the best times. If they never opened the bot, they can still
-        choose on the poll's page in the app."""
-        send = getattr(self.scheduling, "send_private", None)
-        organiser = await self.repo.get_user(poll.creator_user_id) if poll.creator_user_id else None
-        if not send or not organiser:
-            return
+        """Post the results in the group, where only the organiser can confirm a time. If the
+        group can't be reached, the organiser can still choose on the poll's page in the app."""
+        from app.services.group_hub import Refused
+
         report = organiser_report(poll, joined, self.scheduling.settings.heatmap_link(poll.id))
         try:
-            await send(organiser.telegram_user_id, report)
-        except TelegramError:
+            await self.scheduling.hub.post(poll.chat_id, report)
+        except (Refused, TelegramError):
             log.info("poll_report_undelivered poll_id=%s", poll.id)
 
     async def finalize(self, user, poll: Poll, index: int):
@@ -524,6 +534,37 @@ class PollService:
                 await self.repo.set_group_message(event.id, posted)
         return event
 
+    async def choose_in_group(self, telegram_id: int, poll: Poll, extra: str) -> GroupResult:
+        """An Option button on the results posted in the group. Only the organiser's tap counts."""
+        from app.services.group_hub import Refused
+
+        user = await self.repo.ensure_user(telegram_id)
+        if poll.creator_user_id != user.id:
+            return GroupResult(alert="Only the organiser can confirm the meeting time.")
+        if poll.status == "CLOSED":
+            # Chosen already (here or in the app): take the stale buttons off the results.
+            return GroupResult(
+                alert="A time has already been confirmed.",
+                card=Reply(f"Results for {poll.title}: the meeting time has been confirmed."),
+            )
+        index = int(extra) if extra.isdigit() else -1
+        if poll.status != "OPEN" or not 0 <= index < len(poll.slots):
+            return GroupResult(alert="That option isn't available.")
+        try:
+            event = await self.finalize(user, poll, index)
+        except Refused as exc:
+            return GroupResult(alert=str(exc))
+        if not event:
+            return GroupResult(alert="A time has already been confirmed.")
+        start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
+        return GroupResult(
+            alert="Confirmed. The meeting time has been announced.",
+            card=Reply(
+                f"Results for {poll.title}: confirmed for {start:%a %-d %b}, "
+                f"{start:%H:%M}–{end:%H:%M}."
+            ),
+        )
+
     async def choose_from_report(self, user, data: str) -> list[Reply]:
         """A Choose button on the organiser's private report."""
         from app.services.group_hub import Refused
@@ -547,8 +588,8 @@ class PollService:
         start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
         return [
             Reply(
-                f"✅ Done. {event.title} is set for {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M}."
-                " I've posted it in the group so everyone can add it to their calendar.",
+                f"Confirmed: {event.title} is set for {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M}."
+                " The time has been posted in the group.",
                 edit=True,
             )
         ]
@@ -710,6 +751,10 @@ class PollService:
         poll = await self.repo.get_poll(poll_id) if poll_id else None
         if not poll or poll.chat_id != chat_id:
             return GroupResult(alert="This poll is no longer available.")
+        if parts[1] == "choose":
+            return await self.choose_in_group(
+                telegram_id, poll, parts[3] if len(parts) == 4 else ""
+            )
         if poll.status == "CLOSED":
             return GroupResult(alert="This poll is closed.", card=await self.render(poll))
         user = await self.repo.ensure_user(telegram_id)

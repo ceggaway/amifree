@@ -11,7 +11,6 @@ from tests.conftest import extraction
 from tests.test_group_events import (
     CHAT,
     alerts,
-    buttons,
     group_message,
     group_tap,
     make_bot,
@@ -146,99 +145,79 @@ PLAN = extraction(
 )
 
 
-async def test_detection_is_off_until_an_admin_turns_it_on(service_factory):
+async def test_detection_cannot_be_enabled_by_members_or_admins(service_factory):
     service, repo = service_factory(PLAN)
     bot, transport = make_bot(service)
     async with bot:
         await run(bot, "Badminton Saturday 4pm-6pm at UTSRC anyone?", 80, 2)
-        assert service.extractor.calls == [] and not transport.sent  # nothing read, nothing said
-        await run(bot, "/detect", 81)
-        assert "Event detection is off" in transport.sent[-1]["text"]
-        await run(bot, "/detect on", 82, 2)  # not an admin
-        assert "Only a group admin" in transport.sent[-1]["text"]
-        assert not repo.detection.get(CHAT)
-        transport.admins.add(1)
-        await run(bot, "/detect on", 83, 1)
-    notice = transport.sent[-1]["text"]
-    assert repo.detection[CHAT] is True
-    assert "not stored" in notice and "/detect off" in notice and "admin" in notice
+        assert not service.extractor.calls and not transport.sent
+        for index, (command, member) in enumerate(
+            (("/detect", 2), ("/detect on", 2), ("/detect on", 1), ("/detect off", 1))
+        ):
+            transport.admins.add(1)
+            await run(bot, command, 81 + index, member)
+            assert "no longer supported" in transport.sent[-1]["text"]
+    assert not repo.detection.get(CHAT) and not repo.suggestions
 
 
-async def test_detected_plan_becomes_a_card_only_on_a_tap(service_factory):
+async def test_previously_enabled_groups_never_process_ordinary_messages(service_factory):
     service, repo = service_factory(PLAN)
     repo.detection[CHAT] = True
     bot, transport = make_bot(service)
     async with bot:
-        # Chatter that has no day and time is never sent to the extractor.
-        await run(bot, "lol did anyone see the match last night", 90, 2)
-        await run(bot, "see you at 7:30 then", 91, 2)
-        assert service.extractor.calls == [] and not transport.sent
-        await run(bot, "Badminton Saturday 4pm-6pm at UTSRC anyone keen?", 92, 2)
-        suggestion = transport.sent[-1]
-        assert "Looks like a plan" in suggestion["text"] and "Badminton" in suggestion["text"]
-        taps = buttons(suggestion["reply_markup"])
-        assert set(taps) == {"Make event card", "Ignore"}
-        # Nothing is saved until someone taps, and a retried update adds no second suggestion.
-        assert not repo.group_events and len(repo.suggestions) == 1
-        await run(bot, "Badminton Saturday 4pm-6pm at UTSRC anyone keen?", 92, 2)
-        assert len(repo.suggestions) == 1
-        await bot.process_update(
-            Update.de_json(group_tap(taps["Make event card"], 2, update_id=9100), bot.bot)
-        )
-    event = next(iter(repo.group_events.values()))
-    assert event.title == "Badminton" and event.message_id == 101
-    assert event.creator_user_id == (await repo.ensure_user(2)).id
-    assert event.source_message_id == 92 and not repo.suggestions
-    edits = [p for name, p in transport.calls if name == "editMessageText"]
-    assert "📅 Badminton" in edits[-1]["text"] and "Going 0" in edits[-1]["text"]
-    # The suggestion message is now the card, so RSVPs edit it.
-    card_taps = buttons(edits[-1]["reply_markup"])
-    async with bot:
-        await bot.process_update(
-            Update.de_json(group_tap(card_taps["Going"], 4, update_id=9101), bot.bot)
-        )
-    assert "Going 1" in [p for n, p in transport.calls if n == "editMessageText"][-1]["text"]
+        for index, text in enumerate(
+            (
+                "Badminton Saturday 4pm-6pm at UTSRC anyone?",
+                "Quiz night Friday 8pm at the pub",
+                "Cinema Sunday 3pm at Vivo",
+            )
+        ):
+            await run(bot, text, 90 + index, 2)
+    assert not service.extractor.calls and not transport.sent
+    assert not repo.suggestions and not repo.group_events
+    assert await service.detection.enabled(CHAT) is False
 
 
-async def test_ignored_and_stale_suggestions_disappear(service_factory):
-    service, repo = service_factory(PLAN, PLAN)
-    repo.detection[CHAT] = True
+async def test_retired_suggestion_buttons_cannot_create_cards(service_factory, reference):
+    from app.schemas.event import EventDraft
+
+    service, repo = service_factory()
+    draft = EventDraft(
+        title="Old suggestion",
+        start_at=reference + timedelta(days=1),
+        end_at=reference + timedelta(days=1, hours=1),
+    )
+    suggestion = await repo.create_suggestion(CHAT, 95, draft, 2)
     bot, transport = make_bot(service)
     async with bot:
-        await run(bot, "Badminton Saturday 4pm-6pm at UTSRC", 95, 2)
-        taps = buttons(transport.sent[-1]["reply_markup"])
-        await bot.process_update(
-            Update.de_json(group_tap(taps["Ignore"], 2, update_id=9200), bot.bot)
-        )
-        assert [c for c in transport.calls if c[0] == "deleteMessage"]
-        assert not repo.suggestions and not repo.group_events
-        # A second plan nobody answers is removed by the clock.
-        await run(bot, "Badminton Saturday 4pm-6pm at UTSRC", 96, 2)
-        assert len(repo.suggestions) == 1
-        deletions = len([c for c in transport.calls if c[0] == "deleteMessage"])
-    # expiry is measured against the repository's creation time (real clock in the fake)
-    stale = next(iter(repo.suggestions.values()))
-    stale.created_at -= timedelta(hours=1)
+        for index, action in enumerate(("ok", "no")):
+            await bot.process_update(
+                Update.de_json(
+                    group_tap(f"d:{action}:{suggestion.id}", 2, update_id=9200 + index), bot.bot
+                )
+            )
+            assert "no longer supported" in alerts(transport)[-1]["text"]
+    assert not repo.group_events and not service.extractor.calls
+    assert [c for c in transport.calls if c[0] == "deleteMessage"]
+
+
+async def test_old_expired_suggestions_are_still_cleaned_up(service_factory, reference):
     from datetime import datetime
 
-    assert await service.detection.sweep(datetime.now(stale.created_at.tzinfo)) == 1
-    assert not repo.suggestions
-    assert len([c for c in transport.calls if c[0] == "deleteMessage"]) == deletions + 1
-    # A tap on a button whose suggestion has gone is refused politely.
-    async with bot:
-        await bot.process_update(
-            Update.de_json(group_tap(taps["Make event card"], 3, update_id=9201), bot.bot)
-        )
-    assert "expired" in alerts(transport)[-1]["text"]
+    from app.schemas.event import EventDraft
 
-
-async def test_detection_is_rate_limited_and_ignores_bad_extractions(service_factory):
-    service, repo = service_factory(PLAN, extraction(kind="unknown"), detection_per_hour=2)
-    repo.detection[CHAT] = True
+    service, repo = service_factory()
+    draft = EventDraft(
+        title="Old suggestion",
+        start_at=reference + timedelta(days=1),
+        end_at=reference + timedelta(days=1, hours=1),
+    )
+    suggestion = await repo.create_suggestion(CHAT, 96, draft, 2)
+    await repo.set_suggestion_message(suggestion.id, 101)
+    stale = repo.suggestions[suggestion.id]
+    stale.created_at -= timedelta(hours=1)
     bot, transport = make_bot(service)
     async with bot:
-        await run(bot, "Badminton Saturday 4pm-6pm at UTSRC", 100, 2)  # suggestion
-        await run(bot, "Quiz night Friday 8pm at the pub", 101, 2)  # extractor says unknown
-        await run(bot, "Cinema Sunday 3pm at Vivo", 102, 2)  # over the hourly limit: not read
-    assert len(service.extractor.calls) == 2
-    assert len(transport.sent) == 1 and len(repo.suggestions) == 1
+        assert await service.detection.sweep(datetime.now(stale.created_at.tzinfo)) == 1
+    assert not repo.suggestions and not repo.group_events
+    assert [c for c in transport.calls if c[0] == "deleteMessage"]

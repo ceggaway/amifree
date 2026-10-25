@@ -178,7 +178,6 @@ def create_app(
                     BotCommand("attendance", "Mark who came to your latest event"),
                     BotCommand("export", "Attendance CSV (sent privately)"),
                     BotCommand("pro", "Clubs Pro for this group"),
-                    BotCommand("detect", "Admins: suggest cards for plans (on or off)"),
                 ],
                 scope=BotCommandScopeAllGroupChats(),
             )

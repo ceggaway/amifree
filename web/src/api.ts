@@ -102,8 +102,6 @@ export const api = {
   groupStats: (code: string, days: number) => request<GroupStats>("GET", `/api/groups/${code}/stats?days=${days}`),
   exportAttendance: (code: string, days: number) =>
     request<{ message: string }>("POST", `/api/groups/${code}/export`, { days }),
-  setDetection: (code: string, on: boolean) =>
-    request<{ detection: boolean }>("PUT", `/api/groups/${code}/detection`, { on }),
   createEvent: (code: string, form: EventForm) =>
     request<{ id: string }>("POST", `/api/groups/${code}/events`, form),
   createPoll: (code: string, form: PollForm) =>

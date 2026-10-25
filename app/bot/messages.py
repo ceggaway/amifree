@@ -185,7 +185,6 @@ GROUP_HELP = """👋 AmIFree in this group
    "every Tue/Thu until week 13" makes a recurring event.
 /whosfree project meeting 2h next week: find a time; members tap the times that work
 /attendance, /stats, /export: turnout for your events (sent to you privately)
-/detect on: admins only, suggests a card when someone posts a plan
 
 Organisers: tap 📱 Details (or ⚙️ Manage) on a card to edit, cancel, nudge or mark who came.
 To use your schedule, open a private chat with me and send /start."""

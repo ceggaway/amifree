@@ -439,14 +439,20 @@ async def test_stats_export_and_detection_from_the_group_page(hub, reference):
     empty = await client.post(f"/api/groups/{CODE}/export", headers=bearer(2), json={})
     assert empty.status_code == 409 and len(sent) == 1
 
-    # Only admins switch detection, and the group is told.
+    # Older clients cannot enable the retired feature, even with admin access.
+    before = len(posted)
+    repo.detection[CHAT] = True
     overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(2))).json()
     assert overview["admin"] is False and overview["detection"] is False
-    no = await client.put(f"/api/groups/{CODE}/detection", headers=bearer(2), json={"on": True})
-    assert no.status_code == 409
-    on = await client.put(f"/api/groups/{CODE}/detection", headers=bearer(1), json={"on": True})
-    assert on.json() == {"detection": True} and "Event detection is on" in posted[-1][1].text
-    assert (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()["detection"]
+    for member in (1, 2):
+        refused = await client.put(
+            f"/api/groups/{CODE}/detection", headers=bearer(member), json={"on": True}
+        )
+        assert (
+            refused.status_code == 409
+            and "no longer supported" in refused.json()["detail"]["message"]
+        )
+    assert len(posted) == before
 
 
 async def test_reminders_can_be_switched_from_the_app(hub):

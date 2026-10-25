@@ -418,6 +418,8 @@ class SchedulingService:
             return await self.list_events(user)
         if command == "plans":
             return await self.agenda(user)
+        if command == "detect":
+            return [Reply("Spotting plans in chat is no longer supported.")]
         if command in ("event", "plan", "whosfree"):
             return [
                 Reply(
@@ -427,7 +429,6 @@ class SchedulingService:
         if command in (
             "stats",
             "export",
-            "detect",
             "attendance",
             "pro",
         ):

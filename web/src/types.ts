@@ -104,7 +104,6 @@ export type GroupOverview = {
   events: GroupEventSummary[];
   polls: GroupPoll[];
   admin: boolean;
-  detection: boolean;
 };
 
 export type GroupStats = {

@@ -1,14 +1,9 @@
-import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, refusal } from "../api";
+import { api } from "../api";
 import { Icon } from "../components/Icon";
-import { Switch } from "../components/Switch";
-import { haptic } from "../telegram";
-import { dateNumber, day, month, span } from "../format";
+import { capitaliseFirst, dateNumber, day, month, span, weekday } from "../format";
 import type { GroupEventSummary, GroupPoll } from "../types";
 import { useLoad } from "../useLoad";
-
-const MINE: Record<string, string> = { GOING: "You're going", MAYBE: "Maybe", DECLINED: "Can't", SAVED: "Saved" };
 
 /** A group's events and open polls, with the two things people come here to do. */
 export function GroupHome() {
@@ -29,7 +24,7 @@ export function GroupHome() {
           <span className="icon-tile"><Icon name="plus" /></span>
           <div>
             <h2>Create an event</h2>
-            <p className="hint">Time decided? Set the details and collect RSVPs.</p>
+            <p className="hint">Time decided? Set details and get RSVPs.</p>
           </div>
           <Icon name="arrow" size={18} />
         </Link>
@@ -37,7 +32,7 @@ export function GroupHome() {
           <span className="icon-tile"><Icon name="clock" /></span>
           <div>
             <h2>Find a common time</h2>
-            <p className="hint">Time undecided? Find when your group can meet.</p>
+            <p className="hint">Time undecided? Find a common time for the group.</p>
           </div>
           <Icon name="arrow" size={18} />
         </Link>
@@ -48,10 +43,7 @@ export function GroupHome() {
           {pending.map((poll) => <PollRow key={poll.id} poll={poll} />)}
         </section>
       )}
-      <div className="section-heading">
-        <h2>Upcoming events</h2>
-        <span className="hint">{data.events.length} {data.events.length === 1 ? "event" : "events"}</span>
-      </div>
+      <h2>Upcoming event</h2>
       {data.events.length === 0 && <p className="hint">No upcoming events.</p>}
       {data.events.map((event) => (
         <EventRow key={event.id} event={event} />
@@ -64,82 +56,47 @@ export function GroupHome() {
         </div>
         <Icon name="arrow" size={18} />
       </Link>
-      {data.admin && <Detection code={code} on={data.detection} />}
     </>
   );
 }
 
-/** Admins only: let AmIFree spot plans in ordinary group messages. */
-function Detection({ code, on: initial }: { code: string; on: boolean }) {
-  const [on, setOn] = useState(initial);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  async function change(next: boolean) {
-    setBusy(true);
-    setError("");
-    try {
-      setOn((await api.setDetection(code, next)).detection);
-      haptic("success");
-    } catch (err) {
-      haptic("error");
-      setError(refusal(err).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <section className="card">
-      <Switch
-        label="Spot plans in chat"
-        hint="AmIFree reads messages that mention a day and a time, once, and offers to make an event card. Text isn't stored. The group is told when this changes."
-        on={on}
-        busy={busy}
-        onChange={change}
-      />
-      {on && <p className="hint">AmIFree must be an admin of the group to see messages.</p>}
-      {error && <p className="error">{error}</p>}
-    </section>
-  );
-}
-
 function EventRow({ event }: { event: GroupEventSummary }) {
-  const { GOING } = event.counts;
+  const title = capitaliseFirst(event.title);
   return (
-    <Link className="card link event-row" to={`/e/${event.id}`}>
-      <div className="date-tile" aria-hidden="true">
-        <span>{month(event.start_at)}</span>
-        <strong>{dateNumber(event.start_at)}</strong>
-      </div>
+    <article className="card upcoming-card" aria-labelledby={`event-${event.id}-title`}>
+      <time className="date-tile" dateTime={event.start_at} aria-label={day(event.start_at)}>
+        <span aria-hidden="true">{month(event.start_at)}</span>
+        <strong aria-hidden="true">{dateNumber(event.start_at)}</strong>
+        <small className="date-weekday" aria-hidden="true">{weekday(event.start_at)}</small>
+      </time>
       <div className="event-content">
-        <div className="row between">
-          <h3>{event.title}</h3>
-          {event.my_status && <span className={`chip ${event.my_status.toLowerCase()}`}>{MINE[event.my_status]}</span>}
-        </div>
-        <p>
-          {day(event.start_at)} · {span(event.start_at, event.end_at)}
-          {event.location ? ` · ${event.location}` : ""}
-        </p>
-        <p className="hint">
-          {GOING} going
-          {event.recurring ? " · repeats" : ""}
-          {event.organiser ? " · you organise this" : ""}
-        </p>
+        <h3 id={`event-${event.id}-title`}>{title}</h3>
+        <p className="icon-label"><Icon name="clock" size={16} />{span(event.start_at, event.end_at)}</p>
+        <Link className="group-card-button secondary" to={`/e/${event.id}`} aria-label={`Check details for ${title}`}>
+          Check details
+        </Link>
       </div>
-      <Icon name="arrow" size={16} />
-    </Link>
+    </article>
   );
 }
 
 function PollRow({ poll }: { poll: GroupPoll }) {
+  const title = capitaliseFirst(poll.title);
+  const action = poll.status === "COLLECTING" ? "Add your availability" : "Choose a time";
   return (
-    <Link className="card link" to={`/poll/${poll.id}${poll.status === "COLLECTING" ? "/mine" : ""}`}>
-      <h3 className="icon-label"><Icon name="clock" size={18} />{poll.title}</h3>
-      <p className="hint">
-        {poll.joined} joined
-        {poll.status === "COLLECTING" && poll.deadline_at ? ` · reply by ${day(poll.deadline_at)}` : ""}
-      </p>
-      <p>{poll.status === "COLLECTING" ? "Add your availability ›" : "Choose a time to create the event ›"}</p>
-    </Link>
+    <article className="card pending-card" aria-labelledby={`poll-${poll.id}-title`}>
+      <h3 className="icon-label" id={`poll-${poll.id}-title`}><Icon name="calendar" size={18} />{title}</h3>
+      {poll.status === "COLLECTING" && poll.deadline_at && (
+        <p className="hint">Reply by {day(poll.deadline_at)}</p>
+      )}
+      <Link
+        className="group-card-button"
+        to={`/poll/${poll.id}${poll.status === "COLLECTING" ? "/mine" : ""}`}
+        aria-label={`${action} for ${title}`}
+      >
+        {action}
+      </Link>
+    </article>
   );
 }
 

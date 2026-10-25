@@ -29,7 +29,6 @@ log = logging.getLogger(__name__)
 GROUP_COMMANDS = {
     "stats",
     "export",
-    "detect",
     "attendance",
     "pro",
     "app",
@@ -333,6 +332,9 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             if not addressed_to_me(message.text, context.bot.username):
                 return  # /stats@OtherBot belongs to another bot in this group
             analytics.track("group_command", name=name[:32])
+            if name == "detect":
+                await send(update, [Reply("Spotting plans in chat is no longer supported.")])
+                return
             if name in ("event", "plan", "whosfree"):
                 await send(
                     update,
@@ -362,27 +364,8 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
                 result = await service.pro.status(update.effective_chat.id)
             elif name == "export":
                 result = await service.groups.export(user.id, update.effective_chat.id, args)
-            elif name == "detect":
-                result = await service.detection.command(
-                    user.id, update.effective_chat.id, args, await is_admin(context.bot, message)
-                )
         elif operation == "message":
-            # Ordinary group messages are dropped unless an admin switched detection on.
-            if message.from_user and message.from_user.is_bot:
-                return
-            try:
-                result = await service.detection.on_message(
-                    user.id,
-                    update.effective_chat.id,
-                    message.message_id,
-                    message.text or message.caption or "",
-                    message.date,
-                )
-                if result is not None:
-                    await deliver_group(update, service, result)
-            except Exception as exc:
-                # Never answer ordinary chatter with an error, and never ask Telegram to retry it.
-                log.warning("detection_message_failed error_type=%s", type(exc).__name__)
+            # Group chatter is never sent to extraction, including groups that opted in before.
             return
         else:
             return

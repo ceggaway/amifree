@@ -203,7 +203,7 @@ class GroupHub:
             "events": shown,
             "polls": polls,
             "admin": await self.admin_or_not(user, chat_id),
-            "detection": await self.scheduling.detection.enabled(chat_id),
+            "detection": False,
         }
 
     async def summary(self, user, event: GroupEvent) -> dict:
@@ -421,22 +421,9 @@ class GroupHub:
         return {"message": "📬 Sent the attendance file to your chat with AmIFree."}
 
     async def set_detection(self, user, chat_id: int, on: bool) -> dict:
-        """An admin switches event detection; the group is told, as with /detect."""
+        """Reject settings changes from older app versions."""
         await self.require_member(user, chat_id)
-        if not await self.is_admin(user, chat_id, fresh=True):
-            raise Refused("Only a group admin can change event detection.")
-        detection = self.scheduling.detection
-        if await detection.enabled(chat_id) != on:
-            result = await detection.command(
-                user.telegram_user_id, chat_id, "on" if on else "off", True
-            )
-            post = getattr(self.scheduling, "post_group_card", None)
-            if post and result.post:
-                try:
-                    await post(chat_id, result.post)
-                except (Forbidden, BadRequest):
-                    pass  # switched anyway; the bot just can't post there
-        return {"detection": on}
+        raise Refused("Spotting plans in chat is no longer supported.")
 
     # ---- find-a-time polls ----
 

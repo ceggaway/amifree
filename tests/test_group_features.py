@@ -139,7 +139,7 @@ async def test_still_coming_check_and_organiser_summary(service_factory):
         assert (await service.notifier.run())["queued"] == 0  # asked once
 
     labels = [b.text for row in outbox.replies[0][1].keyboard.inline_keyboard for b in row]
-    assert labels == ["Still coming", "Not sure", "Can't anymore"]
+    assert labels == ["Still coming", "Can't anymore"]
     data = {
         b.text: b.callback_data
         for row in outbox.replies[0][1].keyboard.inline_keyboard
@@ -147,13 +147,16 @@ async def test_still_coming_check_and_organiser_summary(service_factory):
     }
     yes = await service.callback(2, data["Still coming"])
     assert yes[0].text.startswith("✅ See you there") and yes[0].edit
-    await service.callback(3, data["Not sure"])
+    # "Not sure" on a message sent before it was removed asks for a clear answer again.
+    legacy = await service.callback(3, data["Still coming"].replace("c:y:", "c:u:"))
+    assert legacy[0].text.startswith("Are you still coming")
+    assert [b.text for row in legacy[0].keyboard.inline_keyboard for b in row] == labels
     drop = await service.callback(4, data["Can't anymore"])
     assert "marked Can't make it" in drop[0].text
     async with bot:
         await press(bot, taps["Status"], 1, 8620)
     assert alerts(transport)[-1]["text"] == (
-        "Going 3 · Can't 3\n1 confirmed · 1 unsure · 1 dropped · 1 no reply"
+        "Going 3 · Can't 3\n1 confirmed · 1 dropped · 2 no reply"
     )
     assert (await service.callback(9, data["Still coming"]))[0].text.startswith("That check isn't")
     linked = {e.user_id: e.status for e in repo.events.values() if e.group_event_id == event.id}

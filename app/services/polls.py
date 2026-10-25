@@ -18,7 +18,6 @@ from app.bot.keyboards import links_keyboard, poll_keyboard
 from app.bot.messages import Reply, clock
 from app.schemas.event import SG, EventDraft, Poll, Status
 from app.services.app_links import group_link
-from app.services.calendar_export import google_link
 from app.services.date_resolution import Clarification, resolve_date
 from app.services.group_events import GroupResult, parse_id
 from app.services.usual_times import covers
@@ -292,21 +291,17 @@ def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Rep
     return Reply(text, InlineKeyboardMarkup(rows))
 
 
-def announcement(event, free: int, of: int, ics_url: str | None, details_url: str) -> Reply:
-    """The public message once the organiser chooses: when it is, and add-to-calendar buttons."""
+def announcement(event, free: int, of: int) -> Reply:
+    """The public message once the organiser chooses: when it is. No buttons: everyone who
+    submitted their availability is already added, and can change their answer in /plans."""
     start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
-    text = (
-        f"📣 {event.title} is confirmed!\n"
-        f"🗓 {start:%a %-d %b %Y} · {start:%H:%M}–{end:%H:%M}\n"
-        f"✅ {free} of {of} who filled in are free then.\n\n"
-        "Add it to your calendar with a button below. Then tap Going or Can't so the"
-        " organiser knows who's coming, and you get a reminder the day before."
+    return Reply(
+        f"{event.title} is confirmed for {start:%a %-d %b %Y}, {start:%H:%M}–{end:%H:%M}.\n"
+        f"{free} of {of} people who submitted their availability are free at this time.\n\n"
+        "It has been added to the plans of everyone who submitted their availability, and to"
+        " their calendar if they have connected one. If you can no longer attend, update it in"
+        " /plans."
     )
-    calendars = [InlineKeyboardButton("📅 Google Calendar", url=google_link(event))]
-    if ics_url:
-        calendars.append(InlineKeyboardButton("🍎 Apple Calendar", url=ics_url))
-    rows = [calendars, [InlineKeyboardButton("✋ Going or Can't", url=details_url)]]
-    return Reply(text, InlineKeyboardMarkup(rows))
 
 
 class PollService:
@@ -521,18 +516,27 @@ class PollService:
         _, event = picked
         await self.scheduling.poll_changed(poll.id)
         if not event.message_id:
+            await self.add_participants(poll, event)
             settings = self.scheduling.settings
             details_url = settings.event_link(event.id)
             hub = self.scheduling.hub
             if details_url:
-                base = settings.app_base_url.rstrip("/")
-                ics_url = f"{base}/ics/event/{event.id}.ics" if base else None
-                await hub.post(poll.chat_id, announcement(event, free, of, ics_url, details_url))
+                await hub.post(poll.chat_id, announcement(event, free, of))
             else:
                 # Without the app there is no page for Going: post the usual card instead.
                 posted = await hub.post(poll.chat_id, await self.scheduling.groups.render(event))
                 await self.repo.set_group_message(event.id, posted)
         return event
+
+    async def add_participants(self, poll: Poll, event) -> None:
+        """Everyone who submitted their availability is marked Going, so the meeting is in their
+        plans and syncs to any calendar they connected. They can change it in /plans."""
+        for person in await self.repo.poll_participants(poll.id):
+            await self.repo.group_rsvp(person, event, Status.GOING)
+            user = await self.repo.get_user(person)
+            if user:
+                self.scheduling.google_sync_soon(user.telegram_user_id)
+        await self.scheduling.group_changed(event.id)
 
     async def choose_in_group(self, telegram_id: int, poll: Poll, extra: str) -> GroupResult:
         """An Option button on the results posted in the group. Only the organiser's tap counts."""

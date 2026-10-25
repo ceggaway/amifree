@@ -5,6 +5,7 @@ import { day, span } from "../format";
 import { confirm, haptic } from "../telegram";
 import type { PollDetail } from "../types";
 import { useLoad } from "../useLoad";
+import { ChooseTime } from "../components/ChooseTime";
 import { Heatmap } from "./Heatmap";
 
 /** A find-a-time poll: join, answer each suggested time, and (organisers) settle it. */
@@ -93,7 +94,7 @@ export function Poll() {
       {p.status === "OPEN" && (
         <p className="banner info">
           {p.organiser
-            ? "Results are in. Choose a suggested time, or any time from See all times below. It's posted in the group for everyone."
+            ? "Results are in. Confirm a suggested time, or choose your own below. It will be announced in the group."
             : "Results are in. The organiser is choosing the time, and it will be posted in the group."}
         </p>
       )}
@@ -130,9 +131,16 @@ export function Poll() {
         </section>
       )}
 
+      {p.organiser && p.status !== "CLOSED" && (
+        <section className="card organiser">
+          <h2>Choose a time yourself</h2>
+          <ChooseTime pollId={p.id} />
+        </section>
+      )}
+
       {p.joined_by_me && p.status !== "CLOSED" && (
-        <details open={p.organiser && p.status === "OPEN"}>
-          <summary>{p.organiser ? "See all times (tap one to choose it)" : "Who's free when"}</summary>
+        <details>
+          <summary>{p.organiser ? "See all times" : "Who's free when"}</summary>
           <Heatmap />
         </details>
       )}

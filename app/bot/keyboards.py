@@ -130,14 +130,12 @@ def poll_keyboard(poll: Poll, app_url: str | None = None) -> InlineKeyboardMarku
 
 
 def attendance_keyboard(event: GroupEvent) -> InlineKeyboardMarkup:
-    """The "still coming?" answers, sent privately the day before."""
+    """The "still coming?" answers, sent privately the day before: a clear yes or no."""
 
     def button(label, action):
         return InlineKeyboardButton(label, callback_data=f"c:{action}:{event.id}")
 
-    return InlineKeyboardMarkup(
-        [[button("Still coming", "y"), button("Not sure", "u"), button("Can't anymore", "n")]]
-    )
+    return InlineKeyboardMarkup([[button("Still coming", "y"), button("Can't anymore", "n")]])
 
 
 def suggestion_keyboard(suggestion_id: str) -> InlineKeyboardMarkup:

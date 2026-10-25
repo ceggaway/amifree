@@ -33,7 +33,7 @@ export function Heatmap() {
         <h2>{data.title}</h2>
         <p className="hint">
           {data.known} of {data.joined} members have a schedule AmIFree can read. At least{" "}
-          {data.min_known} are needed before the grid is shown, so it can't point at one person.
+          {data.min_known} are needed before the grid is shown.
         </p>
       </section>
     );

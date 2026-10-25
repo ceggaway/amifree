@@ -2,7 +2,8 @@
 
 Privacy rules, enforced here rather than left to the caller:
 - only people who joined (filled in their times, or tapped "Count me in") have their schedule read;
-- slots are suggested only once MIN_PARTICIPANTS have joined;
+- slots are suggested only once MIN_PARTICIPANTS have joined (with two, each can tell when the
+  other is free from the counts, but never why or with what);
 - the group sees counts per slot, never who is busy or what with.
 """
 
@@ -23,7 +24,8 @@ from app.services.group_events import GroupResult, parse_id
 from app.services.usual_times import covers
 
 log = logging.getLogger(__name__)
-MIN_PARTICIPANTS = 3
+# Two is enough for a pair to meet. With two, each sees when the other is free (never why).
+MIN_PARTICIPANTS = 2
 DAY_START, DAY_END, STEP = time(8), time(22), timedelta(minutes=30)
 USAGE = "Try: /whosfree project meeting 2h next week"
 ANSWERS = {"F": "FREE", "M": "MAYBE", "B": "BUSY"}
@@ -405,17 +407,16 @@ class PollService:
         people = await self.repo.poll_participants(poll.id)
         if len(people) < MIN_PARTICIPANTS:
             return None, (
-                f"{len(people)} joined so far. At least {MIN_PARTICIPANTS} are needed, so"
-                " nobody's schedule can be worked out from the result."
+                f"{len(people)} joined so far. At least {MIN_PARTICIPANTS} need to fill in their"
+                " availabilities before there is anything to compare."
             )
         spans = {person: await self.busy_spans(poll, person) for person in people}
         busy = {person: found for person, found in spans.items() if found is not None}
         if len(busy) < MIN_PARTICIPANTS:
             return None, (
                 f"{len(people)} joined, but only {len(busy)} have a schedule AmIFree can"
-                f" read. At least {MIN_PARTICIPANTS} are needed, so nobody's schedule can be"
-                " worked out from the result. Members can send their NUSMods or calendar link"
-                " to the bot."
+                f" read. At least {MIN_PARTICIPANTS} are needed. Members can fill in their"
+                " availabilities, or send their NUSMods or calendar link to the bot."
             )
         slots = suggest_slots(
             poll.window_start,

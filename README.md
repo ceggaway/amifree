@@ -24,7 +24,7 @@ NUSMods is optional. After Save or Going, the bot offers 📅 Google Calendar (a
 - The bot acts only on messages sent or forwarded to it in private, on commands, and on button taps. Telegram privacy mode stays on, so ordinary group messages are never delivered to it, unless a group admin makes the bot an admin and switches on `/detect on` (see below). `/event` reads only the one message it replies to.
 - Anything derived from a person's schedule in a group is returned as a callback alert that only the person who tapped can see. Group cards show counts, never names or reasons. The one exception is **Who's going?**, which lists the names of people who tapped Going (never Can't).
 - Names (`first_name`, `@username`) are kept per group, only for people who tapped something there, so Who's going? and the organiser's attendance export can show them. They are deleted with `/deletemydata` and with the person's record.
-- `/whosfree` reads a schedule only after that member taps Count me in, and suggests slots only once three people have joined.
+- `/whosfree` reads a schedule only after that member fills in their availabilities (or taps Count me in), and suggests times once two people have joined. With two, each can tell from the counts when the other is free, but never why.
 - Nudges and reminders go only to people who have used AmIFree; `/reminders off` stops summaries and nudges.
 - `/deletemydata` (alias `/delete`) removes the user's timetable, plans, busy blocks, poll answers, "still coming?" answers, check-ins, names, notification records and analytics. Group cards they organised stay for the other members, with no organiser attached.
 

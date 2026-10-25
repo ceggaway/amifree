@@ -456,43 +456,6 @@ def first_calendar_keyboard(finish_apple: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([*rows, *calendar_home_rows()[1:]])
 
 
-def google_share_steps(email: str) -> str:
-    return (
-        "📅 <b>Google Calendar</b> · 3 quick steps\n\n"
-        "<b>Step 1 of 3 · Share your calendar with me</b>\n"
-        "Do this on a computer (or your phone's browser in desktop mode).\n\n"
-        "1. Go to <b>calendar.google.com</b>.\n"
-        "2. Click the <b>⚙️</b> gear, then <b>Settings</b>.\n"
-        "3. Under <b>Settings for my calendars</b>, click your calendar.\n"
-        "4. Open <b>Share with specific people or groups</b>, then <b>Add people and "
-        "groups</b>.\n"
-        f"5. Paste this email: <code>{html.escape(email)}</code>\n"
-        "6. Set the permission to <b>Make changes (see private events as free/busy)</b>.\n"
-        "7. Click <b>Send</b>.\n\n"
-        "Then tap <b>Done</b> below.\n\n"
-        "🔒 I only read your busy times, and only change events I add. To stop: remove AmIFree "
-        "from <b>Shared with</b>, or tap Remove in /calendar."
-    )
-
-
-def google_share_steps_phone(email: str) -> str:
-    return (
-        "📅 <b>Google Calendar</b> · 3 quick steps\n\n"
-        "<b>Step 1 of 3 · Share your calendar with me</b>\n"
-        "Do this in the Google Calendar app on your phone.\n\n"
-        "1. Open <b>Google Calendar</b>, tap <b>☰</b> (top left).\n"
-        "2. Tap <b>Settings</b>.\n"
-        "3. Tap your calendar — <b>My calendar</b>, or the one to check.\n"
-        "4. Tap <b>Shared with</b>, then <b>Add people or groups</b>.\n"
-        f"5. Paste this email: <code>{html.escape(email)}</code>\n"
-        "6. Set the permission to <b>Make changes (see private events as free/busy)</b>.\n"
-        "7. Tap <b>Save</b>.\n\n"
-        "Then tap <b>Done</b> below.\n\n"
-        "🔒 I only read your busy times, and only change events I add. To stop: remove AmIFree "
-        "from <b>Shared with</b>, or tap Remove in /calendar."
-    )
-
-
 PHOTOS_CAPTION = "Swipe through the pictures: the red marks show where to tap."
 
 # Guide name -> (folder under app/assets, pictures in order).
@@ -514,58 +477,95 @@ def screen_photos(name: str) -> tuple[bytes, ...]:
         return ()
 
 
-GOOGLE_PHOTOS_CAPTION = "Swipe through the pictures: the red box shows what to click in each step."
+# Google step 1 (sharing), one small step per message, each with the picture of that
+# screen. {email} is AmIFree's Google account, shown in <code> so a tap copies it.
+GOOGLE_STEPS = {
+    "phone": (
+        "google_phone",
+        (
+            (
+                "gphone_step1.png",
+                "Open the <b>Google Calendar</b> app and tap <b>☰</b> (top left).",
+            ),
+            ("gphone_step2.png", "Scroll down and tap <b>Settings</b>."),
+            (
+                "gphone_step3.png",
+                "Tap your calendar (usually <b>My calendar</b>), then <b>Shared with</b>.",
+            ),
+            (
+                "gphone_step4.png",
+                "Tap <b>Add people or groups</b> and paste this email (tap it to copy):\n"
+                "<code>{email}</code>",
+            ),
+            (
+                "gphone_step5.png",
+                "Set the permission to <b>Make changes (see private events as free/busy)</b>, "
+                "then tap <b>Save</b>.\n\n"
+                "🔒 I only read your busy times, and only change events I add.",
+            ),
+        ),
+    ),
+    "computer": (
+        "google",
+        (
+            (
+                "step1_gear.png",
+                "On a computer, go to <b>calendar.google.com</b> and click the <b>⚙️ gear</b> "
+                "(top right).",
+            ),
+            ("step2_settings.png", "Click <b>Settings</b>."),
+            (
+                "step3_calendar.png",
+                "Under <b>Settings for my calendars</b> on the left, click your calendar.",
+            ),
+            (
+                "step4_add.png",
+                "Scroll to <b>Share with specific people or groups</b> and click "
+                "<b>Add people and groups</b>.",
+            ),
+            (
+                "step5_dialog.png",
+                "Paste this email (tap it to copy):\n<code>{email}</code>\n"
+                "Set the permission to <b>Make changes (see private events as free/busy)</b>, "
+                "then click <b>Send</b>.\n\n"
+                "🔒 I only read your busy times, and only change events I add.",
+            ),
+        ),
+    ),
+}
+GOOGLE_STEP1 = "📅 <b>Google Calendar · Step 1 of 3 · Share your calendar with me</b>\n"
 
-GOOGLE_PHOTO_FILES = (
-    "step1_gear.png",
-    "step2_settings.png",
-    "step3_calendar.png",
-    "step4_add.png",
-    "step5_dialog.png",
-)
 
-
-def google_share_photos() -> tuple[bytes, ...]:
-    """The annotated screenshots, in order. Empty if they can't be read: the steps still work."""
-    folder = Path(__file__).resolve().parent.parent / "assets" / "google"
+def google_step(
+    email: str, device: str = "phone", n: int = 1
+) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
+    """One part of Google step 1: its text, its picture (None if it can't be read), buttons."""
+    folder, steps = GOOGLE_STEPS[device]
+    picture, body = steps[n - 1]
+    text = GOOGLE_STEP1 + f"<b>{n} of {len(steps)}</b> · " + body.format(email=html.escape(email))
+    if n == len(steps):
+        text += "\n\nThen tap <b>Done</b> below."
     try:
-        return tuple((folder / name).read_bytes() for name in GOOGLE_PHOTO_FILES)
+        photo = (Path(__file__).resolve().parent.parent / "assets" / folder / picture).read_bytes()
     except OSError:
-        return ()
-
-
-GOOGLE_PHONE_PHOTO_FILES = (
-    "gphone_step1.png",
-    "gphone_step2.png",
-    "gphone_step3.png",
-    "gphone_step4.png",
-    "gphone_step5.png",
-)
-
-
-def google_phone_photos() -> tuple[bytes, ...]:
-    """The phone share screenshots, in order. Empty if they can't be read: the steps still work."""
-    folder = Path(__file__).resolve().parent.parent / "assets" / "google_phone"
-    try:
-        return tuple((folder / name).read_bytes() for name in GOOGLE_PHONE_PHOTO_FILES)
-    except OSError:
-        return ()
-
-
-def google_steps_keyboard(phone: bool = False) -> InlineKeyboardMarkup:
-    switch = (
-        InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")
-        if phone
-        else InlineKeyboardButton("📱 On my phone instead?", callback_data="gcal:start")
-    )
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")],
-            [InlineKeyboardButton("Open Google Calendar ↗", url=GOOGLE_CALENDAR_URL)],
-            [switch],
-            [_button("« Other calendars", "calendar")],
-        ]
-    )
+        photo = None
+    nav = []
+    if n > 1:
+        nav.append(InlineKeyboardButton("‹ Back", callback_data=f"gs:{device}:{n - 1}"))
+    if n < len(steps):
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"gs:{device}:{n + 1}"))
+    rows = [nav] if nav else []
+    if n == len(steps):
+        rows.insert(0, [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")])
+    if n == 1:
+        rows.append([InlineKeyboardButton("Open Google Calendar ↗", url=GOOGLE_CALENDAR_URL)])
+        rows.append(
+            [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
+            if device == "phone"
+            else [InlineKeyboardButton("📱 On my phone instead?", callback_data="gcal:start")]
+        )
+        rows.append([_button("« Other calendars", "calendar")])
+    return text, photo, InlineKeyboardMarkup(rows)
 
 
 GOOGLE_CALENDAR_URL = "https://calendar.google.com/calendar/r/settings"

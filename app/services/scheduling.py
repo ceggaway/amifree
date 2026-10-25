@@ -2083,6 +2083,13 @@ class SchedulingService:
             if name == "appleskip":
                 return [Reply(onboarding.APPLE_SKIPPED, edit=True, clear_album_group="setup")]
             return self.setup_screen(name)
+        if action == "gs":
+            steps = onboarding.GOOGLE_STEPS.get(parts[1] if len(parts) == 3 else "")
+            if not self.google_sync.enabled:
+                return [Reply("Google sharing isn't available right now.")]
+            if not steps or parts[2] not in [str(n) for n in range(1, len(steps[1]) + 1)]:
+                return [Reply("That button isn't valid. Use /calendar.")]
+            return self.google_sync.steps(parts[1] == "phone", int(parts[2]))
         if action == "a2":
             steps = onboarding.APPLE_STEPS.get(parts[1] if len(parts) == 3 else "")
             if not steps or parts[2] not in [str(n) for n in range(1, len(steps) + 1)]:

@@ -584,11 +584,12 @@ def google_step(
     if n == len(steps):
         rows.insert(0, [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")])
     if n == 1:
-        if device == "computer":
-            # The text says to go to calendar.google.com, so the button goes exactly there.
-            rows.append(
-                [InlineKeyboardButton("Open calendar.google.com ↗", url=GOOGLE_CALENDAR_URL)]
-            )
+        # Each button opens what its text says. Telegram buttons only take web links, so the
+        # phone one is Google's address, which phones hand to the app when it's installed.
+        label = (
+            "📅 Open Google Calendar app ↗" if device == "phone" else "Open calendar.google.com ↗"
+        )
+        rows.append([InlineKeyboardButton(label, url=GOOGLE_CALENDAR_URL)])
         rows.append(
             [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
             if device == "phone"

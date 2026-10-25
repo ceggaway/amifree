@@ -270,7 +270,7 @@ async def test_calendar_offers_nusmods_setup_and_updates_after_onboarding(
         assert "update your timetable" in status.text
     else:
         assert "Add your classes" in status.text
-    assert "📤 Plans in my calendar app" in labels(status)
+    assert "📤 Plans in my calendar app" not in labels(status)
     guide = (await service.callback(1, tap(status, "📚 Add or update NUSMods")))[0]
     assert guide.edit and guide.parse_mode == "HTML"
     assert "Share/Sync" in guide.text and "Paste the link into this chat" in guide.text

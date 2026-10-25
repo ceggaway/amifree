@@ -345,23 +345,28 @@ def free_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def personal_calendars_keyboard(calendars) -> InlineKeyboardMarkup:
+def personal_calendars_keyboard(calendars, feed: bool = False) -> InlineKeyboardMarkup:
     """One Remove button per connected calendar, then help adding another."""
     rows = [
         [InlineKeyboardButton(f"Remove {c.label[:30]}", callback_data=f"pcal:rm:{c.id}")]
         for c in calendars
     ]
-    rows += calendar_home_rows()
+    rows += calendar_home_rows(feed)
     return InlineKeyboardMarkup(rows)
 
 
-def calendar_home_rows():
-    """Connect a calendar, add classes, or send plans to a calendar app."""
-    return [
+def calendar_home_rows(feed: bool = False):
+    """Connect a calendar, add classes, and once the AmIFree calendar exists, its link and
+    settings (New link, Turn off). Setting it up is part of Apple setup, not a button here."""
+    rows = [
         [InlineKeyboardButton("➕ Add a calendar", callback_data="setup:calendar")],
         [InlineKeyboardButton("📚 Add or update NUSMods", callback_data="setup:nusmods")],
-        [InlineKeyboardButton("📤 Plans in my calendar app", callback_data="cal:feed")],
     ]
+    if feed:
+        rows.append(
+            [InlineKeyboardButton("🍎 AmIFree calendar settings", callback_data="cal:feed")]
+        )
+    return rows
 
 
 def calendar_keyboard(event: Event, google_url: str) -> InlineKeyboardMarkup:

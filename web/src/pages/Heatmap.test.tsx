@@ -20,7 +20,7 @@ const base: HeatmapData = {
   duration_minutes: 120,
   joined: 4,
   known: 4,
-  min_known: 3,
+  min_known: 2,
   ready: true,
   max_free: 4,
   days: [

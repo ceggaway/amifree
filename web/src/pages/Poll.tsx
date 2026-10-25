@@ -93,7 +93,7 @@ export function Poll() {
       {p.status === "OPEN" && (
         <p className="banner info">
           {p.organiser
-            ? "Results are in. Choose the time that works, and it's posted in the group for everyone."
+            ? "Results are in. Choose a suggested time, or any time from See all times below. It's posted in the group for everyone."
             : "Results are in. The organiser is choosing the time, and it will be posted in the group."}
         </p>
       )}
@@ -131,8 +131,8 @@ export function Poll() {
       )}
 
       {p.joined_by_me && p.status !== "CLOSED" && (
-        <details>
-          <summary>Who's free when</summary>
+        <details open={p.organiser && p.status === "OPEN"}>
+          <summary>{p.organiser ? "See all times (tap one to choose it)" : "Who's free when"}</summary>
           <Heatmap />
         </details>
       )}

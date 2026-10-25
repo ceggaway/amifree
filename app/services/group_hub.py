@@ -524,6 +524,11 @@ class GroupHub:
             raise Refused("This poll is closed.")
         return {"event_id": event.id}
 
+    async def poll_pick_time(self, user, poll, start: datetime) -> dict:
+        """The organiser chooses any time from the heatmap, not only a suggested one."""
+        event = await self.scheduling.polls.finalize_at(user, poll, start)
+        return {"event_id": event.id}
+
     async def poll_nudge(self, user, poll) -> dict:
         if poll.status == "CLOSED":
             raise Refused("This poll is closed, so there's nobody to nudge.")

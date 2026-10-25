@@ -260,7 +260,11 @@ def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Rep
     text = (
         f"📊 Results for {poll.title} ({length_text(poll.duration_minutes)})\n"
         f"{joined} {'person' if joined == 1 else 'people'} filled in their availabilities.\n\n"
-        "Best times:\n" + "\n".join(lines) + missing + "\n\nTap a time to confirm it. I'll post"
+        "Best times:\n"
+        + "\n".join(lines)
+        + missing
+        + "\n\nTap a time to confirm it, or open 📱 See all"
+        " times to choose any other time. I'll post"
         " it in the group so everyone can add it to their calendar."
     )
     rows = [
@@ -274,14 +278,13 @@ def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Rep
     return Reply(text, InlineKeyboardMarkup(rows))
 
 
-def announcement(poll: Poll, index: int, event, ics_url: str | None, details_url: str) -> Reply:
+def announcement(event, free: int, of: int, ics_url: str | None, details_url: str) -> Reply:
     """The public message once the organiser chooses: when it is, and add-to-calendar buttons."""
-    slot = poll.slots[index]
     start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
     text = (
         f"📣 {event.title} is confirmed!\n"
         f"🗓 {start:%a %-d %b %Y} · {start:%H:%M}–{end:%H:%M}\n"
-        f"✅ {slot['free']} of {slot.get('of', slot['free'])} who filled in are free then.\n\n"
+        f"✅ {free} of {of} who filled in are free then.\n\n"
         "Add it to your calendar with a button below. Then tap Going or Can't so the"
         " organiser knows who's coming, and you get a reminder the day before."
     )
@@ -444,9 +447,64 @@ class PollService:
             log.info("poll_report_undelivered poll_id=%s", poll.id)
 
     async def finalize(self, user, poll: Poll, index: int):
-        """The organiser's choice: close the poll, make the event and announce it in the group.
-        None if the poll was already closed."""
-        picked = await self.pick(user, poll, index)
+        """The organiser's choice of a suggested time: close the poll, make the event and
+        announce it in the group. None if the poll was already closed."""
+        slot = poll.slots[index]
+        return await self._finalize(
+            user, poll, slot_draft(poll, index), slot["free"], slot.get("of", slot["free"])
+        )
+
+    async def finalize_at(self, user, poll: Poll, start: datetime):
+        """The organiser's own choice of any time on the heatmap. Raises Refused with the reason
+        when the meeting can't start then."""
+        from app.services.group_hub import Refused
+
+        if poll.creator_user_id != user.id:
+            raise Refused("Only the organiser can choose the time.")
+        if poll.status == "CLOSED":
+            raise Refused("This poll is closed.")
+        start = start.astimezone(SG)
+        end = start + timedelta(minutes=poll.duration_minutes)
+        if start.minute % 30 or start.second or start.microsecond:
+            raise Refused("Choose a time on the hour or half hour.")
+        if start < self.scheduling.clock():
+            raise Refused("That time has already passed.")
+        if start < poll.window_start or end > poll.window_end:
+            raise Refused("That time is outside the days this poll checks.")
+        if start.time() < DAY_START or end > datetime.combine(start.date(), DAY_END, SG):
+            raise Refused(
+                f"A {length_text(poll.duration_minutes)} meeting starting then would not end by"
+                f" {DAY_END:%H:%M}."
+            )
+        people = await self.repo.poll_participants(poll.id)
+        spans = {person: await self.busy_spans(poll, person) for person in people}
+        busy = {person: found for person, found in spans.items() if found is not None}
+        if len(busy) < MIN_PARTICIPANTS:
+            raise Refused(
+                f"At least {MIN_PARTICIPANTS} people need to fill in their availabilities first."
+            )
+        free = sum(not clashes(found, start, end) for found in busy.values())
+        if poll.status == "COLLECTING":
+            # Results weren't out yet: open the poll on this one time, then close it on it.
+            slot = {
+                "start_at": start.isoformat(),
+                "end_at": end.isoformat(),
+                "free": free,
+                "of": len(busy),
+                "unknown": len(people) - len(busy),
+            }
+            opened = await self.repo.poll_open(poll.id, user.id, [slot])
+            if not opened:
+                raise Refused("This poll just changed. Refresh and try again.")
+            poll = opened
+        draft = EventDraft(title=poll.title, start_at=start, end_at=end)
+        event = await self._finalize(user, poll, draft, free, len(busy))
+        if not event:
+            raise Refused("This poll is closed.")
+        return event
+
+    async def _finalize(self, user, poll: Poll, draft: EventDraft, free: int, of: int):
+        picked = await self.close_on(user, poll, draft)
         if not picked:
             return None
         _, event = picked
@@ -458,7 +516,7 @@ class PollService:
             if details_url:
                 base = settings.app_base_url.rstrip("/")
                 ics_url = f"{base}/ics/event/{event.id}.ics" if base else None
-                await hub.post(poll.chat_id, announcement(poll, index, event, ics_url, details_url))
+                await hub.post(poll.chat_id, announcement(event, free, of, ics_url, details_url))
             else:
                 # Without the app there is no page for Going: post the usual card instead.
                 posted = await hub.post(poll.chat_id, await self.scheduling.groups.render(event))
@@ -601,6 +659,8 @@ class PollService:
             "joined": len(people),
             "known": len(busy),
             "min_known": MIN_PARTICIPANTS,
+            "status": poll.status,
+            "organiser": poll.creator_user_id == user_id,
         }
         if len(busy) < MIN_PARTICIPANTS:
             return base | {"ready": False, "days": [], "max_free": 0}
@@ -620,6 +680,10 @@ class PollService:
 
     async def pick(self, user, poll: Poll, index: int) -> tuple[Poll, object] | None:
         """Close the poll on one slot and make its event (not yet posted). None if closed."""
+        return await self.close_on(user, poll, slot_draft(poll, index))
+
+    async def close_on(self, user, poll: Poll, draft: EventDraft) -> tuple[Poll, object] | None:
+        """Close the poll on one time and make its event (not yet posted). None if closed."""
         closed = await self.repo.poll_close(poll.id, user.id)
         if not closed:
             return None
@@ -628,7 +692,7 @@ class PollService:
             user.id,
             poll.chat_id,
             poll.message_id or poll.source_message_id,
-            slot_draft(poll, index),
+            draft,
         )
         return closed, event
 

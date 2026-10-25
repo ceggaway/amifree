@@ -62,6 +62,15 @@ export function MyTimes() {
     setGrid(paint(grid, new Set([start]), state));
   }
 
+  // Touch: the browser only reports the cell where the finger first landed, so find the cell
+  // under the finger as it moves.
+  function move(e: React.PointerEvent) {
+    if (!drag.current || e.pointerType === "mouse") return;
+    const target = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-start]");
+    const start = target?.getAttribute("data-start");
+    if (start) over(start);
+  }
+
   function over(start: string) {
     const current = drag.current;
     if (!grid || !current || current.seen.has(start)) return;
@@ -90,17 +99,31 @@ export function MyTimes() {
       <h2>{grid.title}</h2>
       <p className="hint">
         {grid.known
-          ? "We've blocked the times you're busy. Untick any other times that don't work."
-          : "We don't have your schedule yet, so tap the times you're free."}{" "}
-        The group only sees how many people are free, not who.
+          ? "Blue times are when you're free, filled in from your schedule. Tap a time that doesn't work to clear it."
+          : "Tap each time you're free. It turns blue."}{" "}
+        Tap again to undo. The group only sees how many people are free, not who.
       </p>
+      <div className="grid-legend" aria-hidden="true">
+        <span><i className="swatch free">✓</i> Free</span>
+        <span><i className="swatch off" /> Not free</span>
+        <span><i className="swatch busy" /> Busy in your calendar</span>
+      </div>
       {grid.from_usual && !grid.submitted && (
         <p className="banner info">Pre-filled from your usual times. Change them with /usual in the bot.</p>
       )}
-      <label className="hint">
-        <input type="checkbox" checked={paintMode} onChange={(e) => setPaintMode(e.target.checked)} /> Paint mode:
-        drag across cells to tick or untick many at once (turns off swiping)
-      </label>
+      <button
+        type="button"
+        className={`chip-button${paintMode ? " on" : ""}`}
+        aria-pressed={paintMode}
+        onClick={() => setPaintMode((on) => !on)}
+      >
+        {paintMode ? "Drag to select: on" : "Drag to select: off"}
+      </button>
+      <p className="hint">
+        {paintMode
+          ? "Drag your finger across times to mark many at once. Turn this off to scroll the grid."
+          : "Turn on to mark many times with one drag."}
+      </p>
       <div
         className={`heat-scroll${paintMode ? " painting" : ""}`}
         onPointerUp={() => {
@@ -108,6 +131,7 @@ export function MyTimes() {
           // The click that follows a paint is skipped; forget the flag if no click arrives.
           setTimeout(() => (painted.current = false), 0);
         }}
+        onPointerMove={move}
         onPointerLeave={() => (drag.current = null)}
         onPointerCancel={() => (drag.current = null)}
       >
@@ -128,7 +152,7 @@ export function MyTimes() {
         </div>
       </div>
       <p className="hint" aria-live="polite">
-        {status || `${count} half hours ticked.`}
+        {status || `${count} half hours marked free.`}
       </p>
       <button type="button" className="on" disabled={saving} onClick={save}>
         {saving ? "Saving…" : grid.submitted ? "Update my times" : "Submit my times"}

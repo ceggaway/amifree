@@ -188,9 +188,11 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
       duration_minutes: 120,
       joined: 6,
       known: 6,
-      min_known: 3,
+      min_known: 2,
       ready: true,
       max_free: 6,
+      status: "OPEN",
+      organiser: true,
       days: [1, 2, 3, 4].map((offset) => {
         const d = day(offset);
         return {

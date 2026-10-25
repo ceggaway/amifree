@@ -504,3 +504,40 @@ async def test_the_attendance_file_cannot_be_spammed(hub, reference):
         for _ in range(6)
     ]
     assert codes == [200] * 5 + [409] and len(sent) == 5
+
+
+async def test_organiser_picks_any_time_through_the_api(hub, reference):
+    client, service, repo, posted, members = hub
+    await with_schedule(repo, 1, 2, 3)
+    first = reference.date() + timedelta(days=1)
+    form = {
+        "request_id": str(uuid.uuid4()),
+        "title": "Sync",
+        "minutes": 60,
+        "first": str(first),
+        "last": str(first + timedelta(days=1)),
+    }
+    poll_id = (await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)).json()[
+        "id"
+    ]
+    page = f"/api/polls/{poll_id}"
+    for member in (1, 2, 3):
+        await client.post(f"{page}/join", headers=bearer(member))
+    seen = (await client.get(f"{page}/heatmap", headers=bearer(1))).json()
+    assert (
+        seen["organiser"]
+        and not (await client.get(f"{page}/heatmap", headers=bearer(2))).json()["organiser"]
+    )
+    start = f"{first}T18:00:00+08:00"
+    assert (
+        await client.post(f"{page}/pick-time", headers=bearer(2), json={"start_at": start})
+    ).status_code == 409
+    bad = await client.post(
+        f"{page}/pick-time", headers=bearer(1), json={"start_at": f"{first}T18:00:00"}
+    )
+    assert bad.status_code == 422  # a time without its timezone is refused
+    picked = await client.post(f"{page}/pick-time", headers=bearer(1), json={"start_at": start})
+    assert picked.status_code == 200
+    event = repo.group_events[picked.json()["event_id"]]
+    assert event.start_at.isoformat() == start and repo.polls[poll_id].status == "CLOSED"
+    assert posted[-1][1].text.startswith("📣 Sync is confirmed!")

@@ -52,6 +52,8 @@ export type Heatmap = {
   ready: boolean;
   max_free: number;
   days: HeatmapDay[];
+  status: "COLLECTING" | "OPEN" | "CLOSED";
+  organiser: boolean;
 };
 
 export type CellState = "busy" | "free" | "off";

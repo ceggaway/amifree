@@ -83,20 +83,24 @@ def last_card(transport):
     return [p for name, p in transport.calls if name == "editMessageText"][-1]
 
 
-async def test_slots_need_three_opt_ins_and_the_organiser(service_factory):
+async def test_slots_need_two_people_and_the_organiser(service_factory):
     service, repo = service_factory()
-    bot, transport, card, taps, poll = await run_poll(service, repo, joiners=(2,))
+    bot, transport, card, taps, poll = await run_poll(service, repo, joiners=())
     assert "Who's free? project meeting (2h)" in card["text"] and "Joined: 1" in card["text"]
     assert poll.message_id == 101
     async with bot:
-        # A second tap by the same member does not count twice.
-        await bot.process_update(Update.de_json(group_tap(taps["✋ Count me in"], 2), bot.bot))
-        assert "Joined: 2" in last_card(transport)["text"]
         suggest = taps["Suggest slots (organiser)"]
+        # The organiser alone has nobody to compare with.
+        await bot.process_update(Update.de_json(group_tap(suggest, 1, update_id=8099), bot.bot))
+        assert "At least 2 need to fill in" in alerts(transport)[-1]["text"]
+        # A second tap by the same member does not count twice.
+        for update_id in (8001, 8002):
+            await bot.process_update(
+                Update.de_json(group_tap(taps["✋ Count me in"], 2, update_id=update_id), bot.bot)
+            )
+        assert "Joined: 2" in last_card(transport)["text"]
         await bot.process_update(Update.de_json(group_tap(suggest, 2, update_id=8100), bot.bot))
         assert "Only the organiser" in alerts(transport)[-1]["text"]
-        await bot.process_update(Update.de_json(group_tap(suggest, 1, update_id=8101), bot.bot))
-        assert "At least 3 are needed" in alerts(transport)[-1]["text"]
         # Old vote buttons do nothing until results are out.
         await bot.process_update(
             Update.de_json(group_tap(f"p:v:{poll.id}:0F", 2, update_id=8102), bot.bot)
@@ -240,15 +244,15 @@ async def test_members_with_no_schedule_are_never_counted_as_free(service_factor
     assert repo.polls[poll.id].slots[0]["of"] == 3 and repo.polls[poll.id].slots[0]["unknown"] == 1
 
 
-async def test_slots_need_three_members_with_a_schedule(service_factory):
+async def test_slots_need_two_members_with_a_schedule(service_factory):
     service, repo = service_factory()
-    await with_schedule(repo, 1, 2)  # joiner 3 has no timetable, calendar or blocks
-    bot, transport, _, taps, poll = await run_poll(service, repo, joiners=(2, 3))
+    await with_schedule(repo, 1)  # joiner 2 has no timetable, calendar or blocks
+    bot, transport, _, taps, poll = await run_poll(service, repo, joiners=(2,))
     async with bot:
         await bot.process_update(
             Update.de_json(group_tap(taps["Suggest slots (organiser)"], 1, update_id=8400), bot.bot)
         )
-        assert "only 2 have a schedule" in alerts(transport)[-1]["text"]
+        assert "only 1 have a schedule" in alerts(transport)[-1]["text"]
     assert repo.polls[poll.id].status == "COLLECTING" and repo.polls[poll.id].slots == []
 
 
@@ -264,3 +268,66 @@ async def test_old_fill_buttons_no_longer_vote(service_factory):
         await bot.process_update(Update.de_json(group_tap(fill, 4, update_id=8501), bot.bot))
         assert "organiser is choosing" in alerts(transport)[-1]["text"]
     assert not repo.poll_votes
+
+
+async def test_organiser_can_choose_any_time_from_the_heatmap(service_factory):
+    from app.services.group_hub import Refused
+
+    service, repo = service_factory(
+        bot_username="AmIFreeBot",
+        mini_app_short_name="free",
+        app_base_url="https://amifree.example",
+    )
+    await with_schedule(repo, 1, 2, 3)
+    bot, transport = make_bot(service)
+    async with bot:
+        await bot.process_update(
+            Update.de_json(group_message("/whosfree project meeting 2h tomorrow", 30, 1), bot.bot)
+        )
+    poll = next(iter(repo.polls.values()))
+    for member in (2, 3):
+        await repo.poll_join(poll.id, (await repo.ensure_user(member)).id)
+    organiser, member = await repo.ensure_user(1), await repo.ensure_user(2)
+    late = datetime(2026, 10, 5, 19, 30, tzinfo=SG)
+    # Only the organiser, never in the past, and the 2h meeting must end by 22:00.
+    for who, start, reason in (
+        (member, late, "Only the organiser"),
+        (organiser, datetime(2026, 10, 4, 9, tzinfo=SG), "already passed"),
+        (organiser, datetime(2026, 10, 5, 20, 30, tzinfo=SG), "would not end by 22:00"),
+        (organiser, datetime(2026, 10, 5, 19, 15, tzinfo=SG), "hour or half hour"),
+    ):
+        try:
+            await service.polls.finalize_at(who, repo.polls[poll.id], start)
+        except Refused as refused:
+            assert reason in str(refused)
+        else:
+            raise AssertionError(f"{start} was not refused")
+    assert repo.polls[poll.id].status == "COLLECTING"
+    # Before results are out, the organiser can still choose straight from the heatmap.
+    sent_before = len(transport.sent)
+    async with bot:
+        event = await service.polls.finalize_at(organiser, repo.polls[poll.id], late)
+    assert repo.polls[poll.id].status == "CLOSED"
+    assert event.start_at == late and event.end_at == datetime(2026, 10, 5, 21, 30, tzinfo=SG)
+    announced = transport.sent[sent_before]
+    assert int(announced["chat_id"]) == CHAT
+    assert "🗓 Mon 5 Oct 2026 · 19:30–21:30" in announced["text"]
+    assert "3 of 3 who filled in are free then" in announced["text"]
+    # A second choice changes nothing.
+    try:
+        await service.polls.finalize_at(organiser, repo.polls[poll.id], late)
+    except Refused as refused:
+        assert "closed" in str(refused)
+    assert len(repo.group_events) == 1
+
+
+async def test_two_people_get_suggested_times(service_factory):
+    service, repo = service_factory()
+    await with_schedule(repo, 1, 2)
+    bot, transport, _, taps, poll = await run_poll(service, repo, joiners=(2,))
+    async with bot:
+        await bot.process_update(
+            Update.de_json(group_tap(taps["Suggest slots (organiser)"], 1, update_id=8600), bot.bot)
+        )
+    assert repo.polls[poll.id].status == "OPEN" and repo.polls[poll.id].slots
+    assert "2 people filled in their availabilities" in private_to(transport, 1)[-1]["text"]

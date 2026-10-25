@@ -2,6 +2,7 @@ from datetime import timedelta
 
 import pytest
 
+from app.bot import onboarding
 from app.models.timetable import BusyBlock
 from app.schemas.event import Status
 from app.services.scheduling import SchedulingService
@@ -203,7 +204,9 @@ async def test_new_user_saves_without_nusmods(service_factory, reference):
     add = card.keyboard.inline_keyboard[0][0]
     assert add.text == "Add to plans"
     added = await service.callback(1, add.callback_data)
-    assert len(added) == 1 and added[0].edit  # the tapped card is updated in place
+    assert added[0].edit  # the tapped card is updated in place
+    # The first kept plan offers calendar setup once, as its own message.
+    assert len(added) == 2 and added[1].text == onboarding.CALENDAR_PROMPT
     assert "Added to your plans" in added[0].text
     # Export controls explain the one-off add and how to enable future syncing.
     assert "connect calendar syncing through /calendar" in added[0].text

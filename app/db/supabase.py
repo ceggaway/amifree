@@ -1080,6 +1080,18 @@ class SupabaseRepository:
             .execute()
         )
 
+    async def count_actions(self, user_id: str, kind: str, limit: int = 10) -> int:
+        """How many times this happened to the user, counting up to limit."""
+        rows = (
+            await self.client.table("user_actions")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("action_type", kind)
+            .limit(limit)
+            .execute()
+        ).data
+        return len(rows)
+
     async def extraction(self, user_id: str, text: str, data: dict, state: str):
         await (
             self.client.table("event_extractions")

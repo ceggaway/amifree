@@ -60,7 +60,7 @@ from app.schemas.event import (
     GroupEvent,
     Status,
 )
-from app.services import analytics, quick_reminders
+from app.services import analytics, calendar_export, quick_reminders
 from app.services.availability import check_availability
 from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
@@ -186,12 +186,6 @@ def decided_card(event: Event, availability, note: str, user: User) -> Reply:
     if not event.group_event_id:
         card.edit = True
         return card
-    if (
-        event.status in (Status.SAVED, Status.GOING)
-        and not user.calendar_feed_token
-        and not user.google_connected
-    ):
-        note += "\nTip: /calendar puts every plan in your iPhone calendar automatically."
     return Reply(f"{card.text}\n{note}", card.keyboard, edit=True, parse_mode=card.parse_mode)
 
 
@@ -971,6 +965,13 @@ class SchedulingService:
             # A bare link that is neither NUSMods nor a calendar: say so, don't ask the LLM.
             return [Reply(onboarding.NOT_A_SCHEDULE_LINK, onboarding.link_help_keyboard())]
         pending = user.pending
+        if pending and pending["stage"] == "gcal_email":
+            # Google setup step 2 asked for an email. Something email-like that isn't one gets
+            # asked again; anything else is an ordinary message and closes the question.
+            if "@" in text and " " not in text.strip():
+                return [Reply(onboarding.GOOGLE_EMAIL_AGAIN)]
+            await self.repo.set_pending(user.id, None)
+            user.pending = pending = None
         if pending and pending["stage"] == "gcal_code":
             if re.fullmatch(r"\s*\d{4,8}\s*", text):
                 return await self.google_sync.verify(user, pending, text)
@@ -1591,17 +1592,113 @@ class SchedulingService:
         """/calendar: AmIFree → your calendar (feed), then your calendar → AmIFree (busy)."""
         return [await self.personal_calendar_status(user, intro)]
 
+    def setup_screen(self, name: str, lead: str = "") -> list[Reply]:
+        """One setup screen, edited in place, with its picture guide when it has one."""
+        found = onboarding.screen(name)
+        if found is None:
+            return [Reply("That button isn't valid. Send /start.")]
+        text, keyboard = found
+        if lead:
+            text = lead + "\n\n" + text
+        photos = onboarding.screen_photos(name)
+        if photos:
+            text += "\n\n📸 <b>Picture guide below</b> ↓"
+        replies = [
+            Reply(
+                text,
+                keyboard,
+                edit=True,
+                parse_mode=onboarding.parse_mode(name),
+                clear_album_group="setup",
+                disable_link_preview=name in ("google", "googlelink"),
+            )
+        ]
+        if photos:
+            replies.append(Reply(onboarding.PHOTOS_CAPTION, photos=photos, album_group="setup"))
+        return replies
+
+    async def calendar_prompt(self, user: User) -> list[Reply]:
+        """After a plan is kept: offer calendar setup on the first one, and once more when there
+        are three. Never again after that, and never once plans already go to a calendar."""
+        if synced(user):
+            return []
+        shown = await self.repo.count_actions(user.id, "calendar_prompt")
+        if shown >= 2:
+            return []
+        if shown == 1:
+            now = self.clock()
+            plans = await self.repo.events_between(
+                now - FEED_PAST, now + FEED_AHEAD, [Status.GOING, Status.SAVED], user.id
+            )
+            if len(plans) < 3:
+                return []
+        await self.safe_action(user.id, "calendar_prompt", metadata={"time": shown + 1})
+        return [Reply(onboarding.CALENDAR_PROMPT, onboarding.calendar_prompt_keyboard())]
+
+    async def ensure_feed_token(self, user: User) -> str:
+        if user.calendar_feed_token:
+            return user.calendar_feed_token
+        token = secrets.token_urlsafe(32)
+        await self.repo.set_feed_token(user.id, token)
+        await self.safe_action(user.id, "calendar_feed_created")
+        return token
+
+    async def apple_setup(self, user: User) -> list[Reply]:
+        """Apple, part 1 of 2: subscribe to the AmIFree feed. Part 2 is the iCloud link guide,
+        sent by itself once the calendar app first fetches the feed (see calendar_feed)."""
+        if not self.settings.app_base_url:
+            return self.setup_screen("apple2", onboarding.APPLE_NO_FEED)
+        if user.calendar_feed_token and user.calendar_feed_seen_at:
+            return self.setup_screen("apple2", onboarding.APPLE_PART1_DONE)
+        token = await self.ensure_feed_token(user)
+        text = onboarding.APPLE_PART1
+        if user.google_connected:
+            text += onboarding.APPLE_ALREADY_GOOGLE
+        add = f"{self.settings.app_base_url.rstrip('/')}/cal/{token}/add"
+        return [
+            Reply(
+                text,
+                onboarding.apple_part1_keyboard(add),
+                edit=True,
+                parse_mode="HTML",
+                clear_album_group="setup",
+            )
+        ]
+
+    async def subscribe_page(self, token: str) -> str | None:
+        """The page behind Add to Calendar. None for an unknown link."""
+        user = await self.repo.user_by_feed_token(token)
+        if not user or not self.settings.app_base_url:
+            return None
+        return calendar_export.subscribe_page(self.feed_url(token))
+
+    async def feed_working(self, user: User) -> None:
+        """The calendar app fetched the feed for the first time: say so, and carry on to
+        part 2 of Apple setup if nothing tells me yet when they're busy. Best effort."""
+        if not self.send_private:
+            return
+        if user.google_connected:
+            reply = Reply("✅ Your AmIFree calendar is subscribed. Your plans now appear in it.")
+        elif await self.repo.list_calendars(user.id):
+            reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
+        else:
+            reply = Reply(
+                onboarding.apple_part2(lead=onboarding.APPLE_PART1_DONE),
+                onboarding.apple_part2_keyboard(),
+                parse_mode="HTML",
+            )
+        try:
+            await self.send_private(user.telegram_user_id, reply)
+        except Exception as exc:
+            log.warning("feed_working_dm_failed error_type=%s", type(exc).__name__)
+
     async def feed_setup(self, user: User, intro: str = "") -> Reply:
         if not self.settings.app_base_url:
             return Reply(
                 "Automatic calendar sync needs AmIFree to be online at a public address, "
                 "which isn't set up yet. For now, use the 🍎 and 📅 buttons on your plans."
             )
-        token = user.calendar_feed_token
-        if not token:
-            token = secrets.token_urlsafe(32)
-            await self.repo.set_feed_token(user.id, token)
-            await self.safe_action(user.id, "calendar_feed_created")
+        token = await self.ensure_feed_token(user)
         seen = user.calendar_feed_seen_at if user.calendar_feed_token else None
         status = (
             f"✅ Connected. Your calendar last synced {seen.astimezone(SG):%-d %b, %-I:%M%p}."
@@ -1650,15 +1747,22 @@ class SchedulingService:
             else "📚 Add your classes with a NUSMods Share/Sync link. Tap below for the steps."
         )
         if not calendars:
+            # Apple part 1 done, part 2 not: one tap back to where they stopped.
+            half_done = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+            keyboard = onboarding.first_calendar_keyboard(finish_apple=half_done)
+            if half_done:
+                status = "🍎 Apple: ✓ adding plans · ✗ not checking busy times yet"
+            else:
+                status = self.feed_line(user)
             return Reply(
                 lead + "📅 Your calendars\n\n"
                 "No calendar connected yet. Connect the one you use and its busy times count "
                 "when I check your plans and /free. I keep only start and end times, never "
                 "titles, places or notes.\n\n"
                 f"{nusmods}\n\n"
-                f"{self.feed_line(user)}\n\n"
-                "Which calendar do you use?",
-                onboarding.first_calendar_keyboard(),
+                f"{status}\n\n"
+                "Where do you usually add your events?",
+                keyboard,
             )
         lines = []
         google = (
@@ -1862,6 +1966,8 @@ class SchedulingService:
         seen = user.calendar_feed_seen_at
         if not preview and (seen is None or now - seen > FEED_SEEN_EVERY):
             await self.repo.mark_feed_seen(user.id, now)
+            if seen is None:
+                await self.feed_working(user)
         return build_feed(events, now=now)
 
     async def calendar_file(self, user: User, event_id: str) -> list[Reply]:
@@ -1948,27 +2054,16 @@ class SchedulingService:
         if data in MENU_COMMANDS:
             return await self.command(telegram_id, MENU_COMMANDS[data])
         if data.startswith("setup:"):
-            found = onboarding.screen(data.removeprefix("setup:"), google=self.google_sync.enabled)
-            if found is None:
-                return [Reply("That button isn't valid. Send /start.")]
-            text, keyboard = found
             name = data.removeprefix("setup:")
-            photos = onboarding.screen_photos(name)
-            if photos:
-                text += "\n\n📸 <b>Picture guide below</b> ↓"
-            replies = [
-                Reply(
-                    text,
-                    keyboard,
-                    edit=True,
-                    parse_mode=onboarding.parse_mode(name),
-                    clear_album_group="setup",
-                    disable_link_preview=name in ("google", "googlelink"),
-                )
-            ]
-            if photos:
-                replies.append(Reply(onboarding.PHOTOS_CAPTION, photos=photos, album_group="setup"))
-            return replies
+            if name == "google" and self.google_sync.enabled:
+                return self.google_sync.steps(phone=True)  # sharing; the link is its fallback
+            if name == "apple":
+                return await self.apple_setup(user)
+            if name == "appleskip":
+                return [Reply(onboarding.APPLE_SKIPPED, edit=True, clear_album_group="setup")]
+            return self.setup_screen(name)
+        if data == "calp:later":
+            return [Reply(onboarding.PROMPT_LATER, edit=True)]
         if data in ("free:today", "free:tomorrow", "free:weekend"):
             today = self.clock().astimezone(SG).date()
             days = {
@@ -1990,6 +2085,12 @@ class SchedulingService:
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
             return self.google_sync.steps(phone=False)
+        if data == "gcal:done":
+            if not self.google_sync.enabled:
+                return [Reply("Google sharing isn't available right now.")]
+            await self.google_sync.discard(user.pending)  # a code from an earlier try
+            await self.repo.set_pending(user.id, {"stage": "gcal_email"})
+            return [Reply(onboarding.GOOGLE_EMAIL_ASK, parse_mode="HTML")]
         if data == "pcal:off":
             return await self.disconnect_calendar(user)
         if data.startswith("pcal:rm:"):
@@ -2147,7 +2248,8 @@ class SchedulingService:
             await self.group_changed(result.group_event_id)
             availability = await self.availability(user, result, result.id)
             return [
-                decided_card(result, availability, "Saved. Find it any time with /plans.", user)
+                decided_card(result, availability, "Saved. Find it any time with /plans.", user),
+                *await self.calendar_prompt(user),
             ]
         statuses = {
             "go": Status.GOING,
@@ -2176,4 +2278,6 @@ class SchedulingService:
                 Status.MAYBE: "Marked Maybe. This won't block your time.",
             }[statuses[action]]
         card = decided_card(result, availability, note, user)
+        if statuses[action] == Status.GOING:
+            return [card, *await self.calendar_prompt(user)]
         return [card]

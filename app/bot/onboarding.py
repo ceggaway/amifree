@@ -37,12 +37,31 @@ WELCOME = (
 )
 
 PICK_CALENDAR = (
-    "📅 Which calendar do you use?\n\n"
-    "🍎 iPhone works right from your phone.\n"
-    "📅 Google works in the Google Calendar app or a computer browser.\n"
+    "📅 Where do you usually add your events?\n\n"
+    "I'll put your plans there by themselves, warn you about clashes, and help your groups "
+    "find a time you're free.\n\n"
     "📧 Outlook is coming soon.\n\n"
     "I only see when you're busy, never what your events are called, where they are "
     "or who's going."
+)
+
+# Device-neutral on purpose: not everyone deciding is on an iPhone.
+NOT_SURE = (
+    "🤔 Not sure which one you use?\n\n"
+    "📱 Android phone: it's almost always Google Calendar.\n\n"
+    "🍎 iPhone: open the Calendar app and tap Calendars at the bottom.\n"
+    "• Calendars under iCloud → Apple\n"
+    "• Calendars under Gmail → Google\n\n"
+    "💻 Computer: if you check your calendar at calendar.google.com, it's Google."
+)
+
+# Shown once after the first plan is saved, and once more after the third.
+CALENDAR_PROMPT = (
+    "📅 Want plans like this on your calendar automatically?\n"
+    "I'll also warn you about clashes and help your groups find a free time."
+)
+PROMPT_LATER = (
+    "No problem. Tap 🍎 or 📅 on a plan to add it yourself, or set this up any time with /calendar."
 )
 
 # Every calendar guide ends the same way, so nobody wonders what to do after the last step.
@@ -133,6 +152,41 @@ GUIDES = {
         "You can still forward me a plan any time — setup is optional."
     ),
 }
+
+APPLE_PART1 = (
+    "🍎 <b>Apple Calendar</b> · 2 quick parts\n\n"
+    "<b>Part 1 of 2 · Put your plans in your Calendar app</b>\n"
+    "Tap <b>Add to Calendar</b> below, then tap <b>Subscribe</b>.\n\n"
+    "Your Going and Saved plans then appear in a calendar called <b>AmIFree</b> and update "
+    "by themselves. I'll message you here once it's working."
+)
+APPLE_ALREADY_GOOGLE = (
+    "\n\nℹ️ Your plans already go to your Google Calendar. If that's the calendar on your "
+    "iPhone, you don't need this part: they'd show up twice."
+)
+APPLE_NO_FEED = (
+    "🍎 <b>Apple Calendar</b>\n\n"
+    "Adding plans to your calendar by themselves isn't available yet, so tap 🍎 on a plan to "
+    "add it. This part lets me check when you're busy."
+)
+APPLE_PART1_DONE = "✅ <b>Part 1 done</b>: your plans will appear in your AmIFree calendar."
+APPLE_PART2 = "<b>Part 2 of 2 · Let me check when you're busy</b>\n\n"
+APPLE_SKIPPED = (
+    "OK, skipped. Your plans still go to your AmIFree calendar, but I won't know when you're "
+    "busy with other things. Finish it any time in /calendar."
+)
+APPLE_ALL_SET = (
+    "✅ <b>All set</b>\n"
+    "• Your plans appear in your AmIFree calendar (changes can take a while to show on an "
+    "iPhone)\n"
+    "• I'll warn you about clashes and include you when your groups look for a free time"
+)
+
+
+def apple_part2(mac: bool = False, lead: str = "") -> str:
+    """The iCloud public-link guide, as the second half of Apple setup."""
+    return (lead + "\n\n" if lead else "") + APPLE_PART2 + GUIDES["mac" if mac else "ios"]
+
 
 PLAN_ACTIONS = (
     "When the event card appears, tap <b>Add to plans</b> to save it, or <b>Skip</b> "
@@ -265,42 +319,76 @@ def try_it_keyboard() -> InlineKeyboardMarkup:
 def pick_calendar_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
-            [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
+            [_button("📅 Google Calendar", "google"), _button("🍎 Apple / iCloud", "apple")],
+            [_button("🤔 I'm not sure", "notsure")],
+            [_button("📧 Outlook (soon)", "outlook"), _button("« Back", "home")],
         ]
     )
 
 
-def first_calendar_keyboard() -> InlineKeyboardMarkup:
-    """Offer calendar setup, NUSMods, and plans in a calendar app before connecting."""
-    from app.bot.keyboards import calendar_home_rows
-
+def not_sure_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [*pick_calendar_keyboard().inline_keyboard[:-1], *calendar_home_rows()[1:]]
+        [
+            [_button("📅 Google Calendar", "google"), _button("🍎 Apple / iCloud", "apple")],
+            [_button("« Back", "calendar")],
+        ]
     )
 
 
-GOOGLE_CHOOSE = (
-    "📅 Google Calendar\n\n"
-    "🔗 Share it with AmIFree (recommended): I add the plans you tap Going on to your "
-    "calendar, and I read when you're busy.\n\n"
-    "📋 Paste a link: I only read when you're busy. I can't add anything."
-)
-
-
-def google_choose_keyboard() -> InlineKeyboardMarkup:
+def calendar_prompt_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🔗 Share it (adds plans)", callback_data="gcal:start")],
-            [_button("📋 Paste a link (read only)", "googlelink")],
+            [
+                _button("Set up (1 min)", "calendar"),
+                InlineKeyboardButton("Not now", callback_data="calp:later"),
+            ]
+        ]
+    )
+
+
+def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
+            [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
+            [_button("⏭ Skip to part 2", "apple2")],
             [_button("« Other calendars", "calendar")],
         ]
     )
 
 
+def apple_part2_keyboard(mac: bool = False) -> InlineKeyboardMarkup:
+    switch = (
+        _button("📱 On an iPhone instead?", "apple2")
+        if mac
+        else _button("💻 On a Mac instead?", "apple2mac")
+    )
+    return InlineKeyboardMarkup(
+        [
+            [switch],
+            [_button("📅 Mine's Google", "google")],
+            [_button("⏭ Skip this part", "appleskip")],
+        ]
+    )
+
+
+def first_calendar_keyboard(finish_apple: bool = False) -> InlineKeyboardMarkup:
+    """Offer calendar setup, NUSMods, and plans in a calendar app before connecting."""
+    from app.bot.keyboards import calendar_home_rows
+
+    rows = [
+        [b for b in row if b.callback_data != "setup:home"]
+        for row in pick_calendar_keyboard().inline_keyboard
+    ]
+    if finish_apple:
+        rows.insert(0, [_button("🍎 Finish Apple setup", "apple2")])
+    return InlineKeyboardMarkup([*rows, *calendar_home_rows()[1:]])
+
+
 def google_share_steps(email: str) -> str:
     return (
-        "🔗 <b>Share your Google Calendar</b> · about 1 minute\n"
+        "📅 <b>Google Calendar</b> · 3 quick steps\n\n"
+        "<b>Step 1 of 3 · Share your calendar with me</b>\n"
         "Do this on a computer (or your phone's browser in desktop mode).\n\n"
         "1. Go to <b>calendar.google.com</b>.\n"
         "2. Click the <b>⚙️</b> gear, then <b>Settings</b>.\n"
@@ -310,9 +398,7 @@ def google_share_steps(email: str) -> str:
         f"5. Paste this email: <code>{html.escape(email)}</code>\n"
         "6. Set the permission to <b>Make changes (see private events as free/busy)</b>.\n"
         "7. Click <b>Send</b>.\n\n"
-        "Then send me your own Google email here (like you@gmail.com). I'll drop a code in "
-        "your calendar — send it back to show it's yours.\n\n"
-        "✨ Connects live, and I can add your Going plans to this calendar too.\n\n"
+        "Then tap <b>Done</b> below.\n\n"
         "🔒 I only read your busy times, and only change events I add. To stop: remove AmIFree "
         "from <b>Shared with</b>, or tap Remove in /calendar."
     )
@@ -320,7 +406,8 @@ def google_share_steps(email: str) -> str:
 
 def google_share_steps_phone(email: str) -> str:
     return (
-        "🔗 <b>Share your Google Calendar</b> · about 1 minute\n"
+        "📅 <b>Google Calendar</b> · 3 quick steps\n\n"
+        "<b>Step 1 of 3 · Share your calendar with me</b>\n"
         "Do this in the Google Calendar app on your phone.\n\n"
         "1. Open <b>Google Calendar</b>, tap <b>☰</b> (top left).\n"
         "2. Tap <b>Settings</b>.\n"
@@ -329,9 +416,7 @@ def google_share_steps_phone(email: str) -> str:
         f"5. Paste this email: <code>{html.escape(email)}</code>\n"
         "6. Set the permission to <b>Make changes (see private events as free/busy)</b>.\n"
         "7. Tap <b>Save</b>.\n\n"
-        "Then send me your own Google email here (like you@gmail.com). I'll drop a code in "
-        "your calendar — send it back to show it's yours.\n\n"
-        "✨ Connects live, and I can add your Going plans to this calendar too.\n\n"
+        "Then tap <b>Done</b> below.\n\n"
         "🔒 I only read your busy times, and only change events I add. To stop: remove AmIFree "
         "from <b>Shared with</b>, or tap Remove in /calendar."
     )
@@ -344,6 +429,7 @@ SCREEN_PHOTOS = {
     "ios": ("ios", ("ios_step1.png", "ios_step2.png", "ios_step3.png", "ios_step4.png")),
     "mac": ("ios", ("mac_step1.png", "mac_step2.png")),
 }
+SCREEN_PHOTOS["apple2"], SCREEN_PHOTOS["apple2mac"] = SCREEN_PHOTOS["ios"], SCREEN_PHOTOS["mac"]
 
 
 def screen_photos(name: str) -> tuple[bytes, ...]:
@@ -402,7 +488,56 @@ def google_steps_keyboard(phone: bool = False) -> InlineKeyboardMarkup:
         if phone
         else InlineKeyboardButton("📱 On my phone instead?", callback_data="gcal:start")
     )
-    return InlineKeyboardMarkup([[switch], [_button("« Other calendars", "calendar")]])
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")],
+            [InlineKeyboardButton("Open Google Calendar ↗", url=GOOGLE_CALENDAR_URL)],
+            [switch],
+            [_button("« Other calendars", "calendar")],
+        ]
+    )
+
+
+GOOGLE_CALENDAR_URL = "https://calendar.google.com/calendar/r/settings"
+GOOGLE_EMAIL_ASK = (
+    "<b>Step 2 of 3 · What's your Google email?</b>\n"
+    "The one that owns the calendar you just shared. Just type it here, like "
+    "<code>you@gmail.com</code>.\n\n/cancel to stop."
+)
+GOOGLE_EMAIL_AGAIN = (
+    "That doesn't look like an email. Type the Google email of the calendar you shared, like "
+    "you@gmail.com. /cancel to stop."
+)
+GOOGLE_SHARING_BLOCKED = (
+    "\n\nSome school and work accounts block sharing with outside accounts. If that's yours, "
+    "use a link instead: I'll check when you're busy, but I can't add your plans."
+)
+
+
+def google_code_ask(email: str) -> str:
+    return (
+        "<b>Step 3 of 3 · Show me it's yours</b>\n"
+        f'I\'ve put an event called "AmIFree code" in the calendar for {html.escape(email)} '
+        "today. Open Google Calendar and send me the 6-digit number in it. I'll delete the "
+        "event after.\n\n/cancel to stop."
+    )
+
+
+def google_connected(busy_count: int, added: int, *, timetable_connected: bool) -> str:
+    text = (
+        "✅ <b>Google Calendar connected</b>\n"
+        "• Plans you save or say Going to are added to your Google Calendar\n"
+        "• I only see when you're busy, never titles or details\n"
+        "• Remove it any time in /calendar"
+    )
+    if added:
+        text += f"\n\nI added your {added} current plan{'s' if added != 1 else ''} just now."
+    if not busy_count:
+        text += (
+            "\n\nI don't see any events in it for the next few months. If you use another "
+            "calendar too, add it through /calendar."
+        )
+    return text + "\n\n" + (SCHEDULE_READY if timetable_connected else CLASSES_QUESTION)
 
 
 def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
@@ -418,7 +553,7 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     if screen == "outlook":
         return InlineKeyboardMarkup(
             [
-                [_button("📅 Use Google", "google"), _button("🍎 Use iPhone", "ios")],
+                [_button("📅 Use Google", "google"), _button("🍎 Use Apple", "apple")],
                 [_button("« Other calendars", "calendar")],
             ]
         )
@@ -453,6 +588,8 @@ HTML_SCREENS = frozenset(
         "classes",
         "skip",
         "sendplan",
+        "apple2",
+        "apple2mac",
     }
 )
 
@@ -462,14 +599,19 @@ def parse_mode(name: str) -> str | None:
     return "HTML" if name in HTML_SCREENS else None
 
 
-def screen(name: str, google: bool = False) -> tuple[str, InlineKeyboardMarkup | None] | None:
-    """The text and buttons for one setup screen, or None for an unknown name."""
+def screen(name: str) -> tuple[str, InlineKeyboardMarkup | None] | None:
+    """The text and buttons for one setup screen, or None for an unknown name.
+
+    "google" with sharing on, and "apple", need the user, so the service builds those."""
     if name == "home":
         return WELCOME, welcome_keyboard()
     if name == "calendar":
         return PICK_CALENDAR, pick_calendar_keyboard()
-    if name == "google" and google:
-        return GOOGLE_CHOOSE, google_choose_keyboard()
+    if name == "notsure":
+        return NOT_SURE, not_sure_keyboard()
+    if name in ("apple2", "apple2mac"):
+        mac = name == "apple2mac"
+        return apple_part2(mac), apple_part2_keyboard(mac)
     if name == "googlelink":
         return GUIDES["google"], guide_keyboard("google")
     if name == "classes":

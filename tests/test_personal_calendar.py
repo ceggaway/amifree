@@ -281,7 +281,7 @@ async def test_a_bad_link_is_explained_and_not_saved(with_calendar, reference):
 async def test_calendar_screen_lists_each_calendar_with_remove(with_calendar, reference):
     service, repo = with_calendar(labels={ICLOUD_CCA: "CCA", ICLOUD_EVENTS: "Events"})
     replies = await service.command(1, "calendar")
-    google = (await service.callback(1, tap(replies[-1], "📅 Google")))[0]
+    google = (await service.callback(1, tap(replies[-1], "📅 Google Calendar")))[0]
     assert "Secret address in iCal format" in google.text and google.edit  # step-by-step guide
     await service.message(1, 1, ICLOUD_CCA, reference)
     await service.message(1, 2, ICLOUD_EVENTS, reference)
@@ -399,7 +399,7 @@ async def test_calendar_shows_what_is_connected_then_asks_which_to_add(with_cale
     service, _ = with_calendar(labels={ICLOUD_CCA: "CCA"})
     first = await service.command(1, "calendar")
     assert len(first) == 1 and "No calendar connected yet" in first[0].text
-    assert "Which calendar do you use?" in first[0].text
+    assert "Where do you usually add your events?" in first[0].text
     await service.message(1, 1, ICLOUD_CCA, reference)
     status = (await service.command(1, "calendar"))[0]
     assert "• CCA · refreshed" in status.text and "Plans in your phone's calendar" in status.text

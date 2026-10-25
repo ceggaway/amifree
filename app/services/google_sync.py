@@ -59,22 +59,21 @@ class GoogleSyncService:
 
     # ---- connecting ----
 
-    def steps(self, phone: bool = False) -> list[Reply]:
-        if phone:
-            text = onboarding.google_share_steps_phone(self.client.email)
-            photos = onboarding.google_phone_photos()
-            caption = onboarding.PHOTOS_CAPTION
-        else:
-            text = onboarding.google_share_steps(self.client.email)
-            photos = onboarding.google_share_photos()
-            caption = onboarding.GOOGLE_PHOTOS_CAPTION
-        keyboard = onboarding.google_steps_keyboard(phone)
-        if photos:
-            text += "\n\n📸 <b>Picture guide below</b> ↓"
-        replies = [Reply(text, keyboard, edit=True, parse_mode="HTML", clear_album_group="setup")]
-        if photos:
-            replies.append(Reply(caption, photos=photos, album_group="setup"))
-        return replies
+    def steps(self, phone: bool = False, n: int = 1) -> list[Reply]:
+        """One part of sharing, as a picture with its instructions under it."""
+        text, photo, keyboard = onboarding.google_step(
+            self.client.email, "phone" if phone else "computer", n
+        )
+        return [
+            Reply(
+                text,
+                keyboard,
+                edit=True,
+                parse_mode="HTML",
+                photo=photo,
+                clear_album_group="setup",
+            )
+        ]
 
     async def connect(self, user, email: str) -> list[Reply]:
         """Step 2 of 3 (the email): check the calendar is shared, then put a one-time code in it.

@@ -79,7 +79,8 @@ async def test_google_is_three_steps(service_factory, reference):
     await onboard(service, reference)
     step1 = (await service.callback(1, "setup:google"))[0]
     assert "Step 1 of 3" in step1.text and "Open Google Calendar ↗" in labels(step1)
-    step2 = (await service.callback(1, tap(step1, "✅ Done, I've shared it")))[0]
+    last = (await service.callback(1, "gs:phone:5"))[0]
+    step2 = (await service.callback(1, tap(last, "✅ Done, I've shared it")))[0]
     assert "Step 2 of 3" in step2.text and not step2.edit  # the steps stay readable above
     assert repo.users[1].pending == {"stage": "gcal_email"}
     again = (await service.message(1, 5, "me@gmail", reference))[0]
@@ -136,12 +137,14 @@ async def test_first_feed_fetch_moves_on_to_part_two(service_factory, reference)
     await service.calendar_feed(token, "TelegramBot (like TwitterBot)")  # a preview isn't it
     assert sent.messages == []
     await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
-    [(telegram_id, reply)] = sent.messages
-    assert telegram_id == 1 and "Part 1 done" in reply.text and "Part 2 of 2" in reply.text
-    assert "⏭ Skip this part" in labels(reply)
+    [(telegram_id, done), (_, step)] = sent.messages
+    assert telegram_id == 1 and "Part 1 done" in done.text
+    assert onboarding.FEED_REFRESH_TIP in done.text
+    assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text and step.photo
+    assert "⏭ Skip this part" in labels(step)
     service.clock = lambda: reference + timedelta(hours=1)
     await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
-    assert len(sent.messages) == 1  # only the first fetch announces
+    assert len(sent.messages) == 2  # only the first fetch announces
     # Coming back to Apple setup now starts at part 2.
     again = (await service.callback(1, "setup:apple"))[0]
     assert "Part 1 done" in again.text and "Part 2 of 2" in again.text
@@ -155,7 +158,8 @@ async def test_feed_after_a_link_says_all_set(service_factory, reference):
     await service.message(1, 5, ICLOUD_CCA, reference)
     await service.callback(1, "setup:apple")
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
-    assert sent.messages[0][1].text == onboarding.APPLE_ALL_SET
+    text = sent.messages[0][1].text
+    assert text.startswith(onboarding.APPLE_ALL_SET) and "Every 5 minutes" in text
 
 
 async def test_half_done_apple_setup_shows_in_calendar(service_factory, reference):
@@ -194,3 +198,52 @@ async def test_subscribe_page_route(service_factory, reference):
         assert (await client.get("/cal/" + "x" * 43 + "/add")).status_code == 404
     # Opening the page is not the calendar subscribing.
     assert repo.users[1].calendar_feed_seen_at is None
+
+
+async def test_apple_part_two_is_one_step_and_picture_at_a_time(service_factory, reference):
+    service, _ = service_factory()
+    await onboard(service, reference)
+    pictures = set()
+    step = (await service.callback(1, "setup:apple2"))[0]
+    for n in range(1, 5):
+        assert f"Step {n} of 4" in step.text and step.edit and step.photo
+        assert len(step.text) <= 1024  # Telegram's caption limit
+        pictures.add(step.photo)
+        assert ("‹ Back" in labels(step)) == (n > 1)
+        assert ("📅 Mine's Google" in labels(step)) == (n == 2)  # where Gmail is on screen
+        assert "⏭ Skip this part" in labels(step)
+        if n < 4:
+            step = (await service.callback(1, tap(step, "Next ›")))[0]
+    assert "Paste the link here" in step.text and "Next ›" not in labels(step)
+    assert len(pictures) == 4  # each step shows its own screen
+    back = (await service.callback(1, tap(step, "‹ Back")))[0]
+    assert "Step 3 of 4" in back.text and "Public Calendar" in back.text
+    mac = (await service.callback(1, "setup:apple2mac"))[0]
+    assert "On a Mac · Step 1 of 2" in mac.text and "📱 On an iPhone instead?" in labels(mac)
+    last = (await service.callback(1, tap(mac, "Next ›")))[0]
+    assert "Step 2 of 2" in last.text and last.photo != mac.photo
+    for bad in ("a2:ios:5", "a2:ios:0", "a2:pc:1", "a2:ios"):
+        assert "isn't valid" in (await service.callback(1, bad))[0].text
+
+
+async def test_a_step_swaps_its_picture_in_place():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.bot.messages import Reply, send_reply
+
+    text, photo, keyboard = onboarding.apple_step("ios", 2)
+    on_picture = SimpleNamespace(photo=[object()], delete=AsyncMock())
+    query = SimpleNamespace(
+        message=on_picture, edit_message_media=AsyncMock(), edit_message_text=AsyncMock()
+    )
+    message = SimpleNamespace(reply_photo=AsyncMock(), reply_text=AsyncMock())
+    update = SimpleNamespace(callback_query=query, effective_message=message)
+    await send_reply(update, Reply(text, keyboard, edit=True, photo=photo, parse_mode="HTML"))
+    query.edit_message_media.assert_awaited_once()
+    message.reply_photo.assert_not_awaited()
+    # Leaving the steps (Skip) replaces the picture with a text message.
+    await send_reply(update, Reply(onboarding.APPLE_SKIPPED, edit=True))
+    on_picture.delete.assert_awaited_once()
+    message.reply_text.assert_awaited_once()
+    query.edit_message_text.assert_not_awaited()

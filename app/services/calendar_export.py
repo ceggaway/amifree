@@ -109,8 +109,9 @@ def build_feed(events: list[Event], *, now: datetime | None = None) -> bytes:
         "X-WR-CALNAME:AmIFree",
         "X-WR-TIMEZONE:Asia/Singapore",
         # Ask calendar apps to check back often; each app decides how often it really does.
-        "REFRESH-INTERVAL;VALUE=DURATION:PT15M",
-        "X-PUBLISHED-TTL:PT15M",
+        # A hint only: Mac Calendar can go to 5 minutes, an iPhone checks every 15 at best.
+        "REFRESH-INTERVAL;VALUE=DURATION:PT5M",
+        "X-PUBLISHED-TTL:PT5M",
     ]
     for event in sorted(events, key=lambda e: e.start_at):
         lines += _vevent(event, stamp)

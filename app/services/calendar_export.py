@@ -6,8 +6,10 @@ and its version as SEQUENCE means re-sending the file after an edit updates the 
 in Apple Calendar instead of adding a second copy.
 """
 
+import json
 import re
 from datetime import UTC, datetime
+from html import escape
 from urllib.parse import urlencode
 
 from app.schemas.event import Event
@@ -118,3 +120,34 @@ def build_feed(events: list[Event], *, now: datetime | None = None) -> bytes:
 def ics_filename(event: Event) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", event.title.lower()).strip("-")[:40] or "event"
     return f"{slug}-{event.start_at:%d%b}.ics".lower()
+
+
+def subscribe_page(feed_url: str) -> str:
+    """The page behind the "Add to Calendar" button: Telegram buttons only open http(s) links,
+    so this hands the browser the webcal:// address that opens the calendar app's Subscribe
+    screen. The plain link stays on the page for when the browser won't open it."""
+    webcal = "webcal://" + feed_url.split("://", 1)[-1]
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Add AmIFree to your calendar</title>
+<style>
+body{{font:17px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:24px 16px;
+background:#fff;color:#111;max-width:480px;margin:auto}}
+a.add{{display:block;text-align:center;background:#0a7cff;color:#fff;padding:14px;
+border-radius:12px;text-decoration:none;font-weight:600;margin:20px 0}}
+code{{word-break:break-all;background:#f2f2f5;padding:2px 4px;border-radius:4px}}
+@media (prefers-color-scheme: dark){{body{{background:#111;color:#eee}}
+code{{background:#2a2a2e}}}}
+</style></head><body>
+<h1>📅 Add AmIFree to your calendar</h1>
+<p>Tap the button, then tap <b>Subscribe</b>.</p>
+<a class="add" href="{escape(webcal)}">Add to Calendar</a>
+<p>Nothing happened? Open this page in Safari (tap ⋯ or the compass), or copy this link and add
+it in Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add Subscribed
+Calendar:</p>
+<p><code>{escape(feed_url)}</code></p>
+<p>Keep it private: anyone with the link can see your plans.</p>
+<script>location.href={json.dumps(webcal)};</script>
+</body></html>"""

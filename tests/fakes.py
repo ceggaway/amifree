@@ -567,6 +567,9 @@ class MemoryRepository:
     async def action(self, user_id, kind, event_id=None, metadata=None):
         self.actions.append((user_id, kind, event_id, metadata))
 
+    async def count_actions(self, user_id, kind, limit=10):
+        return min(limit, sum(1 for a in self.actions if a[:2] == (user_id, kind)))
+
     # ---- group features ----
 
     async def polls_past_deadline(self, now):

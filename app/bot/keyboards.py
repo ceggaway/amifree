@@ -298,10 +298,13 @@ def page_keyboard(page: int, pages: int, prefix: str = "events") -> InlineKeyboa
     return InlineKeyboardMarkup([buttons])
 
 
-def google_help_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Show the steps again", callback_data="gcal:start")]]
-    )
+def google_help_keyboard(link: bool = False) -> InlineKeyboardMarkup:
+    """After sharing didn't work: the steps again, and the read-only link when sharing may
+    be blocked (the only place that link is offered when sharing is on)."""
+    rows = [[InlineKeyboardButton("Show the steps again", callback_data="gcal:start")]]
+    if link:
+        rows.append([InlineKeyboardButton("Use a link instead", callback_data="setup:googlelink")])
+    return InlineKeyboardMarkup(rows)
 
 
 def calendar_settings_keyboard() -> InlineKeyboardMarkup:

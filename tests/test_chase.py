@@ -5,7 +5,14 @@ from telegram import Update
 from app.services.chase import non_responders
 from app.services.jobs import Notifier
 from tests.conftest import extraction
-from tests.test_group_events import alerts, buttons, group_message, group_tap, make_bot, post_card
+from tests.test_group_events import (
+    alerts,
+    buttons,
+    group_tap,
+    make_bot,
+    post_card,
+    seed_poll_card,
+)
 from tests.test_notifications import Outbox
 
 
@@ -98,9 +105,7 @@ async def test_poll_nudges_members_who_have_not_filled_in(service_factory, refer
     outbox = Outbox()
     service.notifier = Notifier(service, outbox)
     async with bot:
-        await bot.process_update(
-            Update.de_json(group_message("/whosfree sync tomorrow", 30, 1), bot.bot)
-        )
+        await seed_poll_card(bot, "sync tomorrow", 30, 1)
         taps = buttons(transport.sent[-1]["reply_markup"])
         await bot.process_update(
             Update.de_json(group_tap(taps["✋ Count me in"], 2, update_id=9300), bot.bot)

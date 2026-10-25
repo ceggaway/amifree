@@ -67,14 +67,26 @@ afterEach(() => {
 });
 
 describe("MyTimes", () => {
+  it("shows the capitalised event name and clear legend without extra controls", async () => {
+    show({ ...grid, title: "dinner with friends", submitted: true });
+    expect(await screen.findByRole("heading", { level: 1, name: "Dinner with friends" })).toBeTruthy();
+    for (const label of ["Available", "Unavailable", "Calendar / class clash"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    expect(screen.getByRole("button", { name: "Submit availabilities" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Drag to select|^all$|^none$/ })).toBeNull();
+    expect(screen.queryByText(/half hours marked free/)).toBeNull();
+    expect(screen.queryByText(/The group only sees/)).toBeNull();
+  });
+
   it("blocks busy cells, lets free ones be unticked, and saves the ticked cells", async () => {
     show(grid);
     expect(await screen.findByText("Project meeting")).toBeTruthy();
     const busy = screen.getByLabelText(/08:30: busy/) as HTMLButtonElement;
     expect(busy.disabled).toBe(true);
     fireEvent.click(screen.getByLabelText(/09:00: free/));
-    expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
-    fireEvent.click(screen.getByText("Submit my times"));
+    expect(screen.getByLabelText(/09:00: not free/).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByText("Submit availabilities"));
     await waitFor(() => expect(saved).toEqual([["2026-10-13T08:00:00+08:00"]]));
     // Saving counts the member in and returns to the poll.
     expect(await screen.findByText("Poll page")).toBeTruthy();
@@ -102,31 +114,60 @@ describe("MyTimes", () => {
     fireEvent.pointerEnter(screen.getByLabelText(/09:30: free/), { pointerType: "mouse" });
     fireEvent.pointerEnter(screen.getByLabelText(/08:30: busy/), { pointerType: "mouse" });
     fireEvent.pointerUp(screen.getByLabelText(/09:30: not free/));
-    expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
+    expect(screen.getByLabelText(/09:00: not free/).getAttribute("aria-pressed")).toBe("false");
     expect((screen.getByLabelText(/08:30: busy/) as HTMLButtonElement).disabled).toBe(true);
     // The click that follows the pointer-up must not undo the paint.
     fireEvent.click(screen.getByLabelText(/09:00: not free/));
-    expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
+    expect(screen.getByLabelText(/09:00: not free/).getAttribute("aria-pressed")).toBe("false");
     // A later plain tap works again.
     fireEvent.click(screen.getByLabelText(/09:00: not free/));
-    expect(screen.getByText("2 half hours ticked.")).toBeTruthy();
+    expect(screen.getByLabelText(/09:00: free/).getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("needs paint mode before a touch drag paints, but a touch tap always toggles", async () => {
+  it("lets touch paint immediately without a toggle", async () => {
     show(grid);
     await screen.findByText("Project meeting");
+    expect(screen.queryByRole("button", { name: /Drag to select/ })).toBeNull();
     fireEvent.pointerDown(screen.getByLabelText(/09:00: free/), { pointerType: "touch" });
-    expect(screen.getByText("2 half hours ticked.")).toBeTruthy(); // swipe, not paint
-    fireEvent.click(screen.getByLabelText(/09:00: free/));
-    expect(screen.getByText("1 half hours ticked.")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText(/Paint mode/));
-    fireEvent.pointerDown(screen.getByLabelText(/08:00: free/), { pointerType: "touch" });
-    expect(screen.getByText("0 half hours ticked.")).toBeTruthy();
+    expect(screen.getByLabelText(/09:00: not free/).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.pointerUp(screen.getByLabelText(/09:00: not free/), { pointerType: "touch" });
+    fireEvent.click(screen.getByLabelText(/09:00: not free/));
+    expect(screen.getByLabelText(/09:00: not free/).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("paints by touch as the finger moves across cells", async () => {
+    const wide: MyGrid = {
+      ...grid,
+      days: [
+        {
+          date: "2026-10-13",
+          cells: [
+            { start_at: "2026-10-13T09:00:00+08:00", state: "free" },
+            { start_at: "2026-10-13T09:30:00+08:00", state: "free" },
+          ],
+        },
+      ],
+    };
+    show(wide);
+    await screen.findByText("Project meeting");
+    expect(screen.getByText("Available")).toBeTruthy(); // the legend says what blue means
+    const first = screen.getByLabelText(/09:00: free/);
+    const second = screen.getByLabelText(/09:30: free/);
+    fireEvent.pointerDown(first, { pointerType: "touch" });
+    // Touch keeps reporting the first cell; the cell under the finger is looked up instead.
+    const original = document.elementFromPoint;
+    document.elementFromPoint = () => second;
+    fireEvent.pointerMove(first, { pointerType: "touch", clientX: 10, clientY: 10 });
+    document.elementFromPoint = original;
+    fireEvent.pointerUp(first, { pointerType: "touch" });
+    expect(screen.queryAllByRole("button", { pressed: true })).toHaveLength(0);
   });
 
   it("asks people with no schedule to tap the times they are free", async () => {
     show({ ...grid, known: false, days: [{ date: grid.days[0].date, cells: [{ start_at: "2026-10-13T08:00:00+08:00", state: "off" }] }] });
-    expect(await screen.findByText(/don't have your schedule yet/)).toBeTruthy();
+    expect(await screen.findByText(/Tap a slot or drag across several/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/08:00: not free/));
+    expect(screen.getByLabelText(/08:00: free/).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("says when the poll is closed or hidden", async () => {

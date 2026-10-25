@@ -17,7 +17,7 @@ from telegram.ext import (
 
 from app.bot.delivery import telegram_profile, webhook_delivery
 from app.bot.keyboards import links_keyboard
-from app.bot.messages import GROUP_HELP, Reply, send_reply
+from app.bot.messages import GROUP_HELP, GROUP_WELCOME, Reply, send_reply
 from app.services import analytics
 from app.services.app_links import group_links
 from app.services.image_reader import MAX_BYTES, PictureError
@@ -27,12 +27,8 @@ from app.services.scheduling import SLOW_DOWN
 
 log = logging.getLogger(__name__)
 GROUP_COMMANDS = {
-    "event",
-    "plan",
-    "whosfree",
     "stats",
     "export",
-    "detect",
     "attendance",
     "pro",
     "app",
@@ -336,6 +332,19 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             if not addressed_to_me(message.text, context.bot.username):
                 return  # /stats@OtherBot belongs to another bot in this group
             analytics.track("group_command", name=name[:32])
+            if name == "detect":
+                await send(update, [Reply("Spotting plans in chat is no longer supported.")])
+                return
+            if name in ("event", "plan", "whosfree"):
+                await send(
+                    update,
+                    [
+                        Reply(
+                            "Create events and find a common time in the mini app. Open it with /app."
+                        )
+                    ],
+                )
+                return
             if name in ("help", "start", "app"):
                 links = links_keyboard(group_links(service.settings, update.effective_chat.id))
                 if name == "app" and links:
@@ -347,11 +356,7 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             if name not in GROUP_COMMANDS:
                 await send(update, [Reply(PRIVATE_ONLY)])
                 return
-            if name == "whosfree":
-                result = await service.polls.create(
-                    user.id, update.effective_chat.id, message.message_id, args
-                )
-            elif name == "stats":
+            if name == "stats":
                 result = await service.groups.stats(user.id, update.effective_chat.id)
             elif name == "attendance":
                 result = await service.groups.attendance_command(user.id, update.effective_chat.id)
@@ -359,40 +364,8 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
                 result = await service.pro.status(update.effective_chat.id)
             elif name == "export":
                 result = await service.groups.export(user.id, update.effective_chat.id, args)
-            elif name == "detect":
-                result = await service.detection.command(
-                    user.id, update.effective_chat.id, args, await is_admin(context.bot, message)
-                )
-            else:
-                source = message.reply_to_message if not args else None
-                text = args or (source.text or source.caption or "" if source else "")
-                origin = source.forward_origin if source else None
-                reference = origin.date if origin else (source.date if source else message.date)
-                result = await service.groups.create(
-                    user.id,
-                    update.effective_chat.id,
-                    message.message_id,
-                    text,
-                    reference,
-                    **who,
-                )
         elif operation == "message":
-            # Ordinary group messages are dropped unless an admin switched detection on.
-            if message.from_user and message.from_user.is_bot:
-                return
-            try:
-                result = await service.detection.on_message(
-                    user.id,
-                    update.effective_chat.id,
-                    message.message_id,
-                    message.text or message.caption or "",
-                    message.date,
-                )
-                if result is not None:
-                    await deliver_group(update, service, result)
-            except Exception as exc:
-                # Never answer ordinary chatter with an error, and never ask Telegram to retry it.
-                log.warning("detection_message_failed error_type=%s", type(exc).__name__)
+            # Group chatter is never sent to extraction, including groups that opted in before.
             return
         else:
             return
@@ -428,6 +401,16 @@ async def message(update, context):
 
 async def callback(update, context):
     await dispatch(update, context, "callback")
+
+
+async def added_to_group(update, context):
+    """Say hello once, when this bot itself is added to a group (not when anyone else joins)."""
+    message = update.effective_message
+    if message is None or update.effective_chat.type == ChatType.PRIVATE:
+        return
+    if not any(member.id == context.bot.id for member in message.new_chat_members or []):
+        return
+    await send(update, [Reply(GROUP_WELCOME)])
 
 
 async def unsupported(update, context):
@@ -687,5 +670,6 @@ def register_handlers(application: Application, service):
         )
     )
     application.add_handler(MessageHandler(filters.COMMAND, command))
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, added_to_group))
     application.add_handler(MessageHandler(filters.ALL, unsupported))
     application.add_error_handler(error_handler)

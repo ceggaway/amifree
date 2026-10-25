@@ -45,7 +45,7 @@ async def test_commands_for_another_bot_are_ignored(service_factory):
     assert not addressed_to_me("/event@other", "Bot")
 
 
-async def test_anonymous_admin_can_switch_detection(service_factory):
+async def test_anonymous_admin_cannot_enable_retired_detection(service_factory):
     service, repo = service_factory()
     bot, transport = make_bot(service)
     payload = group_message("/detect on", 84, 1087968824)
@@ -53,7 +53,8 @@ async def test_anonymous_admin_can_switch_detection(service_factory):
     payload["message"]["from"]["is_bot"] = True
     async with bot:
         await bot.process_update(Update.de_json(payload, bot.bot))
-    assert repo.detection[CHAT] is True
+    assert not repo.detection.get(CHAT)
+    assert "no longer supported" in transport.sent[-1]["text"]
 
 
 async def test_bulk_series_changes_send_one_message_per_member(service_factory, reference):
@@ -214,9 +215,8 @@ async def test_suggestions_do_not_keep_quoted_notes(service_factory):
     bot, transport = make_bot(service)
     async with bot:
         await run(bot, "Badminton Saturday 4pm-6pm at UTSRC", 86, 2)
-    stored = next(iter(repo.suggestions.values()))
-    assert stored.draft["notes"] is None
-    assert "private text" not in transport.sent[-1]["text"]
+    assert not repo.suggestions and not service.extractor.calls
+    assert not transport.sent
 
 
 async def test_removed_bot_stops_trying_to_post_sessions(service_factory, reference):

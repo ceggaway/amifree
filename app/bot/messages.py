@@ -172,6 +172,12 @@ def private_verdict(availability: Availability, prefix: str = "") -> str:
     return text[: 200 - len(note)] + note
 
 
+GROUP_WELCOME = (
+    "👋 Thanks for adding AmIFree!\n\n"
+    "To get started, send /app here. It opens AmIFree for this group, where you can"
+    " create an event or find a time that works for everyone."
+)
+
 GROUP_HELP = """👋 AmIFree in this group
 
 /event Dinner Fri 7-9pm at Vivo: post an event card (or reply /event to a plan message)
@@ -179,7 +185,6 @@ GROUP_HELP = """👋 AmIFree in this group
    "every Tue/Thu until week 13" makes a recurring event.
 /whosfree project meeting 2h next week: find a time; members tap the times that work
 /attendance, /stats, /export: turnout for your events (sent to you privately)
-/detect on: admins only, suggests a card when someone posts a plan
 
 Organisers: tap 📱 Details (or ⚙️ Manage) on a card to edit, cancel, nudge or mark who came.
 To use your schedule, open a private chat with me and send /start."""

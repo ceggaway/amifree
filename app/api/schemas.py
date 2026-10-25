@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class AuthRequest(BaseModel):
@@ -111,6 +111,13 @@ class PollVoteRequest(BaseModel):
 class PollPickRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     slot: int = Field(ge=0, le=2)
+
+
+class PollPickTimeRequest(BaseModel):
+    """Any start time from the heatmap; the poll's own length sets the end."""
+
+    model_config = ConfigDict(extra="forbid")
+    start_at: AwareDatetime
 
 
 class ExportRequest(BaseModel):

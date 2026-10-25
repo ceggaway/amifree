@@ -52,6 +52,8 @@ export type Heatmap = {
   ready: boolean;
   max_free: number;
   days: HeatmapDay[];
+  status: "COLLECTING" | "OPEN" | "CLOSED";
+  organiser: boolean;
 };
 
 export type CellState = "busy" | "free" | "off";
@@ -90,6 +92,8 @@ export type GroupPoll = {
   duration_minutes: number;
   joined: number;
   joined_by_me: boolean;
+  organiser: boolean;
+  availability_submitted: boolean;
   deadline_at: string | null;
   min_joined: number;
 };
@@ -100,7 +104,6 @@ export type GroupOverview = {
   events: GroupEventSummary[];
   polls: GroupPoll[];
   admin: boolean;
-  detection: boolean;
 };
 
 export type GroupStats = {

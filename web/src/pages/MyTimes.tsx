@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
-import { dragState, paint, setDay, ticked } from "../availability";
-import { time } from "../format";
+import { dragState, paint, ticked } from "../availability";
+import { capitaliseFirst, time } from "../format";
 import { dayLabel, rowTimes } from "../heatmap";
 import type { MyGrid } from "../types";
 import { useLoad } from "../useLoad";
@@ -15,8 +15,6 @@ export function MyTimes() {
   const [grid, setGrid] = useState<MyGrid | null>(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
-  // Painting: touch drags paint only when switched on, so swiping still scrolls the grid.
-  const [paintMode, setPaintMode] = useState(false);
   const drag = useRef<{ state: "free" | "off"; seen: Set<string> } | null>(null);
   // A pointerdown that painted already changed the cell: the click that follows must not flip it back.
   const painted = useRef(false);
@@ -28,17 +26,17 @@ export function MyTimes() {
     return <p className="error">{hidden ? "This poll isn't available to you." : error}</p>;
   }
   if (!grid) return <p className="hint">Loading…</p>;
+  const title = capitaliseFirst(grid.title);
   if (grid.closed) {
     return (
       <section>
-        <h2>{grid.title}</h2>
+        <h1>{title}</h1>
         <p className="hint">This poll is closed.</p>
       </section>
     );
   }
   const rows = rowTimes(grid.days);
   const lookup = grid.days.map((d) => new Map(d.cells.map((c) => [time(c.start_at), c])));
-  const count = ticked(grid).length;
 
   function tap(start: string) {
     if (!grid) return;
@@ -48,25 +46,34 @@ export function MyTimes() {
     }
     const cell = grid.days.flatMap((d) => d.cells).find((c) => c.start_at === start);
     const state = cell ? dragState(cell.state) : null;
-    if (state) setGrid(paint(grid, new Set([start]), state));
+    if (state) setGrid((current) => current && paint(current, new Set([start]), state));
   }
 
-  function begin(start: string, pointerType: string) {
+  function begin(start: string) {
     painted.current = false;
-    if (!grid || (pointerType !== "mouse" && !paintMode)) return;
+    if (!grid) return;
     const cell = grid.days.flatMap((d) => d.cells).find((c) => c.start_at === start);
     const state = cell ? dragState(cell.state) : null;
     if (!state) return;
     drag.current = { state, seen: new Set([start]) };
     painted.current = true;
-    setGrid(paint(grid, new Set([start]), state));
+    setGrid((current) => current && paint(current, new Set([start]), state));
+  }
+
+  // Touch: the browser only reports the cell where the finger first landed, so find the cell
+  // under the finger as it moves.
+  function move(e: React.PointerEvent) {
+    if (!drag.current) return;
+    const target = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-start]");
+    const start = target?.getAttribute("data-start");
+    if (start) over(start);
   }
 
   function over(start: string) {
     const current = drag.current;
     if (!grid || !current || current.seen.has(start)) return;
     current.seen.add(start);
-    setGrid(paint(grid, new Set([start]), current.state));
+    setGrid((value) => value && paint(value, new Set([start]), current.state));
   }
 
   async function save() {
@@ -87,27 +94,27 @@ export function MyTimes() {
 
   return (
     <section className="heatmap">
-      <h2>{grid.title}</h2>
+      <h1>{title}</h1>
       <p className="hint">
-        {grid.known
-          ? "We've blocked the times you're busy. Untick any other times that don't work."
-          : "We don't have your schedule yet, so tap the times you're free."}{" "}
-        The group only sees how many people are free, not who.
+        Tap a slot or drag across several to change your availability. Busy times from your connected
+        calendar and timetable are blocked automatically.
       </p>
+      <div className="grid-legend">
+        <span><i className="swatch free" aria-hidden="true">✓</i> Available</span>
+        <span><i className="swatch off" aria-hidden="true" /> Unavailable</span>
+        <span><i className="swatch busy" aria-hidden="true" /> Calendar / class clash</span>
+      </div>
       {grid.from_usual && !grid.submitted && (
         <p className="banner info">Pre-filled from your usual times. Change them with /usual in the bot.</p>
       )}
-      <label className="hint">
-        <input type="checkbox" checked={paintMode} onChange={(e) => setPaintMode(e.target.checked)} /> Paint mode:
-        drag across cells to tick or untick many at once (turns off swiping)
-      </label>
       <div
-        className={`heat-scroll${paintMode ? " painting" : ""}`}
+        className="heat-scroll availability-scroll"
         onPointerUp={() => {
           drag.current = null;
           // The click that follows a paint is skipped; forget the flag if no click arrives.
           setTimeout(() => (painted.current = false), 0);
         }}
+        onPointerMove={move}
         onPointerLeave={() => (drag.current = null)}
         onPointerCancel={() => (drag.current = null)}
       >
@@ -116,10 +123,6 @@ export function MyTimes() {
           {grid.days.map((day) => (
             <div key={day.date} className="heat-head">
               {dayLabel(day.date)}
-              <div className="heat-actions">
-                <button type="button" onClick={() => setGrid(setDay(grid, day.date, "free"))}>all</button>
-                <button type="button" onClick={() => setGrid(setDay(grid, day.date, "off"))}>none</button>
-              </div>
             </div>
           ))}
           {rows.map((time) => (
@@ -127,11 +130,9 @@ export function MyTimes() {
           ))}
         </div>
       </div>
-      <p className="hint" aria-live="polite">
-        {status || `${count} half hours ticked.`}
-      </p>
+      {status && <p className="error" role="alert">{status}</p>}
       <button type="button" className="on" disabled={saving} onClick={save}>
-        {saving ? "Saving…" : grid.submitted ? "Update my times" : "Submit my times"}
+        {saving ? "Submitting…" : "Submit availabilities"}
       </button>
     </section>
   );
@@ -148,7 +149,7 @@ function Row({
   time: string;
   grid: MyGrid;
   lookup: Map<string, MyGrid["days"][number]["cells"][number]>[];
-  begin: (start: string, pointerType: string) => void;
+  begin: (start: string) => void;
   over: (start: string) => void;
   tap: (start: string) => void;
 }) {
@@ -169,9 +170,8 @@ function Row({
             aria-label={label}
             data-start={cell.start_at}
             onPointerDown={(e) => {
-              // Let the pointer move across other cells while it stays pressed (touch included).
-              (e.target as Element).releasePointerCapture?.(e.pointerId);
-              begin(cell.start_at, e.pointerType || "mouse");
+              if (e.button !== 0) return;
+              begin(cell.start_at);
             }}
             onPointerEnter={() => over(cell.start_at)}
             onClick={() => tap(cell.start_at)}

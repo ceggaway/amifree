@@ -15,7 +15,6 @@ const at = (days: number, hour: number) => {
   d.setHours(hour, 0, 0, 0);
   return d.toISOString();
 };
-let detection = false;
 let reminders = true;
 let mockPoll: PollDetail = {
   id: "mock",
@@ -103,9 +102,6 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
     result = { days: 120, held: 6, cancelled: 1, going: 48, came: 39, turnout: "81%", pro_required: false, by_event: [{ title: "Training", sessions: 5, going: 40, came: 33, turnout: "82%" }, { title: "Welcome tea", sessions: 1, going: 8, came: 6, turnout: "75%" }] };
   } else if (path.endsWith("/export")) {
     result = { message: "📬 Sent the attendance file to your chat with AmIFree." };
-  } else if (path.endsWith("/detection")) {
-    detection = Boolean(data.on);
-    result = { detection };
   } else if (path === "/api/me" && method === "PATCH") {
     reminders = Boolean(data.reminders_enabled);
     result = { reminders_enabled: reminders };
@@ -114,9 +110,8 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
       chat: "n100500",
       title: "CS3216 group",
       events: [{ ...groupEvent, recurring: false }],
-      polls: [{ id: "mock", title: "Project meeting", status: "COLLECTING", duration_minutes: 120, joined: 3, joined_by_me: false, deadline_at: at(1, 23), min_joined: 3 }],
+      polls: [{ id: "mock", title: "Project meeting", status: "COLLECTING", duration_minutes: 120, joined: 3, joined_by_me: false, organiser: true, availability_submitted: false, deadline_at: at(1, 23), min_joined: 3 }],
       admin: true,
-      detection,
     };
   } else if (path.startsWith("/api/groups/")) {
     result = { id: path.endsWith("/polls") ? "mock" : groupEvent.id };
@@ -188,9 +183,11 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
       duration_minutes: 120,
       joined: 6,
       known: 6,
-      min_known: 3,
+      min_known: 2,
       ready: true,
       max_free: 6,
+      status: "OPEN",
+      organiser: true,
       days: [1, 2, 3, 4].map((offset) => {
         const d = day(offset);
         return {

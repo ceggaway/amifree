@@ -8,11 +8,10 @@ import pytest
 from telegram import Update
 
 from app.schemas.event import SG, Suggestion
-from app.services.detection import DetectionService
 from app.services.polls import PollService, parse_request
 from tests.conftest import extraction
-from tests.test_group_events import CHAT, alerts, buttons, group_tap, make_bot
-from tests.test_group_reports import PLAN, run
+from tests.test_group_events import CHAT, alerts, group_tap, make_bot
+from tests.test_group_reports import PLAN
 from tests.test_group_series import SERIES, post_series, sessions
 
 WEDNESDAY = datetime(2026, 10, 7, 12, tzinfo=SG)
@@ -111,34 +110,28 @@ async def test_rate_limited_poll_card_edit_is_retried(service_factory):
     assert len(edits) == 2  # refused once, then redrawn instead of lost
 
 
-async def test_only_the_author_or_an_admin_decides_a_suggestion(service_factory):
+async def test_retired_suggestions_cannot_be_accepted_by_authors_members_or_admins(service_factory):
     service, repo = service_factory(PLAN)
-    repo.detection[CHAT] = True
     bot, transport = make_bot(service)
     async with bot:
-        await run(bot, "Badminton Saturday 4pm-6pm at UTSRC", 97, 2)
-        taps = buttons(transport.sent[-1]["reply_markup"])
-        assert next(iter(repo.suggestions.values())).author_telegram_id == 2
-        # Another member can neither take it over nor remove it.
-        for n, label in enumerate(("Make event card", "Ignore")):
+        for index, member in enumerate((2, 3, 5)):
+            transport.admins.add(5)
             await bot.process_update(
-                Update.de_json(group_tap(taps[label], 3, update_id=9300 + n), bot.bot)
+                Update.de_json(
+                    group_tap("d:ok:old-suggestion", member, update_id=9300 + index), bot.bot
+                )
             )
-            assert "Only the person who wrote that message" in alerts(transport)[-1]["text"]
-        assert len(repo.suggestions) == 1 and not repo.group_events
-        assert not [c for c in transport.calls if c[0] == "deleteMessage"]
-        # A group admin can.
-        transport.admins.add(5)
-        await bot.process_update(
-            Update.de_json(group_tap(taps["Ignore"], 5, update_id=9310), bot.bot)
-        )
-    assert not repo.suggestions
-    assert [c for c in transport.calls if c[0] == "deleteMessage"]
+            assert "no longer supported" in alerts(transport)[-1]["text"]
+    assert not repo.group_events and not service.extractor.calls
 
 
-async def test_suggestions_from_before_the_migration_stay_open(service_factory):
+async def test_suggestions_from_before_the_migration_are_also_retired(service_factory):
+    service, repo = service_factory()
     old = Suggestion(id="x", chat_id=CHAT, source_message_id=1, draft={})
-    assert await DetectionService.may_decide(old, 3, None)
+    repo.suggestions[old.id] = old
+    result = await service.detection.callback(3, CHAT, "d:ok:x")
+    assert "no longer supported" in result.alert and result.delete_message
+    assert not repo.group_events
 
 
 async def test_manage_opens_a_private_menu_for_the_organiser_only(service_factory):

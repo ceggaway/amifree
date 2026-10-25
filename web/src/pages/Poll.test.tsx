@@ -79,7 +79,7 @@ describe("poll page", () => {
     show(base);
     expect(await screen.findByText(/The organiser is choosing the time/)).toBeTruthy();
     expect(screen.getAllByText("4 of 5 free")).toHaveLength(3);
-    expect(screen.queryByRole("button", { name: "Choose this time" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create event at this time" })).toBeNull();
     expect(screen.queryByText("Vote for this time")).toBeNull();
   });
 
@@ -100,9 +100,18 @@ describe("poll page", () => {
   it("lets the organiser choose a time, which opens the posted event", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     show({ ...base, organiser: true });
-    const picks = await screen.findAllByRole("button", { name: "Choose this time" });
+    const picks = await screen.findAllByRole("button", { name: "Create event at this time" });
     fireEvent.click(picks[2]);
     expect(await screen.findByText("Event page")).toBeTruthy();
     expect(calls).toEqual([["pick", 2]]);
+  });
+
+  it("does not create an event when the organiser cancels confirmation", async () => {
+    const confirmation = vi.spyOn(window, "confirm").mockReturnValue(false);
+    show({ ...base, organiser: true });
+    fireEvent.click((await screen.findAllByRole("button", { name: "Create event at this time" }))[0]);
+    expect(confirmation).toHaveBeenCalledWith("Create an event at this time? This closes the poll and posts the event in the group for RSVPs.");
+    expect(calls).toEqual([]);
+    expect(screen.queryByText("Event page")).toBeNull();
   });
 });

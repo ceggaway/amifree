@@ -8,7 +8,14 @@ from app.schemas.event import Status
 from app.services.jobs import Notifier
 from app.services.recurrence import parse_recurrence, session_dates, week_end
 from tests.conftest import extraction
-from tests.test_group_events import alerts, buttons, group_message, group_tap, make_bot
+from tests.test_group_events import (
+    alerts,
+    buttons,
+    group_message,
+    group_tap,
+    make_bot,
+    seed_event_card,
+)
 from tests.test_notifications import Outbox
 
 TRAINING = "Training every Tue/Thu 7-9pm at UTSRC until week 13"
@@ -38,9 +45,7 @@ async def post_series(service, repo, text=TRAINING, message_id=50):
     service.post_group_card = post
     service.notifier = Notifier(service, Outbox())
     async with bot:
-        await bot.process_update(
-            Update.de_json(group_message(f"/event {text}", message_id, 1), bot.bot)
-        )
+        await seed_event_card(bot, text, message_id, 1)
     return bot, transport
 
 
@@ -104,7 +109,7 @@ async def test_series_makes_a_card_per_session_and_posts_them_ahead(service_fact
     assert "Going to all" in buttons(card["reply_markup"])
     series = next(iter(repo.series.values()))
     assert series.weekdays == [1, 3] and series.until_date == date(2026, 11, 12)
-    # A retried delivery of the same command makes nothing new.
+    # Retired creation commands cannot duplicate an existing series.
     async with bot:
         await bot.process_update(
             Update.de_json(group_message(f"/event {TRAINING}", 50, 1), bot.bot)

@@ -46,7 +46,7 @@ export function Poll() {
   }
 
   async function pick(slot: number) {
-    if (!(await confirm("Choose this time? It's posted in the group and the poll closes."))) return;
+    if (!(await confirm("Create an event at this time? This closes the poll and posts the event in the group for RSVPs."))) return;
     setBusy(true);
     try {
       const { event_id } = await api.pick(p!.id, slot);
@@ -78,7 +78,7 @@ export function Poll() {
       {p.status === "COLLECTING" && (
         <section className="card">
           <p>
-            {p.joined} joined. When the deadline passes, the organiser gets the best times and chooses one
+            {p.joined} joined. When the deadline passes, the best times are posted in the group and the organiser chooses one
             {p.joined < p.min_joined ? ` (at least ${p.min_joined} need to join)` : ""}.
           </p>
           <p className="hint">The group only sees how many people are free, never who is busy or why.</p>
@@ -93,7 +93,7 @@ export function Poll() {
       {p.status === "OPEN" && (
         <p className="banner info">
           {p.organiser
-            ? "Results are in. Choose the time that works, and it's posted in the group for everyone."
+            ? "Results are in. Choose a suggested time, or any time from See all times below. It's posted in the group for everyone."
             : "Results are in. The organiser is choosing the time, and it will be posted in the group."}
         </p>
       )}
@@ -109,7 +109,7 @@ export function Poll() {
             </p>
             {p.organiser && (
               <button type="button" className="on big" disabled={busy} onClick={() => pick(index)}>
-                Choose this time
+                Create event at this time
               </button>
             )}
           </section>
@@ -131,8 +131,8 @@ export function Poll() {
       )}
 
       {p.joined_by_me && p.status !== "CLOSED" && (
-        <details>
-          <summary>Who's free when</summary>
+        <details open={p.organiser && p.status === "OPEN"}>
+          <summary>{p.organiser ? "See all times (tap one to choose it)" : "Who's free when"}</summary>
           <Heatmap />
         </details>
       )}

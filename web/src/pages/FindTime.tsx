@@ -94,7 +94,7 @@ export function FindTime() {
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>Find a time</h1>
+      <h1>Find a common time</h1>
       <p className="hint">
         Members fill in when they're free, and AmIFree suggests the best times. The group only ever sees how
         many people are free, never who is busy.
@@ -190,7 +190,7 @@ export function FindTime() {
         <input type="date" value={replyBy} min={todayKey()} max={last} onChange={(e) => setReplyBy(e.target.value)} />
         <span className="hint">
           Members fill in their free times until the end of this day. Then AmIFree suggests the best times
-          to the group to vote on. Leave blank to use {defaultDeadline(last)}.
+          for the organiser to choose from. Leave blank to use {defaultDeadline(last)}.
         </span>
       </label>
       {error && <p className="error">{error}</p>}

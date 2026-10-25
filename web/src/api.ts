@@ -87,6 +87,8 @@ export const api = {
     request<PollDetail>("POST", `/api/polls/${id}/vote`, { slot, answer }),
   suggest: (id: string) => request<{ message: string }>("POST", `/api/polls/${id}/suggest`),
   pick: (id: string, slot: number) => request<{ event_id: string }>("POST", `/api/polls/${id}/pick`, { slot }),
+  pickTime: (id: string, start_at: string) =>
+    request<{ event_id: string }>("POST", `/api/polls/${id}/pick-time`, { start_at }),
   nudgePoll: (id: string) => request<{ message: string }>("POST", `/api/polls/${id}/nudge`),
   pollHeatmap: (id: string) => request<Heatmap>("GET", `/api/polls/${id}/heatmap`),
   myGrid: (id: string) => request<MyGrid>("GET", `/api/polls/${id}/availability`),
@@ -100,8 +102,6 @@ export const api = {
   groupStats: (code: string, days: number) => request<GroupStats>("GET", `/api/groups/${code}/stats?days=${days}`),
   exportAttendance: (code: string, days: number) =>
     request<{ message: string }>("POST", `/api/groups/${code}/export`, { days }),
-  setDetection: (code: string, on: boolean) =>
-    request<{ detection: boolean }>("PUT", `/api/groups/${code}/detection`, { on }),
   createEvent: (code: string, form: EventForm) =>
     request<{ id: string }>("POST", `/api/groups/${code}/events`, form),
   createPoll: (code: string, form: PollForm) =>

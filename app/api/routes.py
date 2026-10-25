@@ -31,6 +31,7 @@ from app.api.schemas import (
     PlanPatch,
     PollForm,
     PollPickRequest,
+    PollPickTimeRequest,
     PollVoteRequest,
     RsvpRequest,
     SeriesRequest,
@@ -454,6 +455,14 @@ def build_router(settings: Settings) -> APIRouter:
         hub = service_of(request).hub
         poll = await hub_call(hub.organised_poll(user, valid_id(poll_id)))
         return await hub_call(hub.poll_pick(user, poll, body.slot))
+
+    @router.post("/polls/{poll_id}/pick-time")
+    async def poll_pick_time(
+        poll_id: str, body: PollPickTimeRequest, request: Request, user: CurrentUser
+    ):
+        hub = service_of(request).hub
+        poll = await hub_call(hub.organised_poll(user, valid_id(poll_id)))
+        return await hub_call(hub.poll_pick_time(user, poll, body.start_at))
 
     @router.post("/polls/{poll_id}/nudge")
     async def poll_nudge(poll_id: str, request: Request, user: CurrentUser):

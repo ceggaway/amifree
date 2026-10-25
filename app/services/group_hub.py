@@ -182,6 +182,7 @@ class GroupHub:
         polls = []
         for poll in await self.repo.chat_polls(chat_id, now):
             people = await self.repo.poll_participants(poll.id)
+            submitted = await self.repo.get_availability(poll.id, user.id)
             polls.append(
                 {
                     "id": poll.id,
@@ -190,6 +191,8 @@ class GroupHub:
                     "duration_minutes": poll.duration_minutes,
                     "joined": len(people),
                     "joined_by_me": user.id in people,
+                    "availability_submitted": submitted is not None,
+                    "organiser": poll.creator_user_id == user.id,
                     "deadline_at": poll.deadline_at.isoformat() if poll.deadline_at else None,
                     "min_joined": MIN_PARTICIPANTS,
                 }
@@ -200,7 +203,7 @@ class GroupHub:
             "events": shown,
             "polls": polls,
             "admin": await self.admin_or_not(user, chat_id),
-            "detection": await self.scheduling.detection.enabled(chat_id),
+            "detection": False,
         }
 
     async def summary(self, user, event: GroupEvent) -> dict:
@@ -418,22 +421,9 @@ class GroupHub:
         return {"message": "📬 Sent the attendance file to your chat with AmIFree."}
 
     async def set_detection(self, user, chat_id: int, on: bool) -> dict:
-        """An admin switches event detection; the group is told, as with /detect."""
+        """Reject settings changes from older app versions."""
         await self.require_member(user, chat_id)
-        if not await self.is_admin(user, chat_id, fresh=True):
-            raise Refused("Only a group admin can change event detection.")
-        detection = self.scheduling.detection
-        if await detection.enabled(chat_id) != on:
-            result = await detection.command(
-                user.telegram_user_id, chat_id, "on" if on else "off", True
-            )
-            post = getattr(self.scheduling, "post_group_card", None)
-            if post and result.post:
-                try:
-                    await post(chat_id, result.post)
-                except (Forbidden, BadRequest):
-                    pass  # switched anyway; the bot just can't post there
-        return {"detection": on}
+        raise Refused("Spotting plans in chat is no longer supported.")
 
     # ---- find-a-time polls ----
 
@@ -522,6 +512,11 @@ class GroupHub:
         event = await self.scheduling.polls.finalize(user, poll, slot)
         if not event:
             raise Refused("This poll is closed.")
+        return {"event_id": event.id}
+
+    async def poll_pick_time(self, user, poll, start: datetime) -> dict:
+        """The organiser chooses any time from the heatmap, not only a suggested one."""
+        event = await self.scheduling.polls.finalize_at(user, poll, start)
         return {"event_id": event.id}
 
     async def poll_nudge(self, user, poll) -> dict:

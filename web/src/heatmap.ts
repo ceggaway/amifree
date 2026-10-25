@@ -21,6 +21,23 @@ export function shade(free: number, max: number): number {
   return max > 0 ? Math.min(1, Math.max(0, free / max)) : 0;
 }
 
+/**
+ * How many are free for a whole meeting starting at `startAt`: the lowest count across the half
+ * hours it covers. Null when the meeting would run past the day's last cell.
+ */
+export function meetingFree(day: HeatmapDay, startAt: string, minutes: number): number | null {
+  const first = day.cells.findIndex((c) => c.start_at === startAt);
+  if (first < 0) return null;
+  const begin = Date.parse(startAt);
+  let lowest = Infinity;
+  for (let step = 0; step < Math.ceil(minutes / 30); step++) {
+    const cell = day.cells[first + step];
+    if (!cell || Date.parse(cell.start_at) !== begin + step * 30 * 60 * 1000) return null;
+    lowest = Math.min(lowest, cell.free);
+  }
+  return lowest;
+}
+
 /** The cell with the most people free, earliest first, to point at in the summary. */
 export function bestCell(days: HeatmapDay[]): { start_at: string; free: number } | null {
   let best: { start_at: string; free: number } | null = null;

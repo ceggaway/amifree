@@ -281,9 +281,7 @@ async def test_organiser_can_choose_any_time_from_the_heatmap(service_factory):
     await with_schedule(repo, 1, 2, 3)
     bot, transport = make_bot(service)
     async with bot:
-        await bot.process_update(
-            Update.de_json(group_message("/whosfree project meeting 2h tomorrow", 30, 1), bot.bot)
-        )
+        await seed_poll_card(bot, "project meeting 2h tomorrow", 30, 1)
     poll = next(iter(repo.polls.values()))
     for member in (2, 3):
         await repo.poll_join(poll.id, (await repo.ensure_user(member)).id)

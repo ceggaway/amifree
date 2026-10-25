@@ -56,17 +56,34 @@ def test_a_failing_client_never_raises(recorder, monkeypatch):
     analytics.track("start")
 
 
-def test_configure_with_key(monkeypatch):
+def test_configure_with_key(caplog):
+    caplog.set_level("INFO")
     settings = Settings(
         _env_file=None,
         bot_mode="disabled",
-        posthog_api_key=SecretStr("phc_test"),
+        # Pasted into a hosting dashboard with a stray space and newline.
+        posthog_api_key=SecretStr(" phc_test1234\n"),
+        posthog_host="https://eu.i.posthog.com/ ",
         telegram_bot_token=SecretStr("token"),
     )
     analytics.configure(settings)
     try:
         assert analytics._client is not None
+        assert analytics._client.api_key == "phc_test1234"
+        assert analytics._client.host == "https://eu.i.posthog.com"
     finally:
         analytics._client.disabled = True
         analytics.shutdown()
     assert analytics._client is None
+    assert "analytics_on host=https://eu.i.posthog.com key=phc_...1234" in caplog.text
+
+
+def test_upload_failures_are_logged(caplog):
+    analytics._upload_failed(RuntimeError("[PostHog] invalid key (401)"), [{}, {}])
+    assert "analytics_failed error_type=RuntimeError events=2" in caplog.text
+
+
+def test_says_when_off(caplog):
+    caplog.set_level("INFO")
+    analytics.configure(Settings(_env_file=None, bot_mode="disabled"))
+    assert "analytics_off reason=no_posthog_api_key" in caplog.text

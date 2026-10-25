@@ -22,16 +22,32 @@ _WORD = re.compile(r"[a-z_]{1,12}")
 def configure(settings):
     """Start sending events. Called once at startup; tests never call it, so nothing is sent."""
     global _client, _secret
-    key = settings.posthog_api_key.get_secret_value()
+    # Stripped: a key pasted into a hosting dashboard often brings a space or newline along.
+    key = settings.posthog_api_key.get_secret_value().strip()
+    host = settings.posthog_host.strip().rstrip("/")
     if not key:
+        log.info("analytics_off reason=no_posthog_api_key")
         return
     from posthog import Posthog
 
-    _client = Posthog(key, host=settings.posthog_host, disable_geoip=True)
+    _client = Posthog(key, host=host, disable_geoip=True, on_error=_upload_failed)
+    # PostHog accepts unknown keys and drops their events, so show enough to compare it with
+    # the project's key (public, unlike personal phx_ keys) when nothing arrives.
+    log.info("analytics_on host=%s key=%s...%s", host, key[:4], key[-4:])
     # Keyed so the hash can't be reversed by trying every Telegram id.
     _secret = hashlib.sha256(
         b"analytics:" + settings.telegram_bot_token.get_secret_value().encode()
     ).digest()
+
+
+def _upload_failed(error, batch):
+    # Runs on PostHog's sending thread; without this a bad key or host fails silently.
+    log.warning(
+        "analytics_failed error_type=%s events=%s detail=%s",
+        type(error).__name__,
+        len(batch),
+        str(error)[:200],
+    )
 
 
 def shutdown():

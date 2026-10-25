@@ -139,6 +139,7 @@ async def test_first_feed_fetch_moves_on_to_part_two(service_factory, reference)
     [(telegram_id, reply)] = sent.messages
     assert telegram_id == 1 and "Part 1 done" in reply.text and "Part 2 of 2" in reply.text
     assert "⏭ Skip this part" in labels(reply)
+    assert onboarding.FEED_REFRESH_TIP in reply.text
     service.clock = lambda: reference + timedelta(hours=1)
     await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
     assert len(sent.messages) == 1  # only the first fetch announces
@@ -155,7 +156,8 @@ async def test_feed_after_a_link_says_all_set(service_factory, reference):
     await service.message(1, 5, ICLOUD_CCA, reference)
     await service.callback(1, "setup:apple")
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
-    assert sent.messages[0][1].text == onboarding.APPLE_ALL_SET
+    text = sent.messages[0][1].text
+    assert text.startswith(onboarding.APPLE_ALL_SET) and "Every 5 minutes" in text
 
 
 async def test_half_done_apple_setup_shows_in_calendar(service_factory, reference):

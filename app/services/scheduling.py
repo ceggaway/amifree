@@ -1687,6 +1687,7 @@ class SchedulingService:
                 onboarding.apple_part2_keyboard(),
                 parse_mode="HTML",
             )
+        reply.text += "\n\n" + onboarding.FEED_REFRESH_TIP
         try:
             await self.send_private(user.telegram_user_id, reply)
         except Exception as exc:
@@ -1717,7 +1718,7 @@ class SchedulingService:
             "\n\nOn a Mac: Calendar → File → New Calendar Subscription, then paste."
             "\n\nYour Going and Saved plans then appear in a calendar called AmIFree and update "
             "by themselves when plans change. Keep the link private: anyone with it can see "
-            "your plans."
+            "your plans.\n\n" + onboarding.FEED_REFRESH_TIP
         )
         return Reply(text, calendar_settings_keyboard())
 

@@ -176,10 +176,16 @@ APPLE_SKIPPED = (
     "OK, skipped. Your plans still go to your AmIFree calendar, but I won't know when you're "
     "busy with other things. Finish it any time in /calendar."
 )
+# Plain text, so it fits both HTML and plain messages.
+FEED_REFRESH_TIP = (
+    "⏱ Want changes to show up faster? Set how often your calendar checks for them:\n"
+    "• Mac: in Calendar, right-click AmIFree → Get Info → Auto-refresh → Every 5 minutes\n"
+    "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → Every 15 "
+    "Minutes (the fastest an iPhone allows)"
+)
 APPLE_ALL_SET = (
     "✅ <b>All set</b>\n"
-    "• Your plans appear in your AmIFree calendar (changes can take a while to show on an "
-    "iPhone)\n"
+    "• Your plans appear in your AmIFree calendar\n"
     "• I'll warn you about clashes and include you when your groups look for a free time"
 )
 

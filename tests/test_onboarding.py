@@ -38,7 +38,7 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
     ]
     expected = {
         # No public address in tests, so Apple goes straight to its busy-times part.
-        "🍎 Apple / iCloud": ["Part 2 of 2", "Public Calendar", "Share Link", "webcal://"],
+        "🍎 Apple / iCloud": ["Part 2 of 2", "Step 1 of 4", "calendar icon"],
         "📅 Google Calendar": ["calendar.google.com", "Secret address in iCal format"],
         "📧 Outlook (soon)": ["coming soon"],
     }

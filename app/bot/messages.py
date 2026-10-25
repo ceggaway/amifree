@@ -57,6 +57,9 @@ class Reply:
     document: tuple[str, bytes] | None = None
     # Pictures sent together as one swipeable album, with text as the caption of the first.
     photos: tuple[bytes, ...] = ()
+    # One picture with text as its caption and the keyboard under it (a step of a guide).
+    # Edited in place, its picture is swapped too, so Next and Back flip through the steps.
+    photo: bytes | None = None
     # Replace the card whose button was tapped instead of sending a new message.
     edit: bool = False
     parse_mode: str | None = None
@@ -376,21 +379,43 @@ async def send_reply(update, reply: Reply):
         await _clear_guide_album(update, reply.clear_album_group)
     query = getattr(update, "callback_query", None)
     if reply.edit and query is not None and not reply.document:
-        from telegram.error import BadRequest
+        from telegram import InputMediaPhoto
+        from telegram.error import BadRequest, TelegramError
 
+        tapped = getattr(query, "message", None)
+        on_picture = bool(getattr(tapped, "photo", None))
         try:
-            await query.edit_message_text(
-                reply.text,
-                reply_markup=reply.keyboard,
-                parse_mode=reply.parse_mode,
-                **preview_options,
-            )
-            return
+            if reply.photo is not None and on_picture:
+                await query.edit_message_media(
+                    InputMediaPhoto(reply.photo, caption=reply.text, parse_mode=reply.parse_mode),
+                    reply_markup=reply.keyboard,
+                )
+                return
+            if reply.photo is None and not on_picture:
+                await query.edit_message_text(
+                    reply.text,
+                    reply_markup=reply.keyboard,
+                    parse_mode=reply.parse_mode,
+                    **preview_options,
+                )
+                return
+            # Text can't become a picture, or a picture text: replace the message instead.
+            try:
+                await tapped.delete()
+            except TelegramError:
+                pass
         except BadRequest as exc:
             if "not modified" in str(exc).lower():
                 return  # tapped twice: the card already shows this state
             # Too old to edit, or deleted: fall through and send it as a new message.
-    if reply.photos:
+    if reply.photo is not None:
+        await update.effective_message.reply_photo(
+            reply.photo,
+            caption=reply.text,
+            parse_mode=reply.parse_mode,
+            reply_markup=reply.keyboard,
+        )
+    elif reply.photos:
         from telegram import InputMediaPhoto
 
         sent = await update.effective_message.reply_media_group(

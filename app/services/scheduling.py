@@ -1647,9 +1647,9 @@ class SchedulingService:
         """Apple, part 1 of 2: subscribe to the AmIFree feed. Part 2 is the iCloud link guide,
         sent by itself once the calendar app first fetches the feed (see calendar_feed)."""
         if not self.settings.app_base_url:
-            return self.setup_screen("apple2", onboarding.APPLE_NO_FEED)
+            return self.apple_step(lead=onboarding.APPLE_NO_FEED)
         if user.calendar_feed_token and user.calendar_feed_seen_at:
-            return self.setup_screen("apple2", onboarding.APPLE_PART1_DONE)
+            return self.apple_step(lead=onboarding.APPLE_PART1_DONE)
         token = await self.ensure_feed_token(user)
         text = onboarding.APPLE_PART1
         if user.google_connected:
@@ -1661,6 +1661,20 @@ class SchedulingService:
                 onboarding.apple_part1_keyboard(add),
                 edit=True,
                 parse_mode="HTML",
+                clear_album_group="setup",
+            )
+        ]
+
+    def apple_step(self, device: str = "ios", n: int = 1, lead: str = "") -> list[Reply]:
+        """One step of Apple part 2, as a picture with its instructions under it."""
+        text, photo, keyboard = onboarding.apple_step(device, n, lead)
+        return [
+            Reply(
+                text,
+                keyboard,
+                edit=True,
+                parse_mode="HTML",
+                photo=photo,
                 clear_album_group="setup",
             )
         ]
@@ -1677,19 +1691,23 @@ class SchedulingService:
         part 2 of Apple setup if nothing tells me yet when they're busy. Best effort."""
         if not self.send_private:
             return
+        tip = "\n\n" + onboarding.FEED_REFRESH_TIP
         if user.google_connected:
-            reply = Reply("✅ Your AmIFree calendar is subscribed. Your plans now appear in it.")
+            replies = [
+                Reply("✅ Your AmIFree calendar is subscribed. Your plans now appear in it." + tip)
+            ]
         elif await self.repo.list_calendars(user.id):
-            reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
+            replies = [Reply(onboarding.APPLE_ALL_SET + tip, parse_mode="HTML")]
         else:
-            reply = Reply(
-                onboarding.apple_part2(lead=onboarding.APPLE_PART1_DONE),
-                onboarding.apple_part2_keyboard(),
-                parse_mode="HTML",
-            )
-        reply.text += "\n\n" + onboarding.FEED_REFRESH_TIP
+            # The tip first, then part 2's first step on its own, so the step stays short.
+            text, photo, keyboard = onboarding.apple_step()
+            replies = [
+                Reply(onboarding.APPLE_PART1_DONE + tip, parse_mode="HTML"),
+                Reply(text, keyboard, parse_mode="HTML", photo=photo),
+            ]
         try:
-            await self.send_private(user.telegram_user_id, reply)
+            for reply in replies:
+                await self.send_private(user.telegram_user_id, reply)
         except Exception as exc:
             log.warning("feed_working_dm_failed error_type=%s", type(exc).__name__)
 
@@ -2060,9 +2078,16 @@ class SchedulingService:
                 return self.google_sync.steps(phone=True)  # sharing; the link is its fallback
             if name == "apple":
                 return await self.apple_setup(user)
+            if name in ("apple2", "apple2mac"):
+                return self.apple_step("mac" if name == "apple2mac" else "ios")
             if name == "appleskip":
                 return [Reply(onboarding.APPLE_SKIPPED, edit=True, clear_album_group="setup")]
             return self.setup_screen(name)
+        if action == "a2":
+            steps = onboarding.APPLE_STEPS.get(parts[1] if len(parts) == 3 else "")
+            if not steps or parts[2] not in [str(n) for n in range(1, len(steps) + 1)]:
+                return [Reply("That button isn't valid. Use /calendar.")]
+            return self.apple_step(parts[1], int(parts[2]))
         if data == "calp:later":
             return [Reply(onboarding.PROMPT_LATER, edit=True)]
         if data in ("free:today", "free:tomorrow", "free:weekend"):

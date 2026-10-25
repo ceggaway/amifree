@@ -171,7 +171,7 @@ APPLE_NO_FEED = (
     "add it. This part lets me check when you're busy."
 )
 APPLE_PART1_DONE = "✅ <b>Part 1 done</b>: your plans will appear in your AmIFree calendar."
-APPLE_PART2 = "<b>Part 2 of 2 · Let me check when you're busy</b>\n\n"
+APPLE_PART2 = "<b>Part 2 of 2 · Let me check when you're busy</b>\n"
 APPLE_SKIPPED = (
     "OK, skipped. Your plans still go to your AmIFree calendar, but I won't know when you're "
     "busy with other things. Finish it any time in /calendar."
@@ -190,9 +190,88 @@ APPLE_ALL_SET = (
 )
 
 
-def apple_part2(mac: bool = False, lead: str = "") -> str:
-    """The iCloud public-link guide, as the second half of Apple setup."""
-    return (lead + "\n\n" if lead else "") + APPLE_PART2 + GUIDES["mac" if mac else "ios"]
+# Apple part 2, one step per message, each with the picture of that screen
+# (app/assets/ios). "Mine's Google" shows on the step whose text mentions Gmail.
+APPLE_STEPS = {
+    "ios": (
+        (
+            "ios_step1.png",
+            "Open the <b>Calendar</b> app and tap the <b>calendar icon</b> at the bottom "
+            "(circled in red).",
+        ),
+        (
+            "ios_step2.png",
+            "Under <b>iCloud</b>, tap the <b>ⓘ</b> next to the calendar you use.\n\n"
+            "Only see <b>Gmail</b>, no iCloud? Your calendar is Google: tap "
+            "<b>📅 Mine's Google</b>.",
+        ),
+        (
+            "ios_step3.png",
+            "Scroll down and turn on <b>Public Calendar</b>.\n\n"
+            "🔒 Anyone with this calendar's link can see its events, so only paste the link "
+            "here. I keep just your busy times.",
+        ),
+        (
+            "ios_step4.png",
+            "Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
+            "👇 <b>Paste the link here.</b> It starts with <code>webcal://</code>.\n"
+            "Several iCloud calendars (Classes, CCA)? Send each one's link.",
+        ),
+    ),
+    "mac": (
+        (
+            "mac_step1.png",
+            "In the <b>Calendar</b> app, find your calendar under <b>iCloud</b> on the left. "
+            "Hover over it, click the <b>person icon</b>, then tick <b>Public Calendar</b>.\n\n"
+            "No list? Click the calendar icon at the top. Only see <b>Gmail</b>? Tap "
+            "<b>📅 Mine's Google</b>.",
+        ),
+        (
+            "mac_step2.png",
+            "Click the <b>share button</b> next to the link, then <b>Copy</b>, then "
+            "<b>Done</b>.\n\n"
+            "👇 <b>Paste the link here.</b> It starts with <code>webcal://</code>.\n"
+            "🔒 Anyone with the link can see that calendar, so only paste it here. I keep just "
+            "your busy times.",
+        ),
+    ),
+}
+GOOGLE_HINT = {("ios", 2), ("mac", 1)}
+
+
+def apple_step(
+    device: str = "ios", n: int = 1, lead: str = ""
+) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
+    """One step of Apple part 2: its text, its picture (None if it can't be read), buttons."""
+    steps = APPLE_STEPS[device]
+    picture, body = steps[n - 1]
+    where = "On a Mac · " if device == "mac" else ""
+    text = (
+        (lead + "\n\n" if lead else "")
+        + APPLE_PART2
+        + f"<b>{where}Step {n} of {len(steps)}</b>\n"
+        + body
+    )
+    try:
+        photo = (Path(__file__).resolve().parent.parent / "assets" / "ios" / picture).read_bytes()
+    except OSError:
+        photo = None
+    nav = []
+    if n > 1:
+        nav.append(InlineKeyboardButton("‹ Back", callback_data=f"a2:{device}:{n - 1}"))
+    if n < len(steps):
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"a2:{device}:{n + 1}"))
+    rows = [nav] if nav else []
+    if n == 1:
+        rows.append(
+            [_button("💻 On a Mac instead?", "apple2mac")]
+            if device == "ios"
+            else [_button("📱 On an iPhone instead?", "apple2")]
+        )
+    if (device, n) in GOOGLE_HINT:
+        rows.append([_button("📅 Mine's Google", "google")])
+    rows.append([_button("⏭ Skip this part", "appleskip")])
+    return text, photo, InlineKeyboardMarkup(rows)
 
 
 PLAN_ACTIONS = (
@@ -364,21 +443,6 @@ def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:
     )
 
 
-def apple_part2_keyboard(mac: bool = False) -> InlineKeyboardMarkup:
-    switch = (
-        _button("📱 On an iPhone instead?", "apple2")
-        if mac
-        else _button("💻 On a Mac instead?", "apple2mac")
-    )
-    return InlineKeyboardMarkup(
-        [
-            [switch],
-            [_button("📅 Mine's Google", "google")],
-            [_button("⏭ Skip this part", "appleskip")],
-        ]
-    )
-
-
 def first_calendar_keyboard(finish_apple: bool = False) -> InlineKeyboardMarkup:
     """Offer calendar setup, NUSMods, and plans in a calendar app before connecting."""
     from app.bot.keyboards import calendar_home_rows
@@ -436,7 +500,6 @@ SCREEN_PHOTOS = {
     "ios": ("ios", ("ios_step1.png", "ios_step2.png", "ios_step3.png", "ios_step4.png")),
     "mac": ("ios", ("mac_step1.png", "mac_step2.png")),
 }
-SCREEN_PHOTOS["apple2"], SCREEN_PHOTOS["apple2mac"] = SCREEN_PHOTOS["ios"], SCREEN_PHOTOS["mac"]
 
 
 def screen_photos(name: str) -> tuple[bytes, ...]:
@@ -595,8 +658,6 @@ HTML_SCREENS = frozenset(
         "classes",
         "skip",
         "sendplan",
-        "apple2",
-        "apple2mac",
     }
 )
 
@@ -609,16 +670,13 @@ def parse_mode(name: str) -> str | None:
 def screen(name: str) -> tuple[str, InlineKeyboardMarkup | None] | None:
     """The text and buttons for one setup screen, or None for an unknown name.
 
-    "google" with sharing on, and "apple", need the user, so the service builds those."""
+    "google" with sharing on, and the "apple" screens, are built by the service."""
     if name == "home":
         return WELCOME, welcome_keyboard()
     if name == "calendar":
         return PICK_CALENDAR, pick_calendar_keyboard()
     if name == "notsure":
         return NOT_SURE, not_sure_keyboard()
-    if name in ("apple2", "apple2mac"):
-        mac = name == "apple2mac"
-        return apple_part2(mac), apple_part2_keyboard(mac)
     if name == "googlelink":
         return GUIDES["google"], guide_keyboard("google")
     if name == "classes":

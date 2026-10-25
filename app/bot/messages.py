@@ -285,7 +285,12 @@ def personal_calendar_note(availability: Availability) -> str | None:
     return note
 
 
-def personal_event_card(event: Event, availability: Availability, synced: bool) -> Reply:
+def synced_line(synced: bool | str) -> str:
+    """Which calendar plans go to. A plain True (no name known) says just "your calendar"."""
+    return synced if isinstance(synced, str) else "your calendar"
+
+
+def personal_event_card(event: Event, availability: Availability, synced: bool | str) -> Reply:
     if event.status == Status.CANCELLED:
         return Reply("Cancelled\n\n" + personal_details(event), parse_mode="HTML")
     text = personal_availability(availability) + "\n\n" + personal_details(event)
@@ -300,7 +305,7 @@ def personal_event_card(event: Event, availability: Availability, synced: bool) 
     if added:
         text += "\n\n☑️ <b>Added to your plans.</b>"
         if synced:
-            text += "\nSyncing to your calendar."
+            text += f"\nSyncing to {synced_line(synced)} (/calendar to change)."
         if not hide_exports:
             text += (
                 "\n\nWant this event in your personal calendar? Tap <b>Google Calendar</b> "
@@ -311,13 +316,13 @@ def personal_event_card(event: Event, availability: Availability, synced: bool) 
         text += "\n\n❌ <b>Not in your plans.</b>"
     return Reply(
         text,
-        event_keyboard(event, bool(availability.conflicts), synced=hide_exports),
+        event_keyboard(event, bool(availability.conflicts), synced=bool(hide_exports)),
         parse_mode="HTML",
     )
 
 
-def event_card(event: Event, availability: Availability, synced: bool = False) -> Reply:
-    """synced: the user's calendar app subscribes to their AmIFree feed."""
+def event_card(event: Event, availability: Availability, synced: bool | str = False) -> Reply:
+    """synced: where the user's plans go by themselves ("your Google Calendar"), if anywhere."""
     if not event.group_event_id:
         return personal_event_card(event, availability, synced)
     if event.status == Status.CANCELLED:
@@ -344,8 +349,10 @@ def event_card(event: Event, availability: Availability, synced: bool = False) -
         label = PERSONAL_STATUS_LABELS.get(event.status, label)
     body += "\nStatus: " + label
     if synced and event.status in (Status.SAVED, Status.GOING):
-        body += "\n📅 Syncing to your calendar automatically."
-    keyboard = event_keyboard(event, bool(availability.conflicts), availability.possible, synced)
+        body += f"\n📅 Syncing to {synced_line(synced)} automatically."
+    keyboard = event_keyboard(
+        event, bool(availability.conflicts), availability.possible, bool(synced)
+    )
     return Reply(body, keyboard)
 
 

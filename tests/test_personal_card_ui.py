@@ -155,7 +155,7 @@ def test_calendar_controls_only_for_added_unsynced_plans():
             card = event_card(plan(status=status), Availability(()), synced=synced)
             buttons = [label for row in rows(card) for label in row]
             assert ("📅 Google Calendar" in buttons) == (status == Status.GOING and not synced)
-            assert ("Syncing to your calendar." in card.text) == (status == Status.GOING and synced)
+            assert ("Syncing to your calendar" in card.text) == (status == Status.GOING and synced)
 
 
 @pytest.mark.parametrize("personal_connected", [False, True])
@@ -177,7 +177,7 @@ def test_added_calendar_explanation_matches_export_buttons(personal_connected, s
     assert ("Want this event in your personal calendar?" in card.text) == exports
     assert ("connect calendar syncing through /calendar" in card.text) == exports
     # An imported calendar is not evidence of automatic outbound syncing.
-    assert ("Syncing to your calendar." in card.text) == synced
+    assert ("Syncing to your calendar" in card.text) == synced
 
 
 async def test_connected_personal_calendar_hides_exports_after_add(service_factory, reference):

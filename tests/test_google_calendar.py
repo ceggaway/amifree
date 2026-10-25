@@ -350,7 +350,8 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     part = (await service.callback(1, "gcal:start"))[0]
     pictures = set()
     for n in range(1, 6):
-        assert "Step 1 of 3" in part.text and f"<b>{n} of 5</b>" in part.text
+        assert "Step 1 of 3" in part.text and f"<b>{n} of 5 · " in part.text
+        assert "</b>\n\n<b>" in part.text  # a blank line between the title and the part
         assert part.edit and part.parse_mode == "HTML" and part.photo.startswith(b"\x89PNG")
         assert len(part.text) <= 1024  # Telegram's caption limit
         pictures.add(part.photo)
@@ -361,8 +362,12 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     assert len(pictures) == 5 and "Make changes" in part.text
     first = (await service.callback(1, "gcal:start"))[0]
     assert "Google Calendar</b> app" in first.text and "💻 On a computer instead?" in labels(first)
+    # The phone part says to open the app, so it offers no web link.
+    assert not any(b.url for row in first.keyboard.inline_keyboard for b in row)
     computer = (await service.callback(1, tap(first, "💻 On a computer instead?")))[0]
     assert "calendar.google.com" in computer.text and "📱 On my phone instead?" in labels(computer)
+    [link] = [b for row in computer.keyboard.inline_keyboard for b in row if b.url]
+    assert link.text == "Open calendar.google.com ↗" and link.url == "https://calendar.google.com"
     for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone"):
         assert "isn't valid" in (await service.callback(1, bad))[0].text
 
@@ -512,9 +517,12 @@ async def test_removing_the_google_calendar_disconnects_it(with_google, referenc
     status = (await service.command(1, "calendar"))[0]
     assert "Plans you say Going to are added here" in status.text
 
-    gone = (await service.callback(1, tap(status, "Remove Google Calendar")))[0]
+    gone, unshare = await service.callback(1, tap(status, "Remove Google Calendar"))
 
-    assert "stay in your calendar" in gone.text
+    assert "Removed Google Calendar" in gone.text and gone.edit
+    # AmIFree can't take itself off the calendar, so the owner is told how.
+    assert "Shared with" in unshare.text and f"<code>{BOT}</code>" in unshare.text
+    assert "stay in your calendar" in unshare.text
     assert not repo.google and not repo.users[1].google_connected
     await add_dinner(service, reference)
     service.google_sync_soon(1)
@@ -582,5 +590,5 @@ async def test_cards_say_plans_sync_once_connected(with_google, reference):
     await onboard(service, reference)
     await connect(service, 1, "me@gmail.com", reference, 9)
     added = await add_dinner(service, reference)
-    assert "Syncing to your calendar" in added.text
+    assert "Syncing to your Google Calendar (/calendar to change)" in added.text
     assert "/calendar puts every plan in your iPhone calendar" not in added.text

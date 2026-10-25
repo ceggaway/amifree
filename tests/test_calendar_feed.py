@@ -99,7 +99,10 @@ async def test_first_real_fetch_switches_cards_to_synced(online, reference):
     assert (await repo.ensure_user(1)).calendar_feed_seen_at is not None
     assert "✅ Connected" in (await service.callback(1, "cal:feed"))[0].text
     after = await going(service, reference, message_id=3, text="Hall supper Friday 10pm-11pm")
-    assert "Syncing to your calendar" in after.text and "Tip:" not in after.text
+    assert (
+        "Syncing to your AmIFree calendar (/calendar to change)" in after.text
+        and "Tip:" not in after.text
+    )
     labels = [b.text for row in after.keyboard.inline_keyboard for b in row]
     assert "🍎 Apple Calendar" not in labels and "📅 Google Calendar" not in labels
 

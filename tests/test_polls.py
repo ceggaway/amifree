@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from telegram import Update
 
-from app.schemas.event import SG
+from app.schemas.event import SG, Status
 from app.services.polls import parse_request, suggest_slots
 from tests.conftest import extraction
 from tests.test_group_events import (
@@ -180,7 +180,8 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
     # Without the Mini App, the usual event card is posted in the group.
     event_card = transport.sent[sent_before]
     assert int(event_card["chat_id"]) == CHAT
-    assert "project meeting" in event_card["text"] and "Going 0" in event_card["text"]
+    # Everyone who submitted their availability is already Going.
+    assert "project meeting" in event_card["text"] and "Going 3" in event_card["text"]
     assert repo.polls[poll.id].status == "CLOSED"
     # A second tap changes nothing.
     async with bot:
@@ -221,15 +222,17 @@ async def test_choosing_announces_the_time_with_calendar_buttons(service_factory
         )
     announced = transport.sent[sent_before]
     assert int(announced["chat_id"]) == CHAT
-    assert "📣 project meeting is confirmed!" in announced["text"]
-    assert "🗓 Mon 5 Oct 2026 · 08:00–10:00" in announced["text"]
-    markup = announced["reply_markup"]
-    markup = json.loads(markup) if isinstance(markup, str) else markup
-    urls = {b["text"]: b["url"] for row in markup["inline_keyboard"] for b in row}
+    assert "project meeting is confirmed for Mon 5 Oct 2026, 08:00–10:00." in announced["text"]
+    # A plain notice: no buttons, no emoji.
+    assert not announced.get("reply_markup")
+    assert not any(ord(ch) > 0x2600 for ch in announced["text"])
+    # Everyone who submitted their availability is added as Going (their calendars follow).
     event = next(iter(repo.group_events.values()))
-    assert urls["📅 Google Calendar"].startswith("https://calendar.google.com/")
-    assert urls["🍎 Apple Calendar"] == f"https://amifree.example/ics/event/{event.id}.ics"
-    assert urls["✋ Going or Can't"].endswith(f"startapp=ev_{event.id}")
+    going = {e.user_id for e in repo.events.values() if e.group_event_id == event.id}
+    assert going == {(await repo.ensure_user(t)).id for t in (1, 2, 3)}
+    assert all(
+        e.status == Status.GOING for e in repo.events.values() if e.group_event_id == event.id
+    )
     ics = await service.group_event_ics(event.id)
     assert b"SUMMARY:project meeting" in ics
     assert await service.group_event_ics("not-an-id") is None
@@ -331,8 +334,8 @@ async def test_organiser_can_choose_any_time_from_the_heatmap(service_factory):
     assert event.start_at == late and event.end_at == datetime(2026, 10, 5, 21, 30, tzinfo=SG)
     announced = transport.sent[sent_before]
     assert int(announced["chat_id"]) == CHAT
-    assert "🗓 Mon 5 Oct 2026 · 19:30–21:30" in announced["text"]
-    assert "3 of 3 who filled in are free then" in announced["text"]
+    assert "confirmed for Mon 5 Oct 2026, 19:30–21:30." in announced["text"]
+    assert "3 of 3 people who submitted their availability are free" in announced["text"]
     # A second choice changes nothing.
     try:
         await service.polls.finalize_at(organiser, repo.polls[poll.id], late)

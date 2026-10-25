@@ -131,6 +131,8 @@ describe("MyTimes", () => {
     fireEvent.pointerDown(screen.getByLabelText(/09:00: free/), { pointerType: "touch" });
     expect(screen.getByLabelText(/09:00: not free/).getAttribute("aria-pressed")).toBe("false");
     fireEvent.pointerUp(screen.getByLabelText(/09:00: not free/), { pointerType: "touch" });
+    // Phones send the click after the pointer-up, sometimes late: it must not flip the cell back.
+    await new Promise((resolve) => setTimeout(resolve, 20));
     fireEvent.click(screen.getByLabelText(/09:00: not free/));
     expect(screen.getByLabelText(/09:00: not free/).getAttribute("aria-pressed")).toBe("false");
   });

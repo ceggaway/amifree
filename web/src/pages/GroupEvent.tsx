@@ -212,7 +212,7 @@ function Organiser({ event: e, run }: { event: GroupEventDetail; run: Run }) {
       <p className="hint">
         {new Date(e.start_at).getTime() - Date.now() > 30 * 3600 * 1000
           ? `Members marked Going are asked the day before. Going: ${summary.going}.`
-          : `${summary.confirmed} confirmed · ${summary.unsure} unsure · ${summary.dropped} dropped · ${summary.no_reply} no reply`}
+          : `${summary.confirmed} confirmed · ${summary.dropped} dropped · ${summary.no_reply} no reply`}
       </p>
 
       <h3>Who came ({manage.came})</h3>

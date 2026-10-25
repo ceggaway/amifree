@@ -367,7 +367,7 @@ async def test_running_a_poll_from_its_page(hub, reference):
     event = repo.group_events[picked.json()["event_id"]]
     assert event.start_at.isoformat() == opened["slots"][1]["start_at"]
     # The group gets the announcement, with buttons to add it to a calendar.
-    assert posted[-1][1].text.startswith("📣 Sync is confirmed!")
+    assert posted[-1][1].text.startswith("Sync is confirmed for")
     assert repo.polls[poll_id].status == "CLOSED"
     again = await client.post(f"{page}/pick", headers=bearer(1), json={"slot": 0})
     assert again.status_code == 409 and len(repo.group_events) == 1
@@ -546,4 +546,4 @@ async def test_organiser_picks_any_time_through_the_api(hub, reference):
     assert picked.status_code == 200
     event = repo.group_events[picked.json()["event_id"]]
     assert event.start_at.isoformat() == start and repo.polls[poll_id].status == "CLOSED"
-    assert posted[-1][1].text.startswith("📣 Sync is confirmed!")
+    assert posted[-1][1].text.startswith("Sync is confirmed for")

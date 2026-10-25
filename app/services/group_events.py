@@ -455,8 +455,9 @@ class GroupEventService:
             await self.repo.set_attendance_check(event.id, user.id, "CONFIRMED")
             text = f"✅ See you there: {event.title}, {when}."
         elif parts[1] == "u":
+            # "Not sure" on a message sent before it was removed: ask for a clear answer.
             await self.repo.set_attendance_check(event.id, user.id, "UNSURE")
-            text = f"Noted: unsure about {event.title}, {when}. Tap again once you know."
+            text = f"Are you still coming to {event.title}, {when}? Tap one once you know."
         else:
             await self.repo.group_rsvp(user.id, event, Status.DECLINED)
             await self.repo.set_attendance_check(event.id, user.id, "DROPPED")
@@ -477,7 +478,8 @@ class GroupEventService:
             "confirmed": confirmed,
             "unsure": unsure,
             "dropped": dropped,
-            "no_reply": len(going) - confirmed - unsure,
+            # Answers of "not sure" (from older messages) count as no reply yet.
+            "no_reply": len(going) - confirmed,
         }
 
     # ---- reports: stats and export ----
@@ -870,8 +872,8 @@ class GroupEventService:
         summary = await self.attendance_summary(event)
         return (
             line
-            + f"\n{summary['confirmed']} confirmed · {summary['unsure']} unsure"
-            + f" · {summary['dropped']} dropped · {summary['no_reply']} no reply"
+            + f"\n{summary['confirmed']} confirmed · {summary['dropped']} dropped"
+            + f" · {summary['no_reply']} no reply"
         )
 
     async def check_in(self, user, event: GroupEvent) -> GroupResult:

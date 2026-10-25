@@ -16,8 +16,9 @@ export function MyTimes() {
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const drag = useRef<{ state: "free" | "off"; seen: Set<string> } | null>(null);
-  // A pointerdown that painted already changed the cell: the click that follows must not flip it back.
-  const painted = useRef(false);
+  // A pointerdown that painted already changed the cell: the click the browser sends after it must
+  // not flip it back. Phones send that click late, so remember when the paint happened.
+  const paintedAt = useRef(0);
   useEffect(() => {
     if (data) setGrid(data);
   }, [data]);
@@ -40,8 +41,8 @@ export function MyTimes() {
 
   function tap(start: string) {
     if (!grid) return;
-    if (painted.current) {
-      painted.current = false;
+    if (Date.now() - paintedAt.current < 1000) {
+      paintedAt.current = 0;
       return;
     }
     const cell = grid.days.flatMap((d) => d.cells).find((c) => c.start_at === start);
@@ -50,13 +51,13 @@ export function MyTimes() {
   }
 
   function begin(start: string) {
-    painted.current = false;
+    paintedAt.current = 0;
     if (!grid) return;
     const cell = grid.days.flatMap((d) => d.cells).find((c) => c.start_at === start);
     const state = cell ? dragState(cell.state) : null;
     if (!state) return;
     drag.current = { state, seen: new Set([start]) };
-    painted.current = true;
+    paintedAt.current = Date.now();
     setGrid((current) => current && paint(current, new Set([start]), state));
   }
 
@@ -111,8 +112,6 @@ export function MyTimes() {
         className="heat-scroll availability-scroll"
         onPointerUp={() => {
           drag.current = null;
-          // The click that follows a paint is skipped; forget the flag if no click arrives.
-          setTimeout(() => (painted.current = false), 0);
         }}
         onPointerMove={move}
         onPointerLeave={() => (drag.current = null)}

@@ -155,10 +155,11 @@ GUIDES = {
 
 APPLE_PART1 = (
     "🍎 <b>Apple Calendar</b> · 2 quick parts\n\n"
-    "<b>Part 1 of 2 · Put your plans in your Calendar app</b>\n"
-    "Tap <b>Add to Calendar</b> below, then tap <b>Subscribe</b>.\n\n"
-    "Your Going and Saved plans then appear in a calendar called <b>AmIFree</b> and update "
-    "by themselves. I'll message you here once it's working."
+    "<b>Part 1 of 2 · Add your plans to your calendar automatically</b>\n"
+    "Every event you save with me will show up in your iPhone calendar by itself, and "
+    "update if it changes. No more adding them by hand.\n\n"
+    "Tap <b>Add to Calendar</b> below, then tap <b>Subscribe</b>. Your plans will appear in "
+    "a calendar called <b>AmIFree</b>. I'll message you here once it's working."
 )
 APPLE_ALREADY_GOOGLE = (
     "\n\nℹ️ Your plans already go to your Google Calendar. If that's the calendar on your "

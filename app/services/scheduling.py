@@ -60,7 +60,7 @@ from app.schemas.event import (
     GroupEvent,
     Status,
 )
-from app.services import quick_reminders
+from app.services import analytics, quick_reminders
 from app.services.availability import check_availability
 from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
@@ -333,6 +333,7 @@ class SchedulingService:
 
     async def safe_action(self, user_id, kind, event_id=None, metadata=None):
         # Analytics errors should not break a successful commitment.
+        analytics.track(kind, **{k: v for k, v in (metadata or {}).items() if k != "message_id"})
         try:
             await self.repo.action(user_id, kind, event_id, metadata)
         except Exception as exc:

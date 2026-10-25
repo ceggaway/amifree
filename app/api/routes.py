@@ -40,6 +40,7 @@ from app.api.schemas import (
 from app.config import Settings
 from app.models.user import User
 from app.schemas.event import Event, EventDraft, Status
+from app.services import analytics
 from app.services.app_links import parse_chat_code
 from app.services.availability import Availability
 from app.services.date_resolution import Clarification
@@ -149,6 +150,7 @@ def build_router(settings: Settings) -> APIRouter:
             telegram_id = verify_token(value.strip(), key)
         except AuthError:
             raise HTTPException(401, "Sign in from Telegram again") from None
+        analytics.identify(telegram_id)
         return await service.repo.ensure_user(telegram_id)
 
     CurrentUser = Annotated[User, Depends(current_user)]
@@ -172,6 +174,8 @@ def build_router(settings: Settings) -> APIRouter:
         except AuthError:
             raise HTTPException(401, "Telegram sign-in could not be verified") from None
         await service.repo.ensure_user(telegram_id)
+        analytics.identify(telegram_id)
+        analytics.track("app_opened")
         # Kept so people who only use the app still have a name in "Who's going?".
         service.hub.remember_profile(telegram_id, *init_data_profile(body.init_data))
         return {

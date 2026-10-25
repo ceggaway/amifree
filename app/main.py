@@ -22,6 +22,7 @@ from app.bot.delivery import Delivery, webhook_delivery
 from app.bot.handlers import register_handlers
 from app.config import Settings
 from app.db.supabase import SupabaseRepository
+from app.services import analytics
 from app.services.event_extractor import EventExtractor
 from app.services.google_calendar import GoogleCalendar, load_key
 from app.services.image_reader import ImageReader
@@ -91,6 +92,8 @@ def create_app(
             return
         settings.require_credentials()
         async with AsyncExitStack() as stack:
+            analytics.configure(settings)
+            stack.callback(analytics.shutdown)
             http = await stack.enter_async_context(httpx.AsyncClient(timeout=20))
             ai = await stack.enter_async_context(
                 AsyncOpenAI(

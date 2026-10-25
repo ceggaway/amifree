@@ -9,7 +9,10 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
 from datetime import time as day_time
+from urllib.parse import urlparse
 from uuid import UUID
+
+from telegram import InlineKeyboardMarkup
 
 from app.bot import onboarding
 from app.bot.delivery import telegram_profile
@@ -1865,6 +1868,11 @@ class SchedulingService:
         calendars = {c.id: c for c in await self.repo.list_calendars(user.id)}
         google = await self.repo.get_google_connection(user.id) if user.google_connected else None
         was_google = bool(google and google.calendar_id == calendar_id)
+        guide, links = "", None
+        if calendar_id in calendars:  # read before the link and the share are deleted
+            guide, links = await self.unlink_guide(
+                user, [calendars[calendar_id]], google=was_google
+            )
         if calendar_id not in calendars or not await self.repo.remove_calendar(
             user.id, calendar_id
         ):
@@ -1878,15 +1886,14 @@ class SchedulingService:
             f"Removed {calendars[calendar_id].label}. I've deleted its link and every busy time I "
             "read from it."
         )
-        if was_google and self.google_sync.enabled:
-            # A new message: the status screen below stays a plain-text edit.
-            return [
-                Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True),
-                Reply(onboarding.google_unshare(self.google.email), parse_mode="HTML"),
-            ]
-        return [Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True)]
+        replies = [Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True)]
+        if guide:
+            # A new message: the status screen above stays a plain-text edit.
+            replies.append(Reply(guide, links, parse_mode="HTML"))
+        return replies
 
     async def disconnect_calendar(self, user: User) -> list[Reply]:
+        guide, links = await self.unlink_guide(user)
         for c in await self.repo.list_calendars(user.id):
             await self.repo.remove_calendar(user.id, c.id)
         if user.google_connected:
@@ -1896,9 +1903,34 @@ class SchedulingService:
             "All calendars disconnected. I've deleted their links and every busy time I "
             "read from them."
         )
-        if user.google_connected and self.google_sync.enabled:
-            text += "\n\n" + onboarding.google_unshare(self.google.email)
-        return [Reply(text, parse_mode="HTML")]
+        return [Reply(text + ("\n\n" + guide if guide else ""), links, parse_mode="HTML")]
+
+    async def unlink_guide(
+        self, user: User, calendars=None, *, google: bool = True, feed: bool = False
+    ) -> tuple[str, InlineKeyboardMarkup | None]:
+        """What to undo in the user's own calendar apps for these calendars (default: all),
+        their Google share, and with feed, the AmIFree subscription. Read before deleting."""
+        if calendars is None:
+            calendars = await self.repo.list_calendars(user.id)
+        icloud = google_link = False
+        for c in calendars:
+            link = unseal(c.sealed_url, self.link_secret) or ""
+            if link.startswith(GCAL_PREFIX):
+                continue  # the share, below
+            host = urlparse(link).hostname or ""
+            icloud |= host.endswith("icloud.com")
+            google_link |= host.endswith("google.com")
+        shared = None
+        if google and user.google_connected and self.google_sync.enabled:
+            connection = await self.repo.get_google_connection(user.id)
+            shared = connection.calendar_email if connection else None
+        return onboarding.unlink_guide(
+            bot_email=self.google.email if shared else None,
+            shared_email=shared,
+            google_link=google_link,
+            icloud=icloud,
+            feed=feed and bool(user.calendar_feed_token),
+        )
 
     def google_sync_soon(self, telegram_id: int):
         self.google_sync.sync_soon(telegram_id)
@@ -2182,17 +2214,10 @@ class SchedulingService:
                 await self.repo.set_pending(user.id, None)
                 return [Reply("Kept unchanged.")]
             if pending["stage"] == "delete":
+                guide, links = await self.unlink_guide(user, feed=True)  # read before it's gone
                 await self.repo.delete_user(user.id)
                 text = "Your AmIFree data has been deleted. Use /start to set up again."
-                if user.calendar_feed_token:
-                    text += (
-                        "\n\nThe AmIFree calendar on your phone stops updating. To remove it: "
-                        "Settings → Apps → Calendar → Calendar Accounts → AmIFree → Delete "
-                        "Account."
-                    )
-                if user.google_connected and self.google_sync.enabled:
-                    text += "\n\n" + onboarding.google_unshare(self.google.email)
-                return [Reply(text, parse_mode="HTML")]
+                return [Reply(text + ("\n\n" + guide if guide else ""), links, parse_mode="HTML")]
             if pending["stage"] == "block":
                 rule = BlockRule.model_validate(pending["rule"])
                 await self.repo.create_block(user.id, rule)

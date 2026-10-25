@@ -249,17 +249,41 @@ async def test_a_step_swaps_its_picture_in_place():
     query.edit_message_text.assert_not_awaited()
 
 
-async def test_deleting_data_says_how_to_take_amifree_off_the_calendars(service_factory, reference):
+async def test_deleting_data_says_how_to_unlink_each_calendar(service_factory, reference):
     from tests.test_google_calendar import BOT, connect
 
     service, repo = service_factory(app_base_url=BASE)
     service.google = FakeGoogle()
+    service.calendar_reader = FakeReader((), None, {ICLOUD_CCA: "CCA"})
     await onboard(service, reference)
     await connect(service, 1, "me@gmail.com", reference)
+    await service.message(1, 30, ICLOUD_CCA, reference)
     await service.callback(1, "setup:apple")
     asked = (await service.command(1, "deletemydata"))[0]
     done = (await service.callback(1, tap(asked, "Delete my data")))[0]
     assert "has been deleted" in done.text and done.parse_mode == "HTML"
-    # Deleting here can't unshare in Google or unsubscribe the phone, so both are spelled out.
-    assert "Shared with" in done.text and f"<code>{BOT}</code>" in done.text
-    assert "Calendar Accounts → AmIFree → Delete Account" in done.text
+    # Deleting here can't undo anything in the user's own apps, so each one is spelled out.
+    assert "Google Calendar you shared with me" in done.text and f"<code>{BOT}</code>" in done.text
+    assert "iCloud calendar you made public" in done.text and "Public Calendar" in done.text
+    assert "Calendar Accounts → <b>AmIFree</b> → Delete Account" in done.text
+    assert "Google secret link" not in done.text  # only what they connected
+    [button] = [b for row in done.keyboard.inline_keyboard for b in row]
+    # Straight to that calendar's settings page: its id (the email) in base64.
+    assert button.url == onboarding.GOOGLE_SETTINGS + "/calendar/bWVAZ21haWwuY29t"
+
+
+async def test_removing_one_link_only_explains_that_one(service_factory, reference):
+    from tests.test_personal_calendar import GOOGLE
+
+    service, _ = service_factory()
+    service.calendar_reader = FakeReader((), None, {})
+    await onboard(service, reference)
+    await service.message(1, 30, GOOGLE, reference)
+    status = (await service.command(1, "calendar"))[0]
+    remove = next(
+        b.text for row in status.keyboard.inline_keyboard for b in row if "Remove" in b.text
+    )
+    replies = await service.callback(1, tap(status, remove))
+    assert len(replies) == 2 and "Google secret link" in replies[1].text
+    assert "iCloud" not in replies[1].text and "AmIFree calendar" not in replies[1].text
+    assert replies[1].keyboard.inline_keyboard[0][0].url == onboarding.GOOGLE_SETTINGS

@@ -3,6 +3,7 @@
 Every screen edits the same message, so setup never floods the chat (ux-flows.md, /start A).
 """
 
+import base64
 import html
 from pathlib import Path
 
@@ -618,15 +619,74 @@ def google_code_ask(email: str) -> str:
     )
 
 
-def google_unshare(email: str) -> str:
-    """AmIFree can't take itself off a calendar: only its owner can. Said whenever it stops."""
-    return (
-        "⚠️ <b>One more step in Google Calendar.</b> I still have access until you remove me, "
-        "and only you can do that:\n"
-        "Settings → your calendar → <b>Shared with</b> → tap ✕ next to\n"
-        f"<code>{html.escape(email)}</code>\n\n"
-        "Events I added stay in your calendar. Delete them there if you don't want them."
+GOOGLE_SETTINGS = "https://calendar.google.com/calendar/r/settings"
+
+
+def google_calendar_settings(email: str) -> str:
+    """The settings page of one Google calendar, where Shared with is. A main calendar's id is
+    its owner's email, and Google puts the id in the address base64-encoded."""
+    calendar = base64.b64encode(email.encode()).decode().rstrip("=")
+    return f"{GOOGLE_SETTINGS}/calendar/{calendar}"
+
+
+def unlink_guide(
+    *,
+    bot_email: str | None = None,
+    shared_email: str | None = None,
+    google_link: bool = False,
+    icloud: bool = False,
+    feed: bool = False,
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    """What the user still has to undo in their own calendar apps once AmIFree lets go, one
+    section per kind they connected. AmIFree can't do these itself: only the owner can."""
+    sections, rows = [], []
+    if shared_email and bot_email:
+        sections.append(
+            "📅 <b>Google Calendar you shared with me</b>\n"
+            "I still have access until you remove me, and only you can do that. Tap "
+            "<b>Open sharing settings</b> below, find <b>Shared with</b>, and tap ✕ next to\n"
+            f"<code>{html.escape(bot_email)}</code>\n"
+            "(In the Google Calendar app: ☰ → Settings → your calendar → Shared with.)\n"
+            "Events I added stay in your calendar. Delete them there if you don't want them."
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "📅 Open sharing settings ↗", url=google_calendar_settings(shared_email)
+                )
+            ]
+        )
+    if google_link:
+        sections.append(
+            "📅 <b>Google secret link</b>\n"
+            "I've deleted it. So nobody else can use it, reset it: <b>Open Google Calendar "
+            "settings</b> below → your calendar → <b>Integrate calendar</b> → <b>Secret address "
+            "in iCal format</b> → <b>Reset</b>."
+        )
+        rows.append(
+            [InlineKeyboardButton("📅 Open Google Calendar settings ↗", url=GOOGLE_SETTINGS)]
+        )
+    if icloud:
+        sections.append(
+            "🍎 <b>iCloud calendar you made public</b>\n"
+            "To make it private again: Calendar app → <b>Calendars</b> → ⓘ next to it → turn "
+            "off <b>Public Calendar</b>. (Mac: click the person icon next to it and untick "
+            "Public Calendar.)"
+        )
+    if feed:
+        sections.append(
+            "🍎 <b>AmIFree calendar</b>\n"
+            "It stops updating. To remove it:\n"
+            "• iPhone: Settings → Apps → Calendar → Calendar Accounts → <b>AmIFree</b> → "
+            "Delete Account\n"
+            "• Mac: in Calendar, right-click <b>AmIFree</b> → Unsubscribe"
+        )
+    if not sections:
+        return "", None
+    text = "<b>To finish disconnecting, do this in your calendar apps:</b>\n\n" + "\n\n".join(
+        sections
     )
+    return text, InlineKeyboardMarkup(rows) if rows else None
 
 
 def google_connected(busy_count: int, added: int, *, timetable_connected: bool) -> str:

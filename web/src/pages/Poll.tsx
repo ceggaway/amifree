@@ -78,7 +78,7 @@ export function Poll() {
       {p.status === "COLLECTING" && (
         <section className="card">
           <p>
-            {p.joined} joined. When the deadline passes, the organiser gets the best times and chooses one
+            {p.joined} joined. When the deadline passes, the best times are posted in the group and the organiser chooses one
             {p.joined < p.min_joined ? ` (at least ${p.min_joined} need to join)` : ""}.
           </p>
           <p className="hint">The group only sees how many people are free, never who is busy or why.</p>

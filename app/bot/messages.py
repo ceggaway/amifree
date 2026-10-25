@@ -172,6 +172,12 @@ def private_verdict(availability: Availability, prefix: str = "") -> str:
     return text[: 200 - len(note)] + note
 
 
+GROUP_WELCOME = (
+    "👋 Thanks for adding AmIFree!\n\n"
+    "To get started, send /app here. It opens AmIFree for this group, where you can"
+    " create an event or find a time that works for everyone."
+)
+
 GROUP_HELP = """👋 AmIFree in this group
 
 /event Dinner Fri 7-9pm at Vivo: post an event card (or reply /event to a plan message)

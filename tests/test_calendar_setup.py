@@ -287,3 +287,19 @@ async def test_removing_one_link_only_explains_that_one(service_factory, referen
     assert len(replies) == 2 and "Google secret link" in replies[1].text
     assert "iCloud" not in replies[1].text and "AmIFree calendar" not in replies[1].text
     assert replies[1].keyboard.inline_keyboard[0][0].url == onboarding.GOOGLE_SETTINGS
+
+
+def test_cards_name_the_calendar_plans_sync_to():
+    from datetime import datetime
+
+    from app.models.user import User
+    from app.services.scheduling import synced
+
+    user = User(id="u", telegram_user_id=1)
+    assert synced(user) == ""
+    user.google_connected = True
+    assert synced(user) == "your Google Calendar"
+    user.calendar_feed_token, user.calendar_feed_seen_at = "t", datetime(2026, 10, 1)
+    assert synced(user) == "your Google Calendar and AmIFree calendar"
+    user.google_connected = False
+    assert synced(user) == "your AmIFree calendar"

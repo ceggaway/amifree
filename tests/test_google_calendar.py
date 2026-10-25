@@ -590,5 +590,5 @@ async def test_cards_say_plans_sync_once_connected(with_google, reference):
     await onboard(service, reference)
     await connect(service, 1, "me@gmail.com", reference, 9)
     added = await add_dinner(service, reference)
-    assert "Syncing to your calendar" in added.text
+    assert "Syncing to your Google Calendar (/calendar to change)" in added.text
     assert "/calendar puts every plan in your iPhone calendar" not in added.text

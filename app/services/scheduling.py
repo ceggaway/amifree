@@ -179,8 +179,14 @@ BLOCK_TIME = re.compile(
 )
 
 
-def synced(user: User) -> bool:
-    return bool(user.google_connected or (user.calendar_feed_token and user.calendar_feed_seen_at))
+def synced(user: User) -> str:
+    """Where plans go by themselves, as cards name it ("your Google Calendar"); "" for nowhere."""
+    places = []
+    if user.google_connected:
+        places.append("Google Calendar")
+    if user.calendar_feed_token and user.calendar_feed_seen_at:
+        places.append("AmIFree calendar")
+    return "your " + " and ".join(places) if places else ""
 
 
 def decided_card(event: Event, availability, note: str, user: User) -> Reply:
@@ -1853,7 +1859,7 @@ class SchedulingService:
                     calendar.label,
                     len(data.busy),
                     timetable_connected=user.onboarding_status == "READY",
-                    sync_enabled=synced(user),
+                    sync_enabled=bool(synced(user)),
                 ),
                 onboarding.classes_keyboard() if user.onboarding_status != "READY" else None,
                 parse_mode="HTML",

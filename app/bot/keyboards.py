@@ -1,4 +1,4 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from app.schemas.event import Event, GroupEvent, Poll, Status
 
@@ -424,12 +424,20 @@ def feedback_choice_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def menu_keyboard() -> InlineKeyboardMarkup:
+def open_app_row(app_url: str | None) -> list[list[InlineKeyboardButton]]:
+    """The Mini App's way in from a private chat, when it is deployed."""
+    if not app_url:
+        return []
+    return [[InlineKeyboardButton("📱 Open AmIFree", web_app=WebAppInfo(url=app_url))]]
+
+
+def menu_keyboard(app_url: str | None = None) -> InlineKeyboardMarkup:
     """The four things a set-up user does most; each tap runs the matching command."""
     return InlineKeyboardMarkup(
         [
             [_menu("📋 My plans", "plans"), _menu("🕒 Am I free?", "free")],
             [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
+            *open_app_row(app_url),
         ]
     )
 

@@ -248,3 +248,20 @@ async def test_list_buttons_keep_ownership_checks(service_factory, reference):
     assert "Clementi Mall" not in response.text
     for data in ("fp:no:pc:any", "fp:-1:pc:any", "fp:1:fp:0:pc:any"):
         assert "isn't valid" in (await service.callback(1, data))[0].text
+
+
+async def test_start_opens_the_mini_app_from_a_button(service_factory, reference):
+    service, _ = service_factory(mini_app_url="https://example.test/app/")
+    welcome = (await service.command(1, "start"))[0]
+    [app] = [b for row in welcome.keyboard.inline_keyboard for b in row if b.web_app]
+    assert app.text == "📱 Open AmIFree" and app.web_app.url == "https://example.test/app/"
+    await onboard(service, reference)
+    menu = (await service.command(1, "start"))[0]
+    assert menu.keyboard.inline_keyboard[-1][0].web_app.url == "https://example.test/app/"
+    # Without a deployed Mini App there is no button.
+    plain, _ = service_factory()
+    assert not any(
+        b.web_app
+        for row in (await plain.command(1, "start"))[0].keyboard.inline_keyboard
+        for b in row
+    )

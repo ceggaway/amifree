@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from supabase import acreate_client
 from supabase.lib.client_options import AsyncClientOptions
-from telegram import BotCommand, BotCommandScopeAllGroupChats, MenuButtonWebApp, Update, WebAppInfo
+from telegram import BotCommand, BotCommandScopeAllGroupChats, MenuButtonCommands, Update
 from telegram.ext import Application
 
 from app.api.routes import build_router
@@ -181,12 +181,10 @@ def create_app(
                 ],
                 scope=BotCommandScopeAllGroupChats(),
             )
-            if settings.mini_app_url:
-                await bot_app.bot.set_chat_menu_button(
-                    menu_button=MenuButtonWebApp(
-                        "Open AmIFree", WebAppInfo(url=settings.mini_app_url)
-                    )
-                )
+            # The button beside the text box lists the commands above, so nobody has to know
+            # to type "/". Set every start: it replaces the Mini App button this used to be.
+            # The Mini App opens from the Open AmIFree buttons in /start instead.
+            await bot_app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
             await bot_app.start()
             stack.push_async_callback(bot_app.stop)
             if settings.bot_mode == "polling":

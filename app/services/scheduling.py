@@ -403,11 +403,17 @@ class SchedulingService:
                         + html.escape(" and ".join(connected))
                         + ".\n\n"
                         + onboarding.EVERYDAY_HELP,
-                        menu_keyboard(),
+                        menu_keyboard(self.settings.mini_app_url),
                         parse_mode="HTML",
                     )
                 ]
-            return [Reply(onboarding.WELCOME, onboarding.welcome_keyboard(), parse_mode="HTML")]
+            return [
+                Reply(
+                    onboarding.WELCOME,
+                    onboarding.welcome_keyboard(self.settings.mini_app_url),
+                    parse_mode="HTML",
+                )
+            ]
         if command == "cancel":
             await self.google_sync.discard(user.pending)
             await self.repo.set_pending(user.id, None)

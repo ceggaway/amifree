@@ -22,6 +22,7 @@ from app.bot.delivery import Delivery, webhook_delivery
 from app.bot.handlers import register_handlers
 from app.config import Settings
 from app.db.supabase import SupabaseRepository
+from app.services import analytics
 from app.services.event_extractor import EventExtractor
 from app.services.google_calendar import GoogleCalendar, load_key
 from app.services.image_reader import ImageReader
@@ -91,6 +92,8 @@ def create_app(
             return
         settings.require_credentials()
         async with AsyncExitStack() as stack:
+            analytics.configure(settings)
+            stack.callback(analytics.shutdown)
             http = await stack.enter_async_context(httpx.AsyncClient(timeout=20))
             ai = await stack.enter_async_context(
                 AsyncOpenAI(
@@ -284,6 +287,39 @@ def create_app(
             headers={
                 "Cache-Control": "private, max-age=300",
                 "Content-Disposition": 'inline; filename="amifree.ics"',
+            },
+        )
+
+    @app.get("/cal/{token}/add")
+    async def calendar_subscribe(token: str):
+        # Opens the calendar app's Subscribe screen. Fetching this page is not the feed being
+        # fetched, so it never marks the calendar as connected.
+        if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+            raise HTTPException(404, "Not found")
+        if not app.state.ready or not app.state.service:
+            raise HTTPException(503, "Calendar unavailable")
+        page = await app.state.service.subscribe_page(token)
+        if page is None:
+            raise HTTPException(404, "Not found")
+        return Response(
+            page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"}
+        )
+
+    @app.get("/ics/event/{event_id}.ics")
+    async def event_ics(event_id: str):
+        """A confirmed group time as a calendar file. The id is an unguessable UUID, and the file
+        holds only what the group card already shows."""
+        if not app.state.ready or not app.state.service:
+            raise HTTPException(503, "Calendar unavailable")
+        content = await app.state.service.group_event_ics(event_id)
+        if content is None:
+            raise HTTPException(404, "Not found")
+        return Response(
+            content,
+            media_type="text/calendar; charset=utf-8",
+            headers={
+                "Cache-Control": "private, max-age=300",
+                "Content-Disposition": 'inline; filename="event.ics"',
             },
         )
 

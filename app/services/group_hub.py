@@ -512,24 +512,23 @@ class GroupHub:
         if not opened:
             raise Refused(note)
         await self.scheduling.poll_changed(poll.id)
-        return {"message": "Times suggested. Members can now tick them in the group."}
+        return {"message": "Results are ready. Choose a time below."}
 
     async def poll_pick(self, user, poll, slot: int) -> dict:
         if poll.status != "OPEN" or slot >= len(poll.slots):
             raise Refused("This poll is closed." if poll.status == "CLOSED" else "Pick a time.")
-        picked = await self.scheduling.polls.pick(user, poll, slot)
-        if not picked:
+        if poll.creator_user_id != user.id:
+            raise Refused("Only the organiser can choose the time.")
+        event = await self.scheduling.polls.finalize(user, poll, slot)
+        if not event:
             raise Refused("This poll is closed.")
-        _, event = picked
-        await self.scheduling.poll_changed(poll.id)
-        if not event.message_id:
-            posted = await self.post(poll.chat_id, await self.groups.render(event))
-            await self.repo.set_group_message(event.id, posted)
         return {"event_id": event.id}
 
     async def poll_nudge(self, user, poll) -> dict:
         if poll.status == "CLOSED":
             raise Refused("This poll is closed, so there's nobody to nudge.")
+        if poll.status == "OPEN":
+            raise Refused("The results are in. Choose a time to finish.")
         return {"message": await self.groups.nudge(poll)}
 
     # ---- creating ----

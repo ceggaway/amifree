@@ -6,17 +6,23 @@ Privacy rules, enforced here rather than left to the caller:
 - the group sees counts per slot, never who is busy or what with.
 """
 
+import logging
 import re
 from datetime import datetime, time, timedelta
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import TelegramError
 
 from app.bot.keyboards import links_keyboard, poll_keyboard
 from app.bot.messages import Reply, clock
 from app.schemas.event import SG, EventDraft, Poll, Status
 from app.services.app_links import group_link
+from app.services.calendar_export import google_link
 from app.services.date_resolution import Clarification, resolve_date
 from app.services.group_events import GroupResult, parse_id
 from app.services.usual_times import covers
 
+log = logging.getLogger(__name__)
 MIN_PARTICIPANTS = 3
 DAY_START, DAY_END, STEP = time(8), time(22), timedelta(minutes=30)
 USAGE = "Try: /whosfree project meeting 2h next week"
@@ -182,7 +188,7 @@ def poll_card(
     length = f"{hours:g}h" if poll.duration_minutes % 30 == 0 else f"{poll.duration_minutes}min"
     head = f"🗳 Who's free? {poll.title} ({length})"
     if poll.status == "CLOSED":
-        return Reply(head + "\nThis poll is closed.")
+        return Reply(head + "\n✅ The organiser chose a time. It's posted in the group below.")
     deadline = (
         f"\nReply by {poll.deadline_at:%a %-d %b}, {clock(poll.deadline_at)}"
         if poll.deadline_at
@@ -202,8 +208,8 @@ def poll_card(
             )
         else:
             when = (
-                f"\n\nJoined: {joined}. Slots are suggested when the reply time passes, or"
-                f" sooner if the organiser {suggest} ({MIN_PARTICIPANTS} must have joined)."
+                f"\n\nJoined: {joined}. When the reply time passes, the organiser gets the best"
+                f" times privately and chooses one ({MIN_PARTICIPANTS} must have joined)."
             )
         return Reply(
             head
@@ -219,34 +225,71 @@ def poll_card(
             + when,
             poll_keyboard(poll, app_url),
         )
+    known = poll.slots[0].get("of", joined) if poll.slots else joined
+    return Reply(
+        head
+        + f"\n📊 Results are in from {known} schedule{'s' if known != 1 else ''}."
+        + "\n\nThe organiser is choosing the time now. It will be posted here for everyone"
+        + " to add to their calendar.",
+        poll_keyboard(poll, app_url),
+    )
+
+
+def length_text(minutes: int) -> str:
+    hours = minutes / 60
+    return f"{hours:g}h" if minutes % 30 == 0 else f"{minutes}min"
+
+
+def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Reply:
+    """Sent privately to the organiser: the best times, with one button to choose each."""
     lines = []
     for index, slot in enumerate(poll.slots):
-        draft = slot_draft(poll, index)
-        count = tally.get((index, "FREE"), 0)
-        votes = f"✅ {count} vote{'s' if count != 1 else ''}"
+        start = datetime.fromisoformat(slot["start_at"]).astimezone(SG)
+        end = datetime.fromisoformat(slot["end_at"]).astimezone(SG)
         lines.append(
-            f"{index + 1}. {draft.start_at:%a %-d %b %H:%M}–{draft.end_at:%H:%M}"
-            f" · {slot['free']} of {slot.get('of', joined)} with no known clash\n    {votes}"
+            f"{index + 1}. {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M} · "
+            f"{slot['free']} of {slot.get('of', joined)} free"
         )
     unknown = max((s.get("unknown", 0) for s in poll.slots), default=0)
-    known = poll.slots[0].get("of", joined) if poll.slots else joined
-    coverage = (
+    missing = (
         f"\n{unknown} member{'s' if unknown != 1 else ''} had no schedule to check, so"
-        " they aren't counted. Answer by hand."
+        " they aren't counted."
         if unknown
         else ""
     )
-    return Reply(
-        head
-        + f"\nBest slots from {known} schedule{'s' if known != 1 else ''}"
-        + " (no known clashes, not confirmed free):\n\n"
-        + "\n".join(lines)
-        + coverage
-        + deadline
-        + "\n\nTap the time that works best for you. One vote each: tapping another time"
-        " moves your vote, and tapping yours again takes it back.",
-        poll_keyboard(poll, app_url),
+    text = (
+        f"📊 Results for {poll.title} ({length_text(poll.duration_minutes)})\n"
+        f"{joined} {'person' if joined == 1 else 'people'} filled in their availabilities.\n\n"
+        "Best times:\n" + "\n".join(lines) + missing + "\n\nTap a time to confirm it. I'll post"
+        " it in the group so everyone can add it to their calendar."
     )
+    rows = [
+        [
+            InlineKeyboardButton(f"Choose {index + 1}", callback_data=f"pr:{poll.id}:{index}")
+            for index in range(len(poll.slots))
+        ]
+    ]
+    if app_url:
+        rows.append([InlineKeyboardButton("📱 See all times", url=app_url)])
+    return Reply(text, InlineKeyboardMarkup(rows))
+
+
+def announcement(poll: Poll, index: int, event, ics_url: str | None, details_url: str) -> Reply:
+    """The public message once the organiser chooses: when it is, and add-to-calendar buttons."""
+    slot = poll.slots[index]
+    start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
+    text = (
+        f"📣 {event.title} is confirmed!\n"
+        f"🗓 {start:%a %-d %b %Y} · {start:%H:%M}–{end:%H:%M}\n"
+        f"✅ {slot['free']} of {slot.get('of', slot['free'])} who filled in are free then.\n\n"
+        "Add it to your calendar with a button below. Then tap Going or Can't so the"
+        " organiser knows who's coming, and you get a reminder the day before."
+    )
+    calendars = [InlineKeyboardButton("📅 Google Calendar", url=google_link(event))]
+    if ics_url:
+        calendars.append(InlineKeyboardButton("🍎 Apple Calendar", url=ics_url))
+    rows = [calendars, [InlineKeyboardButton("✋ Going or Can't", url=details_url)]]
+    return Reply(text, InlineKeyboardMarkup(rows))
 
 
 class PollService:
@@ -383,8 +426,73 @@ class PollService:
             return None, "There is no time left in that window. Start a new poll."
         opened = await self.repo.poll_open(poll.id, poll.creator_user_id, slots)
         if not opened:
-            return None, "Slots are already suggested."
-        return opened, "Slots suggested."
+            return None, "Results are already out."
+        await self.send_report(opened, len(people))
+        return opened, "Results are ready. I've sent them to you privately to choose a time."
+
+    async def send_report(self, poll: Poll, joined: int):
+        """Message the organiser the best times. If they never opened the bot, they can still
+        choose on the poll's page in the app."""
+        send = getattr(self.scheduling, "send_private", None)
+        organiser = await self.repo.get_user(poll.creator_user_id) if poll.creator_user_id else None
+        if not send or not organiser:
+            return
+        report = organiser_report(poll, joined, self.scheduling.settings.heatmap_link(poll.id))
+        try:
+            await send(organiser.telegram_user_id, report)
+        except TelegramError:
+            log.info("poll_report_undelivered poll_id=%s", poll.id)
+
+    async def finalize(self, user, poll: Poll, index: int):
+        """The organiser's choice: close the poll, make the event and announce it in the group.
+        None if the poll was already closed."""
+        picked = await self.pick(user, poll, index)
+        if not picked:
+            return None
+        _, event = picked
+        await self.scheduling.poll_changed(poll.id)
+        if not event.message_id:
+            settings = self.scheduling.settings
+            details_url = settings.event_link(event.id)
+            hub = self.scheduling.hub
+            if details_url:
+                base = settings.app_base_url.rstrip("/")
+                ics_url = f"{base}/ics/event/{event.id}.ics" if base else None
+                await hub.post(poll.chat_id, announcement(poll, index, event, ics_url, details_url))
+            else:
+                # Without the app there is no page for Going: post the usual card instead.
+                posted = await hub.post(poll.chat_id, await self.scheduling.groups.render(event))
+                await self.repo.set_group_message(event.id, posted)
+        return event
+
+    async def choose_from_report(self, user, data: str) -> list[Reply]:
+        """A Choose button on the organiser's private report."""
+        from app.services.group_hub import Refused
+
+        parts = data.split(":")
+        poll_id = parse_id(parts[1]) if len(parts) == 3 else None
+        poll = await self.repo.get_poll(poll_id) if poll_id else None
+        if not poll or poll.creator_user_id != user.id:
+            return [Reply("That button isn't available to you.")]
+        if poll.status == "CLOSED":
+            return [Reply("You've already chosen a time for this poll.")]
+        index = int(parts[2]) if parts[2].isdigit() else -1
+        if poll.status != "OPEN" or not 0 <= index < len(poll.slots):
+            return [Reply("That button isn't valid.")]
+        try:
+            event = await self.finalize(user, poll, index)
+        except Refused as exc:
+            return [Reply(str(exc))]
+        if not event:
+            return [Reply("You've already chosen a time for this poll.")]
+        start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
+        return [
+            Reply(
+                f"✅ Done. {event.title} is set for {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M}."
+                " I've posted it in the group so everyone can add it to their calendar.",
+                edit=True,
+            )
+        ]
 
     async def sweep_deadlines(self, now: datetime) -> int:
         """Suggest slots for polls whose reply time has passed. Returns how many opened."""
@@ -546,7 +654,7 @@ class PollService:
         if action == "join":
             await self.repo.poll_join(poll.id, user.id)
             note = (
-                "You're in. Times are already suggested: tap the one that works best."
+                "You're in. The organiser is choosing the time now."
                 if poll.status == "OPEN"
                 else "You're in. Your schedule is only used to count who is free."
             )
@@ -559,73 +667,26 @@ class PollService:
             if not organiser:
                 return GroupResult(alert="Only the organiser can suggest slots.")
             if poll.status != "COLLECTING":
-                return GroupResult(alert="Slots are already suggested.")
+                return GroupResult(alert="Results are already out.")
             opened, note = await self.suggest(poll)
             return GroupResult(alert=note, card=await self.render(opened) if opened else None)
         if poll.status != "OPEN":
-            return GroupResult(alert="The organiser hasn't suggested slots yet.")
-        if action == "fill":
-            spans = await self.busy_spans(poll, user.id)
-            if spans is None:
-                # An empty schedule would answer "Free" to everything: say so instead.
-                return GroupResult(
-                    alert="I have no schedule for you yet, so I can't fill this in. Send your"
-                    " NUSMods or calendar link to the bot privately, or answer by hand."
-                )
-            # Cards from before one-vote polls: vote for the first time the schedule leaves free.
-            best = None
-            for index in range(len(poll.slots)):
-                draft = slot_draft(poll, index)
-                availability = await self.scheduling.availability(user, draft)
-                # The spans also hold the cells left unticked in "Set my times" and the time
-                # outside their usual times, which the schedule check alone does not know.
-                if not availability.conflicts and not clashes(spans, draft.start_at, draft.end_at):
-                    best = index
-                    break
-            if best is None:
-                return GroupResult(
-                    alert="Your schedule clashes with every time. Only you see this."
-                )
-            mine = await self.repo.poll_my_votes(poll.id, user.id)
-            if mine.get(best) != "FREE":
-                await self.choose(poll, user.id, best)
-            return GroupResult(
-                alert=f"Voted for time {best + 1}, the first one your schedule leaves free."
-                " Only you see this.",
-                card=await self.render(poll),
-            )
-        index = int(extra[:1]) if extra[:1].isdigit() else -1
-        if not 0 <= index < len(poll.slots):
-            return GroupResult(alert="That button isn't valid.")
-        # "t" is today's card; "v…F" is a ✅ on cards from before one-vote polls.
-        if action == "t" or (action == "v" and extra[1:] == "F"):
-            chosen = await self.choose(poll, user.id, index)
-            return GroupResult(
-                alert=f"Your vote: time {index + 1} ✅. Tap another time to move it."
-                if chosen is not None
-                else "Vote taken back. Tap a time to vote again.",
-                card=await self.render(poll),
-            )
-        if action == "v" and extra[1:] in ANSWERS:
-            # 🤔 / ❌ on an old card: that time doesn't get their vote.
-            mine = await self.repo.poll_my_votes(poll.id, user.id)
-            if mine.get(index) == "FREE":
-                await self.choose(poll, user.id, None)
-            return GroupResult(
-                alert="Noted. Tap the time that works best to vote for it.",
-                card=await self.render(poll),
-            )
+            return GroupResult(alert="Results aren't out yet. Fill in your availabilities first.")
         if action == "pick":
+            # Cards from before the private report still carry Pick buttons.
+            from app.services.group_hub import Refused
+
+            index = int(extra[:1]) if extra[:1].isdigit() else -1
             if not organiser:
-                return GroupResult(alert="Only the organiser can pick the slot.")
-            picked = await self.pick(user, poll, index)
-            if not picked:
+                return GroupResult(alert="Only the organiser can choose the time.")
+            if not 0 <= index < len(poll.slots):
+                return GroupResult(alert="That button isn't valid.")
+            try:
+                event = await self.finalize(user, poll, index)
+            except Refused as exc:
+                return GroupResult(alert=str(exc))
+            if not event:
                 return GroupResult(alert="This poll is closed.")
-            closed, event = picked
-            return GroupResult(
-                alert="Event card posted.",
-                card=await self.render(closed),
-                post=await self.scheduling.groups.render(event),
-                group_event_id=event.id,
-            )
-        return GroupResult(alert="That action isn't available.")
+            return GroupResult(alert="Posted in the group.")
+        # Votes from older cards: the organiser now chooses the time.
+        return GroupResult(alert="The organiser is choosing the time now. Watch the group for it.")

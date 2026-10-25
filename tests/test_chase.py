@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from telegram import Update
 
+from app.services.chase import non_responders
 from app.services.jobs import Notifier
 from tests.conftest import extraction
 from tests.test_group_events import alerts, buttons, group_message, group_tap, make_bot, post_card
@@ -91,11 +92,8 @@ async def test_automatic_chase_after_a_day(service_factory, reference):
     assert (await service.notifier.run())["queued"] == 0
 
 
-async def test_poll_nudges_non_voters(service_factory, reference):
+async def test_poll_nudges_members_who_have_not_filled_in(service_factory, reference):
     service, repo = service_factory()
-    for telegram_id in (1, 2, 3):  # a timetable, so their empty week counts as known
-        await repo.ensure_user(telegram_id)
-        repo.users[telegram_id].coverage_start = reference - timedelta(days=60)
     bot, transport = make_bot(service)
     outbox = Outbox()
     service.notifier = Notifier(service, outbox)
@@ -104,20 +102,13 @@ async def test_poll_nudges_non_voters(service_factory, reference):
             Update.de_json(group_message("/whosfree sync tomorrow", 30, 1), bot.bot)
         )
         taps = buttons(transport.sent[-1]["reply_markup"])
-        for n, member in enumerate((2, 3)):
-            await bot.process_update(
-                Update.de_json(
-                    group_tap(taps["✋ Count me in"], member, update_id=9300 + n), bot.bot
-                )
-            )
-        suggest = taps["Suggest slots (organiser)"]
-        await bot.process_update(Update.de_json(group_tap(suggest, 1, update_id=9310), bot.bot))
-        poll = next(iter(repo.polls.values()))
         await bot.process_update(
-            Update.de_json(group_tap(f"p:fill:{poll.id}", 2, update_id=9311), bot.bot)
+            Update.de_json(group_tap(taps["✋ Count me in"], 2, update_id=9300), bot.bot)
         )
+        poll = next(iter(repo.polls.values()))
+        # Member 3 is seen in the group but hasn't filled in their times.
         await bot.process_update(
-            Update.de_json(group_tap(f"p:nudge:{poll.id}", 2, update_id=9312), bot.bot)
+            Update.de_json(group_tap(f"p:nudge:{poll.id}", 3, update_id=9312), bot.bot)
         )
         assert "Only the organiser" in alerts(transport)[-1]["text"]
         await bot.process_update(
@@ -127,6 +118,8 @@ async def test_poll_nudges_non_voters(service_factory, reference):
     assert len(outbox.sent) == 1 and outbox.sent[0][0] == 3
     assert (
         "choosing a time for sync" in outbox.sent[0][1]
-        and "time that works best" in outbox.sent[0][1]
+        and "fill in your availabilities" in outbox.sent[0][1]
     )
-    assert not repo.events
+    # Once results are out, nobody else has anything to do.
+    repo.polls[poll.id].status = "OPEN"
+    assert await non_responders(repo, repo.polls[poll.id]) == []

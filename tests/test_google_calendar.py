@@ -324,48 +324,55 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     service, _ = service_factory()
     await onboard(service, reference)
     pick = (await service.callback(1, "setup:calendar"))[0]
-    assert labels(pick) == ["🍎 iPhone / iCloud", "📅 Google", "📧 Outlook", "« Back"]
+    assert labels(pick) == [
+        "📅 Google Calendar",
+        "🍎 Apple / iCloud",
+        "🤔 I'm not sure",
+        "📧 Outlook (soon)",
+        "« Back",
+    ]
     # Without the bot's Google account there is only the link.
     link_only = (await service.callback(1, "setup:google"))[0]
     assert "gcal:start" not in str(link_only.keyboard)
     service.google = FakeGoogle()
-    choice = (await service.callback(1, "setup:google"))[0]
-    assert labels(choice) == [
-        "🔗 Share it (adds plans)",
-        "📋 Paste a link (read only)",
-        "« Other calendars",
-    ]
+    # With it, Google goes straight to sharing: read and write in one setup.
+    share = (await service.callback(1, "setup:google"))[0]
+    assert "Step 1 of 3" in share.text and share.photo and "Next ›" in labels(share)
+    assert "googlelink" not in str(share.keyboard)
     link = (await service.callback(1, "setup:googlelink"))[0]
     assert "Secret address" in link.text or "link" in link.text.lower()
     assert link.parse_mode == "HTML" and link.disable_link_preview
 
 
-async def test_share_steps_are_phone_first_with_a_computer_switch(with_google, reference):
+async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, reference):
     service, _, _ = with_google()
     await onboard(service, reference)
-    default = await service.callback(1, "gcal:start")
-    assert "Google Calendar app on your phone" in default[0].text
-    assert default[0].parse_mode == "HTML"
-    labels = [b.text for row in default[0].keyboard.inline_keyboard for b in row]
-    assert "💻 On a computer instead?" in labels
-    assert len(default) == 2 and len(default[1].photos) == 5
-    assert all(ph.startswith(b"\x89PNG") for ph in default[1].photos)
-    assert default[0].clear_album_group == "setup" and default[1].album_group == "setup"
-    assert "Picture guide below" in default[0].text
-    computer = (await service.callback(1, "gcal:computer"))[0]
-    assert "calendar.google.com" in computer.text
-    clabels = [b.text for row in computer.keyboard.inline_keyboard for b in row]
-    assert "📱 On my phone instead?" in clabels
-    back = (await service.callback(1, "gcal:start"))[0]
-    assert "Google Calendar app on your phone" in back.text
+    part = (await service.callback(1, "gcal:start"))[0]
+    pictures = set()
+    for n in range(1, 6):
+        assert "Step 1 of 3" in part.text and f"<b>{n} of 5</b>" in part.text
+        assert part.edit and part.parse_mode == "HTML" and part.photo.startswith(b"\x89PNG")
+        assert len(part.text) <= 1024  # Telegram's caption limit
+        pictures.add(part.photo)
+        assert ("‹ Back" in labels(part)) == (n > 1)
+        assert ("✅ Done, I've shared it" in labels(part)) == (n == 5)
+        if n < 5:
+            part = (await service.callback(1, tap(part, "Next ›")))[0]
+    assert len(pictures) == 5 and "Make changes" in part.text
+    first = (await service.callback(1, "gcal:start"))[0]
+    assert "Google Calendar</b> app" in first.text and "💻 On a computer instead?" in labels(first)
+    computer = (await service.callback(1, tap(first, "💻 On a computer instead?")))[0]
+    assert "calendar.google.com" in computer.text and "📱 On my phone instead?" in labels(computer)
+    for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone"):
+        assert "isn't valid" in (await service.callback(1, bad))[0].text
 
 
 async def test_the_steps_show_the_bots_google_email(with_google, reference):
     service, _, _ = with_google()
     await onboard(service, reference)
-    steps = (await service.callback(1, "gcal:start"))[0]
-    assert f"<code>{BOT}</code>" in steps.text and steps.parse_mode == "HTML" and steps.edit
-    assert "Make changes" in steps.text
+    for data in ("gs:phone:4", "gs:computer:5"):  # the part where it is pasted
+        part = (await service.callback(1, data))[0]
+        assert f"<code>{BOT}</code>" in part.text and part.parse_mode == "HTML" and part.edit
 
 
 async def test_connecting_adds_current_plans_and_counts_busy_time(with_google, reference):
@@ -376,7 +383,7 @@ async def test_connecting_adds_current_plans_and_counts_busy_time(with_google, r
 
     reply = await connect(service, 1, "Me@Gmail.com", reference, 9)
 
-    assert "Personal calendar connected" in reply.text and "added your 1 current plan" in reply.text
+    assert "Google Calendar connected" in reply.text and "added your 1 current plan" in reply.text
     assert google.calls == [("code", "me@gmail.com"), ("upsert", "CCA dinner", False)]
     connection = repo.google[repo.users[1].id]
     assert connection.calendar_email == "me@gmail.com" and repo.users[1].google_connected
@@ -541,7 +548,7 @@ async def test_connecting_needs_the_code_from_that_calendar(with_google, referen
     # The real owner reads the code in their calendar and sends it back.
     await service.message(1, 31, "me@gmail.com", reference)
     done = (await service.message(1, 32, f" {google.code} ", reference))[0]
-    assert "Personal calendar connected" in done.text and repo.users[1].id in repo.google
+    assert "Google Calendar connected" in done.text and repo.users[1].id in repo.google
     assert google.code is None
 
 
@@ -577,13 +584,3 @@ async def test_cards_say_plans_sync_once_connected(with_google, reference):
     added = await add_dinner(service, reference)
     assert "Syncing to your calendar" in added.text
     assert "/calendar puts every plan in your iPhone calendar" not in added.text
-
-
-async def test_the_steps_come_with_a_picture_of_the_sharing_box(with_google, reference):
-    service, _, _ = with_google()
-    await onboard(service, reference)
-    replies = await service.callback(1, "gcal:start")
-    assert replies[0].edit and "Share your Google Calendar" in replies[0].text
-    assert len(replies[1].photos) == 5
-    assert all(p.startswith(b"\x89PNG") for p in replies[1].photos)
-    assert len(replies[1].text) <= 1024  # Telegram's caption limit

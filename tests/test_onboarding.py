@@ -30,19 +30,23 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
     welcome = (await service.command(1, "start"))[0]
     picker = (await service.callback(1, tap(welcome, "📅 Connect personal calendar")))[0]
     assert picker.edit and labels(picker) == [
-        "🍎 iPhone / iCloud",
-        "📅 Google",
-        "📧 Outlook",
+        "📅 Google Calendar",
+        "🍎 Apple / iCloud",
+        "🤔 I'm not sure",
+        "📧 Outlook (soon)",
         "« Back",
     ]
     expected = {
-        "🍎 iPhone / iCloud": ["Public Calendar", "Share Link", "webcal://"],
-        "📅 Google": ["calendar.google.com", "Integrate calendar", "Secret address in iCal format"],
-        "📧 Outlook": ["coming soon"],
+        # No public address in tests, so Apple goes straight to its busy-times part.
+        "🍎 Apple / iCloud": ["Part 2 of 2", "Step 1 of 4", "calendar icon"],
+        "📅 Google Calendar": ["calendar.google.com", "Secret address in iCal format"],
+        "📧 Outlook (soon)": ["coming soon"],
     }
     for button, phrases in expected.items():
         guide = (await service.callback(1, tap(picker, button)))[0]
         assert guide.edit and all(p in guide.text for p in phrases), button
+        if button == "🍎 Apple / iCloud":
+            continue  # its way out is Skip this part, tested on its own
         back = (await service.callback(1, tap(guide, "« Other calendars")))[0]
         assert back.text == onboarding.PICK_CALENDAR
     home = (await service.callback(1, tap(picker, "« Back")))[0]
@@ -51,13 +55,19 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
     assert picker.parse_mode is None
 
 
-async def test_picker_explains_phone_setup_and_outlook_availability(service_factory):
+async def test_picker_asks_where_events_live_and_helps_the_unsure(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]
     picker = (await service.callback(1, tap(welcome, "📅 Connect personal calendar")))[0]
-    assert "iPhone works right from your phone" in picker.text
-    assert "Google works in the Google Calendar app or a computer browser" in picker.text
+    assert "Where do you usually add your events?" in picker.text
     assert "Outlook is coming soon" in picker.text
+    unsure = (await service.callback(1, tap(picker, "🤔 I'm not sure")))[0]
+    assert unsure.edit and unsure.text == onboarding.NOT_SURE
+    # Not only iPhone users decide here.
+    assert "Android" in unsure.text and "iPhone" in unsure.text and "Computer" in unsure.text
+    assert labels(unsure) == ["📅 Google Calendar", "🍎 Apple / iCloud", "« Back"]
+    back = (await service.callback(1, tap(unsure, "« Back")))[0]
+    assert back.text == onboarding.PICK_CALENDAR
 
 
 async def test_every_guide_ends_with_what_to_do_next(service_factory):

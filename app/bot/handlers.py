@@ -18,6 +18,7 @@ from telegram.ext import (
 from app.bot.delivery import telegram_profile, webhook_delivery
 from app.bot.keyboards import links_keyboard
 from app.bot.messages import GROUP_HELP, GROUP_WELCOME, Reply, send_reply
+from app.services import analytics
 from app.services.app_links import group_links
 from app.services.image_reader import MAX_BYTES, PictureError
 from app.services.jobs import Notifier, Undeliverable
@@ -65,6 +66,7 @@ async def send(update: Update, replies: list[Reply]):
 async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation: str):
     if not update.effective_user or not update.effective_chat:
         return
+    analytics.identify(update.effective_user.id)
     if update.effective_chat.type != ChatType.PRIVATE:
         await group_dispatch(update, context, operation)
         return
@@ -77,11 +79,13 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
             except TelegramError:
                 # Expired callback acknowledgements must not prevent safe replay.
                 pass
+            analytics.track("button", action=analytics.button(update.callback_query.data or ""))
             replies = await service.callback(
                 update.effective_user.id, update.callback_query.data or ""
             )
         elif operation == "command":
             name, args = split_command(update.effective_message.text)
+            analytics.track("command", name=name[:32])
             replies = await service.command(update.effective_user.id, name, args)
         else:
             try:
@@ -89,6 +93,14 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
             except TelegramError:
                 pass
             message = update.effective_message
+            analytics.track(
+                "message",
+                kind="forward"
+                if message.forward_origin
+                else "picture"
+                if message.photo or message.document
+                else "text",
+            )
             reference = message.forward_origin.date if message.forward_origin else message.date
             text, notice = await gather_text(message, context, service, update.effective_user.id)
             if not text.strip():
@@ -118,6 +130,7 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
             operation,
             type(exc).__name__,
         )
+        analytics.track("error", operation=operation, error_type=type(exc).__name__)
         await send(update, [Reply(ERROR)])
 
 
@@ -164,7 +177,15 @@ def split_command(text: str) -> tuple[str, str]:
 
 async def send_private(bot, telegram_id: int, reply: Reply):
     """A direct message to one person. Raises Forbidden/BadRequest when they never opened the bot."""
-    if reply.photos:
+    if reply.photo is not None:
+        await bot.send_photo(
+            telegram_id,
+            reply.photo,
+            caption=reply.text,
+            reply_markup=reply.keyboard,
+            **({"parse_mode": reply.parse_mode} if reply.parse_mode else {}),
+        )
+    elif reply.photos:
         from telegram import InputMediaPhoto
 
         await bot.send_media_group(
@@ -295,6 +316,7 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
     try:
         if operation == "callback":
             data = query.data or ""
+            analytics.track("group_button", action=analytics.button(data))
             handlers = {"g:": service.groups, "p:": service.polls, "d:": service.detection}
             handler = next((h for prefix, h in handlers.items() if data.startswith(prefix)), None)
             if handler is None:
@@ -313,6 +335,7 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             name, args = split_command(message.text)
             if not addressed_to_me(message.text, context.bot.username):
                 return  # /stats@OtherBot belongs to another bot in this group
+            analytics.track("group_command", name=name[:32])
             if name in ("help", "start", "app"):
                 links = links_keyboard(group_links(service.settings, update.effective_chat.id))
                 if name == "app" and links:
@@ -385,6 +408,7 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             operation,
             type(exc).__name__,
         )
+        analytics.track("group_error", operation=operation, error_type=type(exc).__name__)
         try:
             if query:
                 await query.answer("Something went wrong. Please try again.", show_alert=True)

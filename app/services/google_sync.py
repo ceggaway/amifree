@@ -59,25 +59,24 @@ class GoogleSyncService:
 
     # ---- connecting ----
 
-    def steps(self, phone: bool = False) -> list[Reply]:
-        if phone:
-            text = onboarding.google_share_steps_phone(self.client.email)
-            photos = onboarding.google_phone_photos()
-            caption = onboarding.PHOTOS_CAPTION
-        else:
-            text = onboarding.google_share_steps(self.client.email)
-            photos = onboarding.google_share_photos()
-            caption = onboarding.GOOGLE_PHOTOS_CAPTION
-        keyboard = onboarding.google_steps_keyboard(phone)
-        if photos:
-            text += "\n\n📸 <b>Picture guide below</b> ↓"
-        replies = [Reply(text, keyboard, edit=True, parse_mode="HTML", clear_album_group="setup")]
-        if photos:
-            replies.append(Reply(caption, photos=photos, album_group="setup"))
-        return replies
+    def steps(self, phone: bool = False, n: int = 1) -> list[Reply]:
+        """One part of sharing, as a picture with its instructions under it."""
+        text, photo, keyboard = onboarding.google_step(
+            self.client.email, "phone" if phone else "computer", n
+        )
+        return [
+            Reply(
+                text,
+                keyboard,
+                edit=True,
+                parse_mode="HTML",
+                photo=photo,
+                clear_album_group="setup",
+            )
+        ]
 
     async def connect(self, user, email: str) -> list[Reply]:
-        """Step 1 of 2: check the calendar is shared, then put a one-time code in it.
+        """Step 2 of 3 (the email): check the calendar is shared, then put a one-time code in it.
 
         Sharing is with AmIFree, not with one person, so anyone who knows the email could
         otherwise claim it. Only someone who can open the calendar can read the code back."""
@@ -111,16 +110,10 @@ class GoogleSyncService:
                 "tries": 0,
             },
         )
-        return [
-            Reply(
-                f"One last step, to check {email} is yours.\n\nI've put an event called"
-                ' "AmIFree code" in that calendar today. Open Google Calendar and send me the'
-                " 6-digit number in it.\n\n/cancel to stop."
-            )
-        ]
+        return [Reply(onboarding.google_code_ask(email), parse_mode="HTML")]
 
     async def verify(self, user, pending: dict, text: str) -> list[Reply]:
-        """Step 2 of 2: the code sent back. Connects on a match."""
+        """Step 3 of 3: the code sent back. Connects on a match."""
         s, now = self.s, self.s.clock()
         if datetime.fromisoformat(pending["expires"]) <= now:
             await s.repo.set_pending(user.id, None)
@@ -201,14 +194,14 @@ class GoogleSyncService:
         await s.repo.save_google_connection(user.id, email, calendar.id)
         added = await self.sync(user.id)
         await s.safe_action(user.id, "google_calendar_connected", metadata={"plans": added})
-        text = onboarding.calendar_added(
-            "Google Calendar",
-            len(busy),
-            timetable_connected=user.onboarding_status == "READY",
-            sync_enabled=True,
+        text = onboarding.google_connected(
+            len(busy), added, timetable_connected=user.onboarding_status == "READY"
         )
-        if added:
-            text += f"\n\nI added your {added} current plan{'s' if added != 1 else ''} just now."
+        if user.calendar_feed_token and user.calendar_feed_seen_at:
+            text += (
+                "\n\nℹ️ You also subscribe to the AmIFree calendar. Delete it on your phone so "
+                "your plans don't show up twice."
+            )
         return [
             Reply(
                 text,
@@ -222,7 +215,7 @@ class GoogleSyncService:
             lead = "I can't see that calendar yet."
             fix = (
                 "Check that you shared it with AmIFree and that the email you sent is the one "
-                "on that calendar. Then send your email again."
+                "on that calendar. Then send your email again." + onboarding.GOOGLE_SHARING_BLOCKED
             )
         else:
             lead = (
@@ -234,7 +227,7 @@ class GoogleSyncService:
                 "To add plans for you, change my permission in Shared with to a Make changes "
                 "option, then send your email again."
             )
-        return Reply(f"{lead}\n\n{fix}", google_help_keyboard())
+        return Reply(f"{lead}\n\n{fix}", google_help_keyboard(link=access is Access.NONE))
 
     # ---- busy times ----
 

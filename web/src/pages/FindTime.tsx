@@ -1,21 +1,40 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
-import { shiftKey, todayKey } from "../format";
+import { day, shiftKey, startOfDay, todayKey } from "../format";
 import { haptic } from "../telegram";
 
 const LENGTHS = [
   [30, "30 min"],
-  [60, "1h"],
-  [90, "1.5h"],
-  [120, "2h"],
-  [180, "3h"],
+  [60, "1 hour"],
+  [90, "1.5 hours"],
+  [120, "2 hours"],
+  [180, "3 hours"],
+] as const;
+
+/** 30 min to 8 hours in half-hour steps: the grid works in half hours and the server allows 8 hours. */
+const CUSTOM_LENGTHS = Array.from({ length: 16 }, (_, index) => (index + 1) * 30);
+
+const lengthLabel = (minutes: number) => {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (!hours) return `${rest} min`;
+  return `${hours} hour${hours === 1 ? "" : "s"}${rest ? ` ${rest} min` : ""}`;
+};
+
+const RANGES = [
+  ["next 7 days", "Next 7 days"],
+  ["this week", "This week"],
+  ["next week", "Next week"],
+  ["weekend", "This weekend"],
+  ["custom", "Pick dates"],
 ] as const;
 
 /** Monday (as a date key) of the week holding `key`. */
 const monday = (key: string) => shiftKey(key, -((new Date(`${key}T12:00:00+08:00`).getUTCDay() + 6) % 7));
 
-function window(choice: string): [string, string] {
+/** The first and last day a poll checks for each choice. */
+function range(choice: string): [string, string] {
   const today = todayKey();
   const week = monday(today);
   if (choice === "this week") return [today, shiftKey(week, 6)];
@@ -28,23 +47,26 @@ function window(choice: string): [string, string] {
   return [shiftKey(today, 1), shiftKey(today, 7)];
 }
 
+/** The deadline the server uses when none is chosen: halfway between now and the end of the last day. */
+function defaultDeadline(last: string) {
+  const now = Date.now();
+  const end = startOfDay(shiftKey(last, 1)).getTime();
+  return day(new Date(now + (end - now) / 2));
+}
+
 /** The /whosfree poll from a form: members add their times, the best slots are suggested. */
 export function FindTime() {
   const { code = "" } = useParams();
   const navigate = useNavigate();
   const [requestId] = useState(() => crypto.randomUUID());
   const [choice, setChoice] = useState("next 7 days");
-  const [[first, last], setRange] = useState(window("next 7 days"));
+  const [[first, last], setRange] = useState(() => range("next 7 days"));
   const [title, setTitle] = useState("");
   const [minutes, setMinutes] = useState(60);
+  const [customLength, setCustomLength] = useState(false);
   const [replyBy, setReplyBy] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-
-  function pick(next: string) {
-    setChoice(next);
-    if (next !== "custom") setRange(window(next));
-  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -74,33 +96,77 @@ export function FindTime() {
     <form className="stack" onSubmit={submit}>
       <h1>Find a time</h1>
       <p className="hint">
-        Members add the times they're free, and AmIFree suggests the best slots. The group only ever
-        sees how many people are free, never who is busy.
+        Members fill in when they're free, and AmIFree suggests the best times. The group only ever sees how
+        many people are free, never who is busy.
       </p>
       <label>
         What for
         <input value={title} maxLength={200} required placeholder="Project meeting" onChange={(e) => setTitle(e.target.value)} />
       </label>
       <fieldset>
-        <legend>How long</legend>
+        <legend>How long is the meeting?</legend>
         <div className="row">
-          {LENGTHS.map(([value, label]) => (
-            <button key={value} type="button" className={`chip-button${minutes === value ? " on" : ""}`} aria-pressed={minutes === value} onClick={() => setMinutes(value)}>
+          {LENGTHS.map(([value, label]) => {
+            const on = !customLength && minutes === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                className={`chip-button${on ? " on" : ""}`}
+                aria-pressed={on}
+                onClick={() => {
+                  setCustomLength(false);
+                  setMinutes(value);
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            className={`chip-button${customLength ? " on" : ""}`}
+            aria-pressed={customLength}
+            onClick={() => setCustomLength(true)}
+          >
+            Custom
+          </button>
+        </div>
+        {customLength && (
+          <label>
+            Length
+            <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
+              {CUSTOM_LENGTHS.map((value) => (
+                <option key={value} value={value}>
+                  {lengthLabel(value)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </fieldset>
+      <fieldset>
+        <legend>Which days can the meeting be on?</legend>
+        <p className="hint">
+          Members fill in their free times for these days only, and AmIFree suggests times within them.
+        </p>
+        <div className="row">
+          {RANGES.map(([name, label]) => (
+            <button
+              key={name}
+              type="button"
+              className={`chip-button${choice === name ? " on" : ""}`}
+              aria-pressed={choice === name}
+              onClick={() => {
+                setChoice(name);
+                if (name !== "custom") setRange(range(name));
+              }}
+            >
               {label}
             </button>
           ))}
         </div>
-      </fieldset>
-      <fieldset>
-        <legend>When</legend>
-        <div className="row">
-          {["next 7 days", "this week", "next week", "weekend", "custom"].map((name) => (
-            <button key={name} type="button" className={`chip-button${choice === name ? " on" : ""}`} aria-pressed={choice === name} onClick={() => pick(name)}>
-              {name[0].toUpperCase() + name.slice(1)}
-            </button>
-          ))}
-        </div>
-        {choice === "custom" && (
+        {choice === "custom" ? (
           <div className="pair">
             <label>
               From
@@ -111,13 +177,21 @@ export function FindTime() {
               <input type="date" value={last} min={first} max={shiftKey(first, 13)} required onChange={(e) => setRange([first, e.target.value])} />
             </label>
           </div>
+        ) : (
+          <p className="hint">
+            {first === last ? day(startOfDay(first)) : `${day(startOfDay(first))} to ${day(startOfDay(last))}`}
+          </p>
         )}
       </fieldset>
       <label>
         <span>
-          Reply by <span className="hint">(optional, otherwise halfway)</span>
+          Deadline to fill in availabilities <span className="hint">(optional)</span>
         </span>
         <input type="date" value={replyBy} min={todayKey()} max={last} onChange={(e) => setReplyBy(e.target.value)} />
+        <span className="hint">
+          Members fill in their free times until the end of this day. Then AmIFree suggests the best times
+          to the group to vote on. Leave blank to use {defaultDeadline(last)}.
+        </span>
       </label>
       {error && <p className="error">{error}</p>}
       <button type="submit" className="on big" disabled={busy}>

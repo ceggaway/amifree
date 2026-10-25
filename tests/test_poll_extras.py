@@ -78,7 +78,10 @@ async def test_poll_shows_deadline_and_suggests_itself_when_it_passes(service_fa
         assert result["suggested"] == 1
         assert repo.polls[poll.id].status == "OPEN" and repo.polls[poll.id].slots
         # The card in the group is redrawn with the slots, and not suggested twice.
-        assert "Best slots from 3 schedules" in last_card(transport)["text"]
+        assert "Results are in from 3 schedules" in last_card(transport)["text"]
+        # The organiser gets the results privately to choose from.
+        report = [m for m in transport.sent if int(m["chat_id"]) == 1][-1]
+        assert "📊 Results for sync" in report["text"]
         assert "suggested" not in await service.notifier.run()
 
 

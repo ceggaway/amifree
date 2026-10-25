@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     alert_cooldown_minutes: int = Field(default=60, ge=1, le=1440)
     # Event detection: language-model checks allowed per group per hour.
     detection_per_hour: int = Field(default=20, ge=1, le=200)
+    # PostHog product analytics: the project API key (phc_...). Blank turns analytics off.
+    posthog_api_key: SecretStr = SecretStr("")
+    posthog_host: str = "https://us.i.posthog.com"
 
     @model_validator(mode="after")
     def webhook_settings(self):

@@ -49,7 +49,7 @@ async def non_responders(repo, card: GroupEvent | Poll) -> list[str]:
     if isinstance(card, GroupEvent):
         answered = set(await repo.group_responder_ids(card.id))
     elif card.status == "OPEN":
-        answered = set(await repo.poll_voter_ids(card.id))
+        return []  # Results are out: only the organiser has anything left to do.
     else:
         answered = set(await repo.poll_participants(card.id))
     return sorted(members - answered - {card.creator_user_id})

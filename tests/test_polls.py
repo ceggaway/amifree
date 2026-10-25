@@ -137,15 +137,17 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
         assert "reply_markup" not in opened or not buttons(opened["reply_markup"])
         # The organiser gets the results privately, with one button per time.
         report = private_to(transport, 1)[-1]
-        assert "📊 Results for project meeting (2h)" in report["text"]
-        assert "3 people filled in their availabilities" in report["text"]
+        assert "Results for project meeting (2 hours)" in report["text"]
+        # Professional wording: no emoji in the organiser's report.
+        assert not any(ord(ch) > 0x2600 for ch in report["text"])
+        assert "3 people have submitted their availability" in report["text"]
         # Everyone is free from 14:00, so the morning never appears.
-        assert "1. Mon 5 Oct, 14:00–16:00 · 3 of 3 free" in report["text"]
-        assert "2. Mon 5 Oct, 16:00–18:00 · 3 of 3 free" in report["text"]
+        assert "1. Mon 5 Oct, 14:00–16:00 (3 of 3 available)" in report["text"]
+        assert "2. Mon 5 Oct, 16:00–18:00 (3 of 3 available)" in report["text"]
         # Counts only: no names, no titles of anyone's plans.
         assert "Lab" not in report["text"] and "Brunch" not in report["text"]
         choose = buttons(report["reply_markup"])
-        assert list(choose) == ["Choose 1", "Choose 2", "Choose 3"]
+        assert list(choose) == ["Option 1", "Option 2", "Option 3"]
         assert all(len(data.encode()) <= 64 for data in choose.values())
         # Old vote buttons now just say the organiser is choosing, and record nothing.
         await bot.process_update(
@@ -154,10 +156,10 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
         assert "organiser is choosing" in alerts(transport)[-1]["text"]
         assert not repo.poll_votes
     # Only the organiser can choose from the report.
-    assert "isn't available" in (await service.callback(2, choose["Choose 2"]))[0].text
+    assert "isn't available" in (await service.callback(2, choose["Option 2"]))[0].text
     sent_before = len(transport.sent)
     async with bot:
-        done = (await service.callback(1, choose["Choose 2"]))[0]
+        done = (await service.callback(1, choose["Option 2"]))[0]
     assert done.edit and "is set for Mon 5 Oct, 16:00–18:00" in done.text
     # Without the Mini App, the usual event card is posted in the group.
     event_card = transport.sent[sent_before]
@@ -166,7 +168,7 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
     assert repo.polls[poll.id].status == "CLOSED"
     # A second tap changes nothing.
     async with bot:
-        again = (await service.callback(1, choose["Choose 1"]))[0]
+        again = (await service.callback(1, choose["Option 1"]))[0]
     assert "already chosen" in again.text
     assert len(repo.group_events) == 1
     event = next(iter(repo.group_events.values()))
@@ -193,8 +195,8 @@ async def test_choosing_announces_the_time_with_calendar_buttons(service_factory
         markup = report["reply_markup"]
         markup = json.loads(markup) if isinstance(markup, str) else markup
         row = markup["inline_keyboard"]
-        assert [b["text"] for b in row[0]] == ["Choose 1", "Choose 2", "Choose 3"]
-        assert row[1][0]["text"] == "📱 See all times"
+        assert [b["text"] for b in row[0]] == ["Option 1", "Option 2", "Option 3"]
+        assert row[1][0]["text"] == "View all times"
         sent_before = len(transport.sent)
         await service.callback(1, row[0][0]["callback_data"])
     announced = transport.sent[sent_before]
@@ -239,7 +241,7 @@ async def test_members_with_no_schedule_are_never_counted_as_free(service_factor
         )
     text = private_to(transport, 1)[-1]["text"]
     # Member 4 joined but gave AmIFree nothing to check: said so, and not counted.
-    assert "of 3 free" in text and "of 4" not in text
+    assert "of 3 available" in text and "of 4" not in text
     assert "1 member had no schedule to check" in text
     assert repo.polls[poll.id].slots[0]["of"] == 3 and repo.polls[poll.id].slots[0]["unknown"] == 1
 
@@ -328,4 +330,4 @@ async def test_two_people_get_suggested_times(service_factory):
             Update.de_json(group_tap(taps["Suggest slots (organiser)"], 1, update_id=8600), bot.bot)
         )
     assert repo.polls[poll.id].status == "OPEN" and repo.polls[poll.id].slots
-    assert "2 people filled in their availabilities" in private_to(transport, 1)[-1]["text"]
+    assert "2 people have submitted their availability" in private_to(transport, 1)[-1]["text"]

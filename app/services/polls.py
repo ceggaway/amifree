@@ -242,6 +242,17 @@ def length_text(minutes: int) -> str:
     return f"{hours:g}h" if minutes % 30 == 0 else f"{minutes}min"
 
 
+def length_words(minutes: int) -> str:
+    """90 -> "1.5 hours", 150 -> "2 hours 30 minutes", for messages people read."""
+    hours, rest = divmod(minutes, 60)
+    if rest == 30 and hours:
+        return f"{hours}.5 hours"
+    if not hours:
+        return f"{minutes} minutes"
+    text = f"{hours} hour{'s' if hours != 1 else ''}"
+    return text + (f" {rest} minutes" if rest else "")
+
+
 def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Reply:
     """Sent privately to the organiser: the best times, with one button to choose each."""
     lines = []
@@ -249,34 +260,34 @@ def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Rep
         start = datetime.fromisoformat(slot["start_at"]).astimezone(SG)
         end = datetime.fromisoformat(slot["end_at"]).astimezone(SG)
         lines.append(
-            f"{index + 1}. {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M} · "
-            f"{slot['free']} of {slot.get('of', joined)} free"
+            f"{index + 1}. {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M} "
+            f"({slot['free']} of {slot.get('of', joined)} available)"
         )
     unknown = max((s.get("unknown", 0) for s in poll.slots), default=0)
     missing = (
-        f"\n{unknown} member{'s' if unknown != 1 else ''} had no schedule to check, so"
-        " they aren't counted."
+        f"\n{unknown} member{'s' if unknown != 1 else ''} had no schedule to check and"
+        f" {'is' if unknown == 1 else 'are'} not included."
         if unknown
         else ""
     )
     text = (
-        f"📊 Results for {poll.title} ({length_text(poll.duration_minutes)})\n"
-        f"{joined} {'person' if joined == 1 else 'people'} filled in their availabilities.\n\n"
-        "Best times:\n"
+        f"Results for {poll.title} ({length_words(poll.duration_minutes)})\n"
+        f"{joined} {'person has' if joined == 1 else 'people have'} submitted their"
+        " availability.\n\n"
+        "Suggested times:\n"
         + "\n".join(lines)
         + missing
-        + "\n\nTap a time to confirm it, or open 📱 See all"
-        " times to choose any other time. I'll post"
-        " it in the group so everyone can add it to their calendar."
+        + "\n\nSelect an option to confirm the meeting time, or view all times to choose a"
+        " different one. The confirmed time will be posted in the group."
     )
     rows = [
         [
-            InlineKeyboardButton(f"Choose {index + 1}", callback_data=f"pr:{poll.id}:{index}")
+            InlineKeyboardButton(f"Option {index + 1}", callback_data=f"pr:{poll.id}:{index}")
             for index in range(len(poll.slots))
         ]
     ]
     if app_url:
-        rows.append([InlineKeyboardButton("📱 See all times", url=app_url)])
+        rows.append([InlineKeyboardButton("View all times", url=app_url)])
     return Reply(text, InlineKeyboardMarkup(rows))
 
 
@@ -547,8 +558,8 @@ class PollService:
         start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
         return [
             Reply(
-                f"✅ Done. {event.title} is set for {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M}."
-                " I've posted it in the group so everyone can add it to their calendar.",
+                f"Confirmed: {event.title} is set for {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M}."
+                " The time has been posted in the group.",
                 edit=True,
             )
         ]

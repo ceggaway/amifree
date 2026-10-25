@@ -182,6 +182,7 @@ class GroupHub:
         polls = []
         for poll in await self.repo.chat_polls(chat_id, now):
             people = await self.repo.poll_participants(poll.id)
+            submitted = await self.repo.get_availability(poll.id, user.id)
             polls.append(
                 {
                     "id": poll.id,
@@ -190,6 +191,8 @@ class GroupHub:
                     "duration_minutes": poll.duration_minutes,
                     "joined": len(people),
                     "joined_by_me": user.id in people,
+                    "availability_submitted": submitted is not None,
+                    "organiser": poll.creator_user_id == user.id,
                     "deadline_at": poll.deadline_at.isoformat() if poll.deadline_at else None,
                     "min_joined": MIN_PARTICIPANTS,
                 }

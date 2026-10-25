@@ -6,7 +6,14 @@ from telegram import Update
 from app.schemas.event import SG
 from app.services.polls import parse_request, suggest_slots
 from tests.conftest import extraction
-from tests.test_group_events import CHAT, alerts, buttons, group_message, group_tap, make_bot
+from tests.test_group_events import (
+    CHAT,
+    alerts,
+    buttons,
+    group_tap,
+    make_bot,
+    seed_poll_card,
+)
 
 # Reference is Sunday 4 Oct 2026, 12:00 Singapore.
 
@@ -56,9 +63,7 @@ async def with_schedule(repo, *telegram_ids):
 async def run_poll(service, repo, joiners=(2, 3)):
     bot, transport = make_bot(service)
     async with bot:
-        await bot.process_update(
-            Update.de_json(group_message("/whosfree project meeting 2h tomorrow", 30, 1), bot.bot)
-        )
+        await seed_poll_card(bot, "project meeting 2h tomorrow", 30, 1)
         card = transport.sent[-1]
         taps = buttons(card["reply_markup"])
         for n, member in enumerate(joiners):
@@ -173,9 +178,7 @@ async def test_choosing_announces_the_time_with_calendar_buttons(service_factory
     await with_schedule(repo, 1, 2, 3)
     bot, transport = make_bot(service)
     async with bot:
-        await bot.process_update(
-            Update.de_json(group_message("/whosfree project meeting 2h tomorrow", 30, 1), bot.bot)
-        )
+        await seed_poll_card(bot, "project meeting 2h tomorrow", 30, 1)
     poll = next(iter(repo.polls.values()))
     for member in (1, 2, 3):
         await repo.poll_join(poll.id, (await repo.ensure_user(member)).id)
@@ -214,13 +217,12 @@ async def test_poll_is_bound_to_its_chat_and_needs_a_topic(service_factory):
             Update.de_json(group_tap(taps["✋ Count me in"], 2, chat=CHAT - 1), bot.bot)
         )
         assert alerts(transport)[-1]["text"] == "This poll is no longer available."
-        await bot.process_update(Update.de_json(group_message("/whosfree", 31, 1), bot.bot))
+        await seed_poll_card(bot, "", 31, 1)
         assert "What are you scheduling?" in transport.sent[-1]["text"]
         # A retried command does not post a second poll.
-        update = group_message("/whosfree project meeting 2h tomorrow", 30, 1)
-        await bot.process_update(Update.de_json(update, bot.bot))
+        await seed_poll_card(bot, "project meeting 2h tomorrow", 30, 1)
     assert len(repo.polls) == 1 and len(repo.poll_people[poll.id]) == 1
-    assert "works in group chats" in (await service.command(1, "whosfree"))[0].text
+    assert "mini app" in (await service.command(1, "whosfree"))[0].text
 
 
 async def test_members_with_no_schedule_are_never_counted_as_free(service_factory):

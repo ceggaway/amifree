@@ -46,7 +46,7 @@ export function Poll() {
   }
 
   async function pick(slot: number) {
-    if (!(await confirm("Choose this time? It's posted in the group and the poll closes."))) return;
+    if (!(await confirm("Create an event at this time? This closes the poll and posts the event in the group for RSVPs."))) return;
     setBusy(true);
     try {
       const { event_id } = await api.pick(p!.id, slot);
@@ -109,7 +109,7 @@ export function Poll() {
             </p>
             {p.organiser && (
               <button type="button" className="on big" disabled={busy} onClick={() => pick(index)}>
-                Choose this time
+                Create event at this time
               </button>
             )}
           </section>

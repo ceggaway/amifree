@@ -3,7 +3,7 @@ import json
 from telegram import Update
 from telegram.ext import Application
 
-from app.bot.handlers import register_handlers
+from app.bot.handlers import deliver_group, register_handlers
 from app.schemas.event import Status
 from tests.conftest import extraction, tap
 from tests.telegram_transport import TelegramTransport
@@ -89,11 +89,27 @@ def alerts(transport):
 
 
 async def post_card(bot, transport, repo, organiser=1):
-    await bot.process_update(
-        Update.de_json(group_message("/event", 50, organiser, reply_to=TEXT), bot.bot)
-    )
+    await seed_event_card(bot, TEXT, 50, organiser)
     card = transport.sent[-1]
     return card, buttons(card["reply_markup"]), next(iter(repo.group_events.values()))
+
+
+async def seed_event_card(bot, text, message_id=50, organiser=1):
+    """Seed an existing card through its service; creation commands are retired."""
+    service = bot.bot_data["service"]
+    update = Update.de_json(group_message(text, message_id, organiser), bot.bot)
+    result = await service.groups.create(
+        organiser, CHAT, message_id, text, update.effective_message.date, name="Member"
+    )
+    await deliver_group(update, service, result)
+
+
+async def seed_poll_card(bot, text, message_id=30, organiser=1):
+    """Seed a poll for existing-card and reminder behaviour tests."""
+    service = bot.bot_data["service"]
+    update = Update.de_json(group_message(text, message_id, organiser), bot.bot)
+    result = await service.polls.create(organiser, CHAT, message_id, text)
+    await deliver_group(update, service, result)
 
 
 async def test_event_card_from_a_replied_message(service_factory):
@@ -235,21 +251,25 @@ async def test_groups_ignore_chatter_and_foreign_cards(service_factory, referenc
     assert "private chat" in texts[1] and "isn't valid" in texts[2]
     assert not [e for e in repo.events.values() if e.group_event_id]
     assert next(iter(repo.events.values())).status == Status.PREVIEW
-    assert "couldn't find an event" in transport.sent[-2]["text"]
-    assert "Reply /event" in transport.sent[-1]["text"]
+    assert "mini app" in transport.sent[-2]["text"]
+    assert "mini app" in transport.sent[-1]["text"]
     assert len(repo.group_events) == 1
 
 
-async def test_incomplete_plan_and_retried_command(service_factory):
-    service, repo = service_factory(extraction(end_time_text=None), extraction(), extraction())
+async def test_retired_creation_commands_do_not_parse_or_create_plans(service_factory):
+    service, repo = service_factory(extraction(end_time_text=None), extraction())
     bot, transport = make_bot(service)
     async with bot:
-        await bot.process_update(
-            Update.de_json(group_message("/event CCA dinner Friday 7pm", 40, 1), bot.bot)
-        )
-        assert "need a bit more" in transport.sent[-1]["text"] and not repo.group_events
-        update = group_message("/event " + TEXT, 41, 1)
-        await bot.process_update(Update.de_json(update, bot.bot))
-        await bot.process_update(Update.de_json(update, bot.bot))
-    assert len(repo.group_events) == 1 and len(transport.sent) == 2
-    assert "works in group chats" in (await service.command(1, "event"))[0].text
+        for number, command in enumerate(
+            (
+                "/event CCA dinner Friday 7pm",
+                "/plan " + TEXT,
+                "/whosfree project meeting 2h tomorrow",
+            )
+        ):
+            update = group_message(command, 40 + number, 1)
+            await bot.process_update(Update.de_json(update, bot.bot))
+            await bot.process_update(Update.de_json(update, bot.bot))
+    assert not repo.group_events and not repo.polls and not service.extractor.calls
+    assert all("mini app" in message["text"] for message in transport.sent)
+    assert "mini app" in (await service.command(1, "event"))[0].text

@@ -27,9 +27,6 @@ from app.services.scheduling import SLOW_DOWN
 
 log = logging.getLogger(__name__)
 GROUP_COMMANDS = {
-    "event",
-    "plan",
-    "whosfree",
     "stats",
     "export",
     "detect",
@@ -336,6 +333,16 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             if not addressed_to_me(message.text, context.bot.username):
                 return  # /stats@OtherBot belongs to another bot in this group
             analytics.track("group_command", name=name[:32])
+            if name in ("event", "plan", "whosfree"):
+                await send(
+                    update,
+                    [
+                        Reply(
+                            "Create events and find a common time in the mini app. Open it with /app."
+                        )
+                    ],
+                )
+                return
             if name in ("help", "start", "app"):
                 links = links_keyboard(group_links(service.settings, update.effective_chat.id))
                 if name == "app" and links:
@@ -347,11 +354,7 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             if name not in GROUP_COMMANDS:
                 await send(update, [Reply(PRIVATE_ONLY)])
                 return
-            if name == "whosfree":
-                result = await service.polls.create(
-                    user.id, update.effective_chat.id, message.message_id, args
-                )
-            elif name == "stats":
+            if name == "stats":
                 result = await service.groups.stats(user.id, update.effective_chat.id)
             elif name == "attendance":
                 result = await service.groups.attendance_command(user.id, update.effective_chat.id)
@@ -362,19 +365,6 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             elif name == "detect":
                 result = await service.detection.command(
                     user.id, update.effective_chat.id, args, await is_admin(context.bot, message)
-                )
-            else:
-                source = message.reply_to_message if not args else None
-                text = args or (source.text or source.caption or "" if source else "")
-                origin = source.forward_origin if source else None
-                reference = origin.date if origin else (source.date if source else message.date)
-                result = await service.groups.create(
-                    user.id,
-                    update.effective_chat.id,
-                    message.message_id,
-                    text,
-                    reference,
-                    **who,
                 )
         elif operation == "message":
             # Ordinary group messages are dropped unless an admin switched detection on.

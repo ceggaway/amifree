@@ -90,6 +90,8 @@ export type GroupPoll = {
   duration_minutes: number;
   joined: number;
   joined_by_me: boolean;
+  organiser: boolean;
+  availability_submitted: boolean;
   deadline_at: string | null;
   min_joined: number;
 };

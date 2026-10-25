@@ -114,7 +114,7 @@ export async function mock<T>(method: string, path: string, body?: unknown): Pro
       chat: "n100500",
       title: "CS3216 group",
       events: [{ ...groupEvent, recurring: false }],
-      polls: [{ id: "mock", title: "Project meeting", status: "COLLECTING", duration_minutes: 120, joined: 3, joined_by_me: false, deadline_at: at(1, 23), min_joined: 3 }],
+      polls: [{ id: "mock", title: "Project meeting", status: "COLLECTING", duration_minutes: 120, joined: 3, joined_by_me: false, organiser: true, availability_submitted: false, deadline_at: at(1, 23), min_joined: 3 }],
       admin: true,
       detection,
     };

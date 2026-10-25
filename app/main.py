@@ -174,8 +174,6 @@ def create_app(
                 [
                     BotCommand("app", "Open AmIFree for this group"),
                     BotCommand("help", "How to use AmIFree in this group"),
-                    BotCommand("event", "Post an event card (reply to a plan, or add details)"),
-                    BotCommand("whosfree", "Find a time: /whosfree project meeting 2h next week"),
                     BotCommand("stats", "Turnout for your events (sent privately)"),
                     BotCommand("attendance", "Mark who came to your latest event"),
                     BotCommand("export", "Attendance CSV (sent privately)"),

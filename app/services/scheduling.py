@@ -418,10 +418,13 @@ class SchedulingService:
             return await self.list_events(user)
         if command == "plans":
             return await self.agenda(user)
+        if command in ("event", "plan", "whosfree"):
+            return [
+                Reply(
+                    "Create events and find a common time in the mini app. Open it in your group with /app."
+                )
+            ]
         if command in (
-            "event",
-            "plan",
-            "whosfree",
             "stats",
             "export",
             "detect",

@@ -7,7 +7,7 @@ from telegram import Update
 
 from app.schemas.event import SG
 from app.services.polls import heatmap_cells, parse_deadline
-from tests.test_group_events import alerts, buttons, group_message, group_tap, make_bot
+from tests.test_group_events import alerts, buttons, group_tap, make_bot, seed_poll_card
 from tests.test_polls import last_card, run_poll, with_schedule
 
 
@@ -53,11 +53,7 @@ async def test_poll_shows_deadline_and_suggests_itself_when_it_passes(service_fa
     await with_schedule(repo, 1, 2, 3)
     bot, transport = make_bot(service)
     async with bot:
-        await bot.process_update(
-            Update.de_json(
-                group_message("/whosfree sync 1h next week reply by Mon", 30, 1), bot.bot
-            ),
-        )
+        await seed_poll_card(bot, "sync 1h next week reply by Mon", 30, 1)
         card = transport.sent[-1]
         assert "Reply by Mon 5 Oct, 11:59pm" in card["text"]
         taps = buttons(card["reply_markup"])
@@ -124,9 +120,7 @@ async def test_poll_card_links_to_the_mini_app_when_configured(service_factory):
     service, repo = service_factory(bot_username="AmIFreeBot", mini_app_short_name="free")
     bot, transport = make_bot(service)
     async with bot:
-        await bot.process_update(
-            Update.de_json(group_message("/whosfree sync tomorrow", 30, 1), bot.bot)
-        )
+        await seed_poll_card(bot, "sync tomorrow", 30, 1)
     markup = transport.sent[-1]["reply_markup"]
     markup = json.loads(markup) if isinstance(markup, str) else markup
     urls = [b["url"] for row in markup["inline_keyboard"] for b in row if b.get("url")]

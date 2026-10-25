@@ -16,39 +16,51 @@ export function GroupHome() {
   const { data, error } = useLoad(() => api.group(code), [code]);
   if (error) return <NotInGroup error={error} />;
   if (!data) return <p className="hint">Loading…</p>;
+  const pending = data.polls.filter((poll) =>
+    poll.status === "COLLECTING" ? !poll.availability_submitted : poll.organiser,
+  );
   return (
     <>
       <header className="group-head">
-        <p className="eyebrow"><Icon name="users" size={14} /> Group workspace</p>
         <h1>{data.title ?? "This group"}</h1>
-        <p className="hint">Your plans, people and time together.</p>
       </header>
-      <div className="actions">
-        <Link className="action" to={`/g/${code}/new`}>
-          <Icon name="plus" size={18} /> Create an event
+      <nav className="group-actions" aria-label="Plan together">
+        <Link className="card link group-action" to={`/g/${code}/new`}>
+          <span className="icon-tile"><Icon name="plus" /></span>
+          <div>
+            <h2>Create an event</h2>
+            <p className="hint">Time decided? Set the details and collect RSVPs.</p>
+          </div>
+          <Icon name="arrow" size={18} />
         </Link>
-        <Link className="action secondary" to={`/g/${code}/find`}>
-          <Icon name="clock" size={18} /> Find a time
+        <Link className="card link group-action" to={`/g/${code}/find`}>
+          <span className="icon-tile"><Icon name="clock" /></span>
+          <div>
+            <h2>Find a common time</h2>
+            <p className="hint">Time undecided? Find when your group can meet.</p>
+          </div>
+          <Icon name="arrow" size={18} />
         </Link>
-      </div>
+      </nav>
+      {pending.length > 0 && (
+        <section aria-labelledby="pending-action-heading">
+          <h2 id="pending-action-heading">Pending action</h2>
+          {pending.map((poll) => <PollRow key={poll.id} poll={poll} />)}
+        </section>
+      )}
       <div className="section-heading">
-        <h2>Coming up</h2>
+        <h2>Upcoming events</h2>
         <span className="hint">{data.events.length} {data.events.length === 1 ? "event" : "events"}</span>
       </div>
-      {data.events.length === 0 && <p className="hint">No events yet. Create the first one above.</p>}
+      {data.events.length === 0 && <p className="hint">No upcoming events.</p>}
       {data.events.map((event) => (
         <EventRow key={event.id} event={event} />
       ))}
-      {data.polls.length > 0 && <h2>Finding a time</h2>}
-      {data.polls.map((poll) => (
-        <PollRow key={poll.id} poll={poll} />
-      ))}
-      <h2>For organisers</h2>
+      <h2>Group tools</h2>
       <Link className="card link organiser-link" to={`/g/${code}/stats`}>
         <span className="icon-tile"><Icon name="chart" /></span>
         <div>
-          <h3>Turnout and attendance</h3>
-          <p className="hint">View event insights and export attendance.</p>
+          <h3>Attendance and insights</h3>
         </div>
         <Icon name="arrow" size={18} />
       </Link>
@@ -120,14 +132,13 @@ function EventRow({ event }: { event: GroupEventSummary }) {
 
 function PollRow({ poll }: { poll: GroupPoll }) {
   return (
-    <Link className="card link" to={`/poll/${poll.id}`}>
+    <Link className="card link" to={`/poll/${poll.id}${poll.status === "COLLECTING" ? "/mine" : ""}`}>
       <h3 className="icon-label"><Icon name="clock" size={18} />{poll.title}</h3>
       <p className="hint">
         {poll.joined} joined
-        {poll.deadline_at ? ` · reply by ${day(poll.deadline_at)}` : ""}
-        {poll.status === "OPEN" ? " · times suggested" : ""}
+        {poll.status === "COLLECTING" && poll.deadline_at ? ` · reply by ${day(poll.deadline_at)}` : ""}
       </p>
-      <p>{poll.status === "OPEN" ? "Answer ›" : poll.joined_by_me ? "You're in ›" : "Fill in my availabilities ›"}</p>
+      <p>{poll.status === "COLLECTING" ? "Add your availability ›" : "Choose a time to create the event ›"}</p>
     </Link>
   );
 }

@@ -95,6 +95,12 @@ p { margin: 5px 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 32px; }
 .action { display: flex; background: var(--accent); color: var(--accent-text); text-decoration: none; flex-direction: row; align-items: center; justify-content: center; gap: 9px; padding: 11px 17px; border: 1px solid transparent; border-radius: 7px; font-size: 13px; font-weight: 600; }
 .action.secondary { background: var(--panel); color: var(--text); border-color: var(--border); }
+.group-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 28px; }
+a.card.link.group-action { display: flex; align-items: center; gap: 14px; margin: 0; padding: 18px; }
+.group-action > div { min-width: 0; flex: 1; }
+.group-action h2 { font-size: 16px; line-height: 1.35; margin: 0; }
+.group-action p { margin: 4px 0 0; }
+.group-action > .icon { color: var(--hint); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; margin: 28px 0 12px; }
 .section-heading h2 { margin: 0; }
 .section-heading .hint { font-size: 12px; }

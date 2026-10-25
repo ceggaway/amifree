@@ -290,6 +290,32 @@ async def test_find_a_time_from_the_app(hub, reference):
     assert refused.status_code == 409
 
 
+async def test_group_overview_tracks_availability_submission_not_just_joining(hub, reference):
+    client, service, repo, posted, members = hub
+    first = reference.date() + timedelta(days=1)
+    form = {
+        "request_id": str(uuid.uuid4()),
+        "title": "Project meeting",
+        "minutes": 60,
+        "first": str(first),
+        "last": str(first + timedelta(days=2)),
+    }
+    made = await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)
+    poll_id = made.json()["id"]
+    before = (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()["polls"][0]
+    assert before["organiser"] and before["joined_by_me"]
+    assert before["availability_submitted"] is False
+    member = (await client.get(f"/api/groups/{CODE}", headers=bearer(2))).json()["polls"][0]
+    assert member["organiser"] is False and member["availability_submitted"] is False
+    # An empty answer is still a completed response: no suitable times this week.
+    saved = await client.put(
+        f"/api/polls/{poll_id}/availability", headers=bearer(1), json={"free": []}
+    )
+    assert saved.status_code == 200
+    after = (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()["polls"][0]
+    assert after["availability_submitted"] is True
+
+
 async def test_running_a_poll_from_its_page(hub, reference):
     client, service, repo, posted, members = hub
     await with_schedule(repo, 1, 2, 3)
@@ -347,34 +373,37 @@ async def test_running_a_poll_from_its_page(hub, reference):
     assert again.status_code == 409 and len(repo.group_events) == 1
 
 
-async def test_group_commands_open_the_app(service_factory):
-    service, repo = service_factory(extraction(), **APP)
+async def test_app_and_help_keep_the_existing_group_entry_point(service_factory):
+    service, _ = service_factory(**APP)
     bot, transport = make_bot(service)
     async with bot:
-        for n, command in enumerate(("/event", "/whosfree", "/app", "/help")):
+        for n, command in enumerate(("/app", "/help")):
             await bot.process_update(Update.de_json(group_message(command, 70 + n, 1), bot.bot))
-        sent = transport.sent[-4:]
-        urls = [[b["url"] for row in markup(m)["inline_keyboard"] for b in row] for m in sent]
-        assert urls[0] == [f"https://t.me/AmIFreeTestBot/app?startapp=new_{CODE}"]
-        assert urls[1] == [f"https://t.me/AmIFreeTestBot/app?startapp=find_{CODE}"]
-        assert urls[2] == urls[3] == [f"https://t.me/AmIFreeTestBot/app?startapp=g_{CODE}"]
-        assert "AmIFree in this group" in sent[3]["text"]
-        # A card typed in full still posts straight away: answers plus 📱 Details, nothing else.
-        await bot.process_update(
-            Update.de_json(group_message("/event Dinner Fri 7-9pm at Vivo", 80, 1), bot.bot)
-        )
-        card = transport.sent[-1]
-        labels = [b["text"] for row in markup(card)["inline_keyboard"] for b in row]
-        assert labels == ["Going", "Can't", "📱 Details"]
+    urls = [[b["url"] for row in markup(m)["inline_keyboard"] for b in row] for m in transport.sent]
+    assert urls == [[f"https://t.me/AmIFreeTestBot/app?startapp=g_{CODE}"]] * 2
+    assert "AmIFree in this group" in transport.sent[-1]["text"]
 
 
-async def test_without_the_app_set_up_commands_work_as_before(service_factory):
-    service, repo = service_factory()
+@pytest.mark.parametrize("app_settings", [APP, {}])
+async def test_creation_commands_are_retired_even_without_a_configured_app(
+    service_factory, app_settings
+):
+    service, repo = service_factory(extraction(), **app_settings)
     bot, transport = make_bot(service)
     async with bot:
-        await bot.process_update(Update.de_json(group_message("/event", 90, 1), bot.bot))
-        assert "Reply /event to a message" in transport.sent[-1]["text"]
-        assert "reply_markup" not in transport.sent[-1]
+        for n, command in enumerate(
+            (
+                "/event",
+                "/event Dinner Fri 7-9pm at Vivo",
+                "/plan",
+                "/whosfree",
+                "/whosfree project meeting 2h tomorrow",
+            )
+        ):
+            await bot.process_update(Update.de_json(group_message(command, 90 + n, 1), bot.bot))
+            assert "mini app" in transport.sent[-1]["text"]
+            assert "reply_markup" not in transport.sent[-1]
+    assert not repo.group_events and not repo.polls and not service.extractor.calls
 
 
 async def test_stats_export_and_detection_from_the_group_page(hub, reference):

@@ -64,8 +64,9 @@ never hold a task's due date, a notes heading date or a deadline:
 end_date_text is only for one event that runs past midnight or across days. Never put the
 day of another session there: "Hackathon Sat & Sun 9am-6pm" gives date_text "Sat",
 end_date_text null, and other_times [{date_text "Sun", ...}].
-In other_times, use null for what is the same as the time before it: "Training Tue 7-9pm
-and Thu 6-8pm" gives other_times [{title null, date_text "Thu", start_time_text "6",
+The main fields always name the activity: "Training Tue 7-9pm and Thu 6-8pm" gives title
+"Training". In other_times, use null for what is the same as the time before it: that
+message gives other_times [{title null, date_text "Thu", start_time_text "6",
 end_time_text "8pm", location null}]; "Dinner Friday or Saturday 7-9pm" gives date_text
 "Saturday" and null times. The same copy-don't-convert rules apply. A recurring event
 ("every Tue/Thu", "Tuesdays", "weekly") is never split: relation "one", other_times empty,

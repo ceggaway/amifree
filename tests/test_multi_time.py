@@ -161,6 +161,14 @@ async def test_separate_events_get_one_picker(service_factory, reference):
     assert {e.status for e in repo.events.values()} == {Status.PREVIEW}
 
 
+async def test_an_untitled_extraction_is_named_from_the_message(service_factory, reference):
+    # Seen live: the model left title null, so both lines said "Event".
+    service, _ = service_factory(trainings().model_copy(update={"title": None}))
+    [picker] = await service.message(1, 7, TRAINING, reference)
+    assert "1. <b>Training</b>" in picker.text and "2. <b>Training</b>" in picker.text
+    assert "<b>Event</b>" not in picker.text
+
+
 async def test_add_one_then_the_other(service_factory, reference):
     service, repo = service_factory(trainings())
     [picker] = await service.message(1, 7, TRAINING, reference)

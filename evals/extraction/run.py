@@ -278,6 +278,10 @@ def score(case: dict, pred: Prediction) -> dict:
         result["verdict"] = "missed_event"
     else:
         result["verdict"] = "wrong_kind"
+    # The right time under the wrong name ("Event" for "Training") is still a miss: the
+    # user can't tell what the plan is.
+    if result["verdict"] == "correct" and result["title_ok"] is False:
+        result["verdict"] = "wrong_title"
     # Asking is only right if it asks about the right thing.
     if result["verdict"] == "correct":
         asks = pred.asks or [asked_about(pred)]

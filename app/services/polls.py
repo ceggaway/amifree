@@ -7,6 +7,7 @@ Privacy rules, enforced here rather than left to the caller:
 - the group sees counts per slot, never who is busy or what with.
 """
 
+import html
 import logging
 import re
 from datetime import datetime, time, timedelta
@@ -295,13 +296,21 @@ def announcement(event, free: int, of: int) -> Reply:
     """The public message once the organiser chooses: when it is. No buttons: everyone who
     submitted their availability is already added, and can change their answer in /plans."""
     start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
-    return Reply(
-        f"{event.title} is confirmed for {start:%a %-d %b %Y}, {start:%H:%M}–{end:%H:%M}.\n"
-        f"{free} of {of} people who submitted their availability are free at this time.\n\n"
-        "It has been added to the plans of everyone who submitted their availability, and to"
-        " their calendar if they have connected one. If you can no longer attend, update it in"
-        " /plans."
-    )
+    lines = [
+        f"✅ <b>{html.escape(event.title)} is confirmed</b>",
+        "",
+        f"📅 {start:%a, %-d %b %Y}",
+        f"🕑 {start:%H:%M}–{end:%H:%M}",
+    ]
+    if event.location:
+        lines.append(f"📍 {html.escape(event.location)}")
+    lines += [
+        f"👥 {free} of {of} who filled in are free",
+        "",
+        "Everyone who filled in is added as Going, and to their calendar if connected."
+        " Can't make it? Update it in /plans.",
+    ]
+    return Reply("\n".join(lines), parse_mode="HTML")
 
 
 class PollService:

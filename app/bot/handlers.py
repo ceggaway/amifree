@@ -551,7 +551,9 @@ def register_handlers(application: Application, service):
             pass
 
     async def post_card(chat_id: int, card: Reply) -> int | None:
-        sent = await application.bot.send_message(chat_id, card.text, reply_markup=card.keyboard)
+        sent = await application.bot.send_message(
+            chat_id, card.text, reply_markup=card.keyboard, parse_mode=card.parse_mode
+        )
         return sent.message_id
 
     async def edit_message(chat_id: int, message_id: int, text: str):

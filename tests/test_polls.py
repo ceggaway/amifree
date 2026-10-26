@@ -222,10 +222,11 @@ async def test_choosing_announces_the_time_with_calendar_buttons(service_factory
         )
     announced = transport.sent[sent_before]
     assert int(announced["chat_id"]) == CHAT
-    assert "project meeting is confirmed for Mon 5 Oct 2026, 08:00–10:00." in announced["text"]
-    # A plain notice: no buttons, no emoji.
+    text = announced["text"]
+    assert "<b>project meeting is confirmed</b>" in text and announced["parse_mode"] == "HTML"
+    assert "📅 Mon, 5 Oct 2026" in text and "🕑 08:00–10:00" in text
+    # A notice, not a card: no buttons.
     assert not announced.get("reply_markup")
-    assert not any(ord(ch) > 0x2600 for ch in announced["text"])
     # Everyone who submitted their availability is added as Going (their calendars follow).
     event = next(iter(repo.group_events.values()))
     going = {e.user_id for e in repo.events.values() if e.group_event_id == event.id}
@@ -334,8 +335,8 @@ async def test_organiser_can_choose_any_time_from_the_heatmap(service_factory):
     assert event.start_at == late and event.end_at == datetime(2026, 10, 5, 21, 30, tzinfo=SG)
     announced = transport.sent[sent_before]
     assert int(announced["chat_id"]) == CHAT
-    assert "confirmed for Mon 5 Oct 2026, 19:30–21:30." in announced["text"]
-    assert "3 of 3 people who submitted their availability are free" in announced["text"]
+    assert "📅 Mon, 5 Oct 2026" in announced["text"] and "🕑 19:30–21:30" in announced["text"]
+    assert "👥 3 of 3 who filled in are free" in announced["text"]
     # A second choice changes nothing.
     try:
         await service.polls.finalize_at(organiser, repo.polls[poll.id], late)

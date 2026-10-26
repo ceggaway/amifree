@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GroupOverview, GroupPoll } from "../types";
@@ -10,6 +10,10 @@ vi.mock("../api", () => ({
   api: {
     group: () => Promise.resolve(state.group),
     nudgePoll: () => Promise.resolve({ message: "Nudging 2 members privately." }),
+    cancelPoll: (id: string) => {
+      state.group = { ...state.group, polls: state.group.polls.filter((p) => p.id !== id) };
+      return Promise.resolve({ message: "Poll cancelled." });
+    },
   },
 }));
 
@@ -126,5 +130,23 @@ describe("organiser poll progress", () => {
     expect(within(card).getByRole("link", { name: "See who's filled in for Project meeting" }).getAttribute("href")).toBe("/poll/mine");
     fireEvent.click(within(card).getByRole("button", { name: "Remind the 2" }));
     expect(await within(card).findByText("Nudging 2 members privately.")).toBeTruthy();
+  });
+});
+
+describe("cancelling a poll", () => {
+  it("lets the organiser cancel from the card, after confirming", async () => {
+    const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
+    show({ ...base, polls: [{ id: "mine", title: "Project meeting", status: "COLLECTING", duration_minutes: 60, joined: 1, waiting: 2, joined_by_me: true, organiser: true, availability_submitted: true, deadline_at: null, min_joined: 3 }] });
+    const card = await screen.findByRole("article", { name: "Project meeting" });
+    fireEvent.click(within(card).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByText("Project meeting")).toBeNull());
+    expect(ask).toHaveBeenCalled();
+    ask.mockRestore();
+  });
+
+  it("shows no Cancel to members", async () => {
+    show({ ...base, polls: [{ id: "theirs", title: "Project meeting", status: "COLLECTING", duration_minutes: 60, joined: 1, joined_by_me: false, organiser: false, availability_submitted: false, deadline_at: null, min_joined: 3 }] });
+    const card = await screen.findByRole("article", { name: "Project meeting" });
+    expect(within(card).queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 });

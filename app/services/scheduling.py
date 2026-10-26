@@ -267,6 +267,7 @@ class SchedulingService:
         self.on_poll_change = None
         self.post_group_card = None
         self.delete_group_message = None
+        self.edit_group_message = None
         self.refund_star_payment = None
         self.detection = DetectionService(self)
         self.pro = ProService(self)

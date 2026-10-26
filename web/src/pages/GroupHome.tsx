@@ -1,15 +1,16 @@
 import { useState } from "react";
+import { confirm, haptic } from "../telegram";
 import { Link, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
 import { Icon } from "../components/Icon";
 import { capitaliseFirst, dateNumber, day, month, span, weekday } from "../format";
 import type { GroupEventSummary, GroupPoll } from "../types";
-import { useLoad } from "../useLoad";
+import { forget, useLoad } from "../useLoad";
 
 /** A group's events and open polls, with the two things people come here to do. */
 export function GroupHome() {
   const { code = "" } = useParams();
-  const { data, error } = useLoad(() => api.group(code), [code], `group:${code}`);
+  const { data, error, reload } = useLoad(() => api.group(code), [code], `group:${code}`);
   if (error) return <NotInGroup error={error} />;
   if (!data) return <p className="hint">Loading…</p>;
   // Polls you still have to fill in, and every poll you organise (to follow its progress).
@@ -18,14 +19,11 @@ export function GroupHome() {
   );
   return (
     <>
-      <header className="group-head">
-        <h1>{data.title ?? "This group"}</h1>
-      </header>
       <Intro />
       {pending.length > 0 && (
         <section aria-labelledby="pending-action-heading">
           <h2 id="pending-action-heading">Needs you</h2>
-          {pending.map((poll) => <PollRow key={poll.id} poll={poll} />)}
+          {pending.map((poll) => <PollRow key={poll.id} poll={poll} onCancelled={reload} />)}
         </section>
       )}
       <nav className="group-actions" aria-labelledby="plan-heading">
@@ -84,7 +82,7 @@ function EventRow({ event }: { event: GroupEventSummary }) {
   );
 }
 
-function PollRow({ poll }: { poll: GroupPoll }) {
+function PollRow({ poll, onCancelled }: { poll: GroupPoll; onCancelled: () => void }) {
   const title = capitaliseFirst(poll.title);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -101,6 +99,21 @@ function PollRow({ poll }: { poll: GroupPoll }) {
     } catch (err) {
       setNote(refusal(err).message);
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel() {
+    if (!(await confirm(`Cancel "${title}"? Everyone's answers are deleted.`))) return;
+    setBusy(true);
+    try {
+      await api.cancelPoll(poll.id);
+      haptic("success");
+      forget(`poll:${poll.id}`);
+      onCancelled();
+    } catch (err) {
+      haptic("error");
+      setNote(refusal(err).message);
       setBusy(false);
     }
   }
@@ -125,6 +138,11 @@ function PollRow({ poll }: { poll: GroupPoll }) {
         {poll.organiser && collecting && waiting > 0 && (
           <button type="button" className="group-card-button secondary" disabled={busy} onClick={remind}>
             Remind the {waiting}
+          </button>
+        )}
+        {poll.organiser && (
+          <button type="button" className="group-card-button secondary danger" disabled={busy} onClick={cancel}>
+            Cancel
           </button>
         )}
       </div>

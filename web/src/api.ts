@@ -98,6 +98,7 @@ export const api = {
   pick: (id: string, slot: number) => request<{ event_id: string }>("POST", `/api/polls/${id}/pick`, { slot }),
   pickTime: (id: string, start_at: string) =>
     request<{ event_id: string }>("POST", `/api/polls/${id}/pick-time`, { start_at }),
+  cancelPoll: (id: string) => request<{ message: string }>("POST", `/api/polls/${id}/cancel`),
   nudgePoll: (id: string) => request<{ message: string }>("POST", `/api/polls/${id}/nudge`),
   pollHeatmap: (id: string) => request<Heatmap>("GET", `/api/polls/${id}/heatmap`),
   myGrid: (id: string) => request<MyGrid>("GET", `/api/polls/${id}/availability`),

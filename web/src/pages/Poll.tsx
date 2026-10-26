@@ -4,7 +4,7 @@ import { api, refusal } from "../api";
 import { day, span } from "../format";
 import { confirm, haptic } from "../telegram";
 import type { PollDetail } from "../types";
-import { useLoad } from "../useLoad";
+import { forget, useLoad } from "../useLoad";
 import { ChooseTime } from "../components/ChooseTime";
 import { Heatmap } from "./Heatmap";
 
@@ -18,6 +18,8 @@ export function Poll() {
   const [note, setNote] = useState((location.state as { note?: string } | null)?.note ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // The organiser's buttons sit low on the page: their result shows next to them.
+  const [cardNote, setCardNote] = useState<{ text: string; ok: boolean } | null>(null);
   const p = loaded.data;
 
   if (loaded.error) {
@@ -26,20 +28,38 @@ export function Poll() {
   }
   if (!p) return <p className="hint">Loading…</p>;
 
-  async function run(work: () => Promise<PollDetail | { message: string }>) {
-    setError("");
+  async function organiserAction(work: () => Promise<{ message: string }>, opens: boolean) {
+    setCardNote(null);
     setBusy(true);
     try {
-      const result = await work();
-      if ("message" in result) {
-        setNote(result.message);
-        loaded.reload();
-      } else loaded.update(result);
+      const { message } = await work();
       haptic("success");
+      if (opens) {
+        // The page now shows the best times from the top.
+        setNote(message);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else setCardNote({ text: message, ok: true });
+      loaded.reload();
     } catch (err) {
       haptic("error");
-      setError(refusal(err).message);
+      setCardNote({ text: refusal(err).message, ok: false });
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelPoll() {
+    if (!(await confirm(`Cancel "${p!.title}"? Everyone's answers are deleted.`))) return;
+    setBusy(true);
+    try {
+      await api.cancelPoll(p!.id);
+      haptic("success");
+      forget(`poll:${p!.id}`);
+      forget("group:");
+      navigate(`/g/${p!.chat}`, { replace: true });
+    } catch (err) {
+      haptic("error");
+      setCardNote({ text: refusal(err).message, ok: false });
       setBusy(false);
     }
   }
@@ -112,13 +132,25 @@ export function Poll() {
             </>
           )}
           <div className="row">
-            <button type="button" className="on" disabled={busy} onClick={() => run(() => api.suggest(p.id))}>
+            <button
+              type="button"
+              className="on"
+              disabled={busy || p.joined < p.min_joined}
+              onClick={() => organiserAction(() => api.suggest(p.id), true)}
+            >
               See best times now
             </button>
-            <button type="button" disabled={busy} onClick={() => run(() => api.nudgePoll(p.id))}>
+            <button type="button" disabled={busy} onClick={() => organiserAction(() => api.nudgePoll(p.id), false)}>
               Remind the rest
             </button>
+            <button type="button" className="danger" disabled={busy} onClick={cancelPoll}>
+              Cancel poll
+            </button>
           </div>
+          {p.joined < p.min_joined && (
+            <p className="hint">Best times need {p.min_joined} people. {p.joined} so far.</p>
+          )}
+          {cardNote && <p className={`banner ${cardNote.ok ? "ok" : "clash"}`} role="status">{cardNote.text}</p>}
         </section>
       )}
 

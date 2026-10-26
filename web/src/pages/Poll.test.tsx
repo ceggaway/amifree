@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PollDetail } from "../types";
 
 const calls: unknown[][] = [];
-const state: { poll: PollDetail } = { poll: {} as PollDetail };
+const state: { poll: PollDetail; refuse?: string } = { poll: {} as PollDetail };
 
 vi.mock("../api", async () => {
   const { ApiError } = await vi.importActual<typeof import("../api")>("../api");
@@ -27,6 +27,13 @@ vi.mock("../api", async () => {
         calls.push(["pick", slot]);
         return Promise.resolve({ event_id: "e1" });
       },
+      suggest: () => {
+        calls.push(["suggest"]);
+        return state.refuse
+          ? Promise.reject(new ApiError(409, { message: state.refuse }))
+          : Promise.resolve({ message: "Results are ready. Choose a time below." });
+      },
+      nudgePoll: () => Promise.resolve({ message: "Nudging 1 member privately." }),
       pollHeatmap: () => new Promise(() => {}),
     },
   };
@@ -147,5 +154,26 @@ describe("organiser progress", () => {
     show({ ...base, status: "COLLECTING", slots: [], people: null });
     await screen.findByText("Mark when you're free.");
     expect(screen.queryByText(/Filled in \(/)).toBeNull();
+  });
+});
+
+describe("organiser buttons", () => {
+  const collecting = { ...base, status: "COLLECTING" as const, slots: [], organiser: true, joined_by_me: true, people: { done: ["A"], waiting: ["B"] } };
+
+  it("greys out See best times until enough people have filled in", async () => {
+    show({ ...collecting, joined: 2 });
+    expect(((await screen.findByRole("button", { name: "See best times now" })) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Best times need 3 people. 2 so far.")).toBeTruthy();
+  });
+
+  it("shows the result next to the buttons, including a refusal", async () => {
+    window.scrollTo = () => {};
+    state.refuse = "3 joined, but only 2 have a schedule AmIFree can read.";
+    show({ ...collecting, joined: 3 });
+    fireEvent.click(await screen.findByRole("button", { name: "See best times now" }));
+    expect((await screen.findByRole("status")).textContent).toContain("only 2 have a schedule");
+    fireEvent.click(screen.getByRole("button", { name: "Remind the rest" }));
+    expect(await screen.findByText("Nudging 1 member privately.")).toBeTruthy();
+    state.refuse = undefined;
   });
 });

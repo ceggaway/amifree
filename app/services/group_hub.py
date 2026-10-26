@@ -555,6 +555,22 @@ class GroupHub:
         event = await self.scheduling.polls.finalize_at(user, poll, start)
         return {"event_id": event.id}
 
+    async def poll_cancel(self, user, poll) -> dict:
+        """The organiser calls the poll off: it is deleted and its card in the group says so."""
+        if poll.status == "CLOSED":
+            raise Refused("A time is already chosen. Cancel the event instead.")
+        if not await self.repo.delete_poll(poll.id, user.id):
+            raise Refused("This poll can't be cancelled now.")
+        edit = getattr(self.scheduling, "edit_group_message", None)
+        if edit and (poll.message_id or 0) > 0:
+            await edit(
+                poll.chat_id,
+                poll.message_id,
+                f"❌ {poll.title[:80]}: poll cancelled by the organiser.",
+            )
+        await self.scheduling.safe_action(user.id, "poll_cancelled", metadata={"from": "app"})
+        return {"message": "Poll cancelled."}
+
     async def poll_nudge(self, user, poll) -> dict:
         if poll.status == "CLOSED":
             raise Refused("This poll is closed, so there's nobody to nudge.")

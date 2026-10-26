@@ -573,3 +573,35 @@ async def test_organiser_sees_who_has_filled_in_a_poll(hub, reference):
     overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()
     row = next(p for p in overview["polls"] if p["id"] == poll_id)
     assert row["joined"] == 2 and row["waiting"] == 1
+
+
+async def test_organiser_cancels_a_poll(hub, reference):
+    client, service, repo, posted, members = hub
+    edited = []
+
+    async def edit(chat_id, message_id, text):
+        edited.append((chat_id, message_id, text))
+
+    service.edit_group_message = edit
+    first = reference.date() + timedelta(days=1)
+    form = {
+        "request_id": str(uuid.uuid4()),
+        "title": "Sync",
+        "minutes": 60,
+        "first": str(first),
+        "last": str(first + timedelta(days=2)),
+    }
+    poll_id = (await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)).json()[
+        "id"
+    ]
+    message_id = repo.polls[poll_id].message_id
+    # Only the organiser can cancel it.
+    assert (await client.post(f"/api/polls/{poll_id}/cancel", headers=bearer(2))).status_code == 409
+    done = await client.post(f"/api/polls/{poll_id}/cancel", headers=bearer(1))
+    assert done.status_code == 200 and done.json()["message"] == "Poll cancelled."
+    assert poll_id not in repo.polls
+    assert edited == [(CHAT, message_id, "❌ Sync: poll cancelled by the organiser.")]
+    # Gone from the group page, and its page is no longer there.
+    overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()
+    assert overview["polls"] == []
+    assert (await client.get(f"/api/polls/{poll_id}", headers=bearer(1))).status_code == 404

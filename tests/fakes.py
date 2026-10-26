@@ -507,6 +507,16 @@ class MemoryRepository:
         p.slots, p.status = slots, "OPEN"
         return p.model_copy(deep=True)
 
+    async def delete_poll(self, poll_id, user_id):
+        p = self.polls.get(poll_id)
+        if not p or p.creator_user_id != user_id or p.status == "CLOSED":
+            return False
+        del self.polls[poll_id]
+        self.poll_people.pop(poll_id, None)
+        self.poll_votes = {k: v for k, v in self.poll_votes.items() if k[0] != poll_id}
+        self.availability = {k: v for k, v in self.availability.items() if k[0] != poll_id}
+        return True
+
     async def poll_close(self, poll_id, user_id):
         p = self.polls[poll_id]
         if p.creator_user_id != user_id or p.status != "OPEN":

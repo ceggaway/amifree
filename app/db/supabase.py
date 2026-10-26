@@ -992,6 +992,18 @@ class SupabaseRepository:
         ).execute()
         return Poll.model_validate(result.data[0]) if result.data else None
 
+    async def delete_poll(self, poll_id: str, user_id: str) -> bool:
+        """The organiser cancels a poll that isn't finished. Its answers go with it (cascade)."""
+        result = await (
+            self.client.table("polls")
+            .delete()
+            .eq("id", poll_id)
+            .eq("creator_user_id", user_id)
+            .neq("status", "CLOSED")
+            .execute()
+        )
+        return bool(result.data)
+
     async def poll_vote(self, poll_id: str, user_id: str, votes: dict[str, str]) -> bool:
         result = await self.client.rpc(
             "amifree_poll_vote", {"p_poll_id": poll_id, "p_user_id": user_id, "p_votes": votes}

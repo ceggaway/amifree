@@ -554,6 +554,13 @@ def register_handlers(application: Application, service):
         sent = await application.bot.send_message(chat_id, card.text, reply_markup=card.keyboard)
         return sent.message_id
 
+    async def edit_message(chat_id: int, message_id: int, text: str):
+        """Replace a card's text and remove its buttons, e.g. when a poll is cancelled."""
+        try:
+            await application.bot.edit_message_text(text, chat_id=chat_id, message_id=message_id)
+        except TelegramError:
+            pass
+
     async def delete_message(chat_id: int, message_id: int):
         try:
             await application.bot.delete_message(chat_id, message_id)
@@ -603,6 +610,7 @@ def register_handlers(application: Application, service):
     service.on_poll_change = poll_refresher.refresh
     service.post_group_card = post_card
     service.delete_group_message = delete_message
+    service.edit_group_message = edit_message
     application.add_handler(
         CommandHandler(
             [

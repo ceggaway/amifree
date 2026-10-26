@@ -464,6 +464,12 @@ def build_router(settings: Settings) -> APIRouter:
         poll = await hub_call(hub.organised_poll(user, valid_id(poll_id)))
         return await hub_call(hub.poll_pick_time(user, poll, body.start_at))
 
+    @router.post("/polls/{poll_id}/cancel")
+    async def poll_cancel(poll_id: str, request: Request, user: CurrentUser):
+        hub = service_of(request).hub
+        poll = await hub_call(hub.organised_poll(user, valid_id(poll_id)))
+        return await hub_call(hub.poll_cancel(user, poll))
+
     @router.post("/polls/{poll_id}/nudge")
     async def poll_nudge(poll_id: str, request: Request, user: CurrentUser):
         hub = service_of(request).hub

@@ -203,3 +203,4 @@ button.back-button { min-height: 34px; padding: 6px 12px 6px 8px; font-weight: 6
 .submit-bar { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 20px -4px 0; padding: 12px 4px calc(12px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); }
 .submit-bar p { margin: 0; color: var(--hint); font-size: 13px; }
 .submit-bar button { margin-top: 0; padding-inline: 18px; }
+.group-card-button.danger { color: var(--danger); border-color: var(--danger); }

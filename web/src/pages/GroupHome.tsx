@@ -29,16 +29,16 @@ export function GroupHome() {
       <nav className="group-actions" aria-labelledby="plan-heading">
         <p className="plan-question" id="plan-heading">Plan something</p>
         <Link className="card link group-action" to={`/g/${code}/new`}>
-          <span className="icon-tile"><Icon name="plus" /></span>
+          <span className="icon-tile emoji" aria-hidden="true">📅</span>
           <div>
-            <h2>I know the time</h2>
+            <h2>Schedule an event</h2>
           </div>
           <Icon name="arrow" size={18} />
         </Link>
         <Link className="card link group-action" to={`/g/${code}/find`}>
-          <span className="icon-tile"><Icon name="clock" /></span>
+          <span className="icon-tile emoji" aria-hidden="true">🗳️</span>
           <div>
-            <h2>Find a time together</h2>
+            <h2>Find a time that works</h2>
           </div>
           <Icon name="arrow" size={18} />
         </Link>

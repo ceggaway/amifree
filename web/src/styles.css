@@ -204,3 +204,4 @@ button.back-button { min-height: 34px; padding: 6px 12px 6px 8px; font-weight: 6
 .submit-bar p { margin: 0; color: var(--hint); font-size: 13px; }
 .submit-bar button { margin-top: 0; padding-inline: 18px; }
 .group-card-button.danger { color: var(--danger); border-color: var(--danger); }
+.group-action .icon-tile.emoji { background: var(--accent-soft); font-size: 22px; line-height: 1; }

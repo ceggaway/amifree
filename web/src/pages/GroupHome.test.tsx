@@ -110,8 +110,8 @@ describe("first visit", () => {
     localStorage.clear();
     show(base);
     expect(await screen.findByText("Plan something")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /I know the time/ }).getAttribute("href")).toBe("/g/n100500/new");
-    expect(screen.getByRole("link", { name: /Find a time together/ }).getAttribute("href")).toBe("/g/n100500/find");
+    expect(screen.getByRole("link", { name: /Schedule an event/ }).getAttribute("href")).toBe("/g/n100500/new");
+    expect(screen.getByRole("link", { name: /Find a time that works/ }).getAttribute("href")).toBe("/g/n100500/find");
     expect(screen.getByText(/Nothing planned yet/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
     expect(screen.queryByText("How it works")).toBeNull();

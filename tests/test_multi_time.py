@@ -161,6 +161,27 @@ async def test_separate_events_get_one_picker(service_factory, reference):
     assert {e.status for e in repo.events.values()} == {Status.PREVIEW}
 
 
+async def test_the_picker_says_where_plans_go_without_a_calendar(service_factory, reference):
+    service, _ = service_factory(trainings())
+    [picker] = await service.message(1, 7, TRAINING, reference)
+    assert "➕ What you add goes to /plans. Want it in Google or Apple Calendar too?" in (
+        picker.text
+    )
+    replies = await service.callback(1, tap(picker, "Add both"))
+    assert "☑️ <b>All added to /plans.</b>\n📅 Only in AmIFree for now." in replies[0].text
+
+
+async def test_the_picker_names_the_calendar_plans_sync_to(service_factory, reference):
+    service, repo = service_factory(trainings())
+    user = await repo.ensure_user(1)
+    await repo.set_user_flags(user.id, google_connected=True)
+    [picker] = await service.message(1, 7, TRAINING, reference)
+    assert "➕ What you add goes to /plans and syncs to your Google Calendar." in picker.text
+    assert "Want it in Google" not in picker.text
+    replies = await service.callback(1, tap(picker, "Add both"))
+    assert "📅 Syncing to your Google Calendar too (/calendar to change)." in replies[0].text
+
+
 async def test_an_untitled_extraction_is_named_from_the_message(service_factory, reference):
     # Seen live: the model left title null, so both lines said "Event".
     service, _ = service_factory(trainings().model_copy(update={"title": None}))
@@ -173,13 +194,13 @@ async def test_add_one_then_the_other(service_factory, reference):
     service, repo = service_factory(trainings())
     [picker] = await service.message(1, 7, TRAINING, reference)
     [first] = await service.callback(1, tap(picker, "Add 1 · Tue 6 Oct"))
-    assert first.edit and "☑️ Added to your plans." in first.text
+    assert first.edit and "☑️ Added to /plans." in first.text
     labels = [b.text for row in first.keyboard.inline_keyboard for b in row]
     assert labels == ["Add 2 · Thu 8 Oct", "Done"]
     statuses = sorted(e.status for e in repo.events.values())
     assert statuses == sorted([Status.GOING, Status.PREVIEW])
     replies = await service.callback(1, tap(first, "Add 2 · Thu 8 Oct"))
-    assert "All added to your plans." in replies[0].text and replies[0].keyboard is None
+    assert "All added to /plans." in replies[0].text and replies[0].keyboard is None
     assert {e.status for e in repo.events.values()} == {Status.GOING}
     assert (await repo.ensure_user(1)).pending is None
 
@@ -199,7 +220,7 @@ async def test_add_both(service_factory, reference):
     service, repo = service_factory(trainings())
     [picker] = await service.message(1, 7, TRAINING, reference)
     replies = await service.callback(1, tap(picker, "Add both"))
-    assert "All added to your plans." in replies[0].text
+    assert "All added to /plans." in replies[0].text
     assert {e.status for e in repo.events.values()} == {Status.GOING}
 
 

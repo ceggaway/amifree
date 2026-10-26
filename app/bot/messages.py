@@ -357,9 +357,7 @@ def times_text(
         text = f"I found {found} events in that message:"
         for n, (event, availability) in pairs:
             text += f"\n\n{n}. " + personal_details(event, compact=True) + "\n"
-            text += (
-                "☑️ Added to your plans." if n - 1 in added else personal_availability(availability)
-            )
+            text += "☑️ Added to /plans." if n - 1 in added else personal_availability(availability)
     if unread:
         text += (
             "\n\nI couldn't read the date or time of "
@@ -367,14 +365,31 @@ def times_text(
             + ". Send it on its own to add it."
         )
     if relation != "alternatives" and len(added) == len(events):
-        text += "\n\n☑️ <b>All added to your plans.</b>"
-        if synced:
-            text += f"\nSyncing to {synced_line(synced)} (/calendar to change)."
-    elif not added:
+        text += "\n\n☑️ <b>All added to /plans.</b>\n" + where_plans_go(synced, done=True)
+        return text
+    text += "\n\n" + where_plans_go(synced)
+    if not added:
         note = personal_calendar_note(availabilities[0])
         if note:
             text += "\n\n<i>" + note + "</i>"
     return text
+
+
+def where_plans_go(synced: bool | str, done: bool = False) -> str:
+    """Before and after Add: plans land in /plans, and in a calendar only once one is set up."""
+    if synced:
+        if done:
+            return f"📅 Syncing to {synced_line(synced)} too (/calendar to change)."
+        return f"➕ What you add goes to /plans and syncs to {synced_line(synced)}."
+    if done:
+        return (
+            "📅 Only in AmIFree for now. Connect Google or Apple Calendar in /calendar "
+            "to see your plans there too."
+        )
+    return (
+        "➕ What you add goes to /plans. Want it in Google or Apple Calendar too? "
+        "Connect one in /calendar."
+    )
 
 
 def event_card(event: Event, availability: Availability, synced: bool | str = False) -> Reply:

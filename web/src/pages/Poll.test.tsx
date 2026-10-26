@@ -115,3 +115,37 @@ describe("poll page", () => {
     expect(screen.queryByText("Event page")).toBeNull();
   });
 });
+
+describe("poll progress", () => {
+  it("shows the step and tells a new member what to do", async () => {
+    show({ ...base, status: "COLLECTING", slots: [], joined: 1 });
+    const current = await screen.findByText("Everyone fills in");
+    expect(current.closest("li")?.getAttribute("aria-current")).toBe("step");
+    expect(screen.getByText(/mark when you're free/)).toBeTruthy();
+  });
+
+  it("tells a member who filled in that they're done", async () => {
+    show({ ...base, status: "COLLECTING", slots: [], joined_by_me: true });
+    expect(await screen.findByText(/Nothing else to do/)).toBeTruthy();
+  });
+
+  it("tells the organiser to pick once results are in", async () => {
+    show({ ...base, organiser: true });
+    expect(await screen.findByText(/pick one of the times below/)).toBeTruthy();
+    expect(screen.getByText("Best times shown").closest("li")?.getAttribute("aria-current")).toBe("step");
+  });
+});
+
+describe("organiser progress", () => {
+  it("lists who has filled in and who hasn't, only for the organiser", async () => {
+    show({ ...base, status: "COLLECTING", slots: [], organiser: true, joined_by_me: true, people: { done: ["Angel", "Ben"], waiting: ["Chloe"] } });
+    expect(await screen.findByText("Filled in (2)")).toBeTruthy();
+    expect(screen.getByText("Angel, Ben")).toBeTruthy();
+    expect(screen.getByText("Not yet (1)")).toBeTruthy();
+    expect(screen.getByText("Chloe")).toBeTruthy();
+    cleanup();
+    show({ ...base, status: "COLLECTING", slots: [], people: null });
+    await screen.findByText(/mark when you're free/);
+    expect(screen.queryByText(/Filled in \(/)).toBeNull();
+  });
+});

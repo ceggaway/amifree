@@ -15,7 +15,7 @@ const PERIODS: [number, string][] = [
 export function GroupStats() {
   const { code = "" } = useParams();
   const [days, setDays] = useState(120);
-  const { data, error } = useLoad(() => api.groupStats(code, days), [code, days]);
+  const { data, error } = useLoad(() => api.groupStats(code, days), [code, days], `stats:${code}:${days}`);
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState("");
   const [sending, setSending] = useState(false);

@@ -183,3 +183,25 @@ button.switch { flex: none; width: 50px; min-height: 30px; height: 30px; padding
 button.back-button { min-height: 34px; padding: 6px 12px 6px 8px; font-weight: 600; color: var(--link); background: transparent; border-color: var(--border); }
 
 .upcoming-card .date-weekday { display: block; padding: 0 4px 6px; font-size: 11px; line-height: 1.4; font-weight: 500; }
+
+/* Guidance for first-time users: one instruction, where the poll is up to, and what's next. */
+.instruction { font-size: 16px; margin: 4px 0 2px; }
+.plan-question { margin: 0 0 2px; font-size: 15px; font-weight: 650; }
+.card.empty { color: var(--hint); text-align: center; border-style: dashed; }
+.card.intro { border-color: var(--accent); background: var(--accent-soft); }
+.card.intro h2 { margin-top: 0; }
+.card.intro ol { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.next-step > p:first-child { font-size: 15px; margin-top: 0; }
+.answer-heading { margin: 0 0 4px; }
+.steps { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 0; margin: 14px 0; }
+.steps li { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; font-size: 12px; color: var(--hint); padding-top: 4px; border-top: 3px solid var(--border); }
+.steps li.done { border-top-color: var(--accent); }
+.steps li.now { border-top-color: var(--accent); color: var(--text); font-weight: 650; }
+.step-dot { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--border); background: var(--panel); font-size: 12px; }
+.steps li.done .step-dot, .steps li.now .step-dot { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.heat-head { display: flex; flex-direction: column; align-items: center; gap: 3px; z-index: 1; }
+button.day-fill { min-height: 26px; padding: 2px 6px; font-size: 11px; border-radius: 999px; color: var(--link); background: var(--panel); white-space: nowrap; }
+button.day-fill.on { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
+.submit-bar { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 20px -4px 0; padding: 12px 4px calc(12px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); }
+.submit-bar p { margin: 0; color: var(--hint); font-size: 13px; }
+.submit-bar button { margin-top: 0; padding-inline: 18px; }

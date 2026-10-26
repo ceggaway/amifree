@@ -180,3 +180,50 @@ describe("MyTimes", () => {
     expect(await screen.findByText("This poll isn't available to you.")).toBeTruthy();
   });
 });
+
+describe("MyTimes guidance", () => {
+  const empty: MyGrid = {
+    ...grid,
+    days: [
+      {
+        date: "2026-10-13",
+        cells: [
+          { start_at: "2026-10-13T08:00:00+08:00", state: "off" },
+          { start_at: "2026-10-13T08:30:00+08:00", state: "busy" },
+          { start_at: "2026-10-13T09:00:00+08:00", state: "off" },
+        ],
+      },
+    ],
+  };
+
+  it("marks a whole day free in one tap, skipping busy times, and keeps a running total", async () => {
+    show(empty);
+    expect(await screen.findByText("No free times marked yet")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Free all day on/ }));
+    expect(screen.getByText("1 hr free")).toBeTruthy();
+    expect(screen.getByLabelText(/08:30: busy/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Clear/ }));
+    expect(screen.getByText("No free times marked yet")).toBeTruthy();
+  });
+
+  it("checks before submitting no free times at all", async () => {
+    const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
+    show(empty);
+    fireEvent.click(await screen.findByText("Submit availabilities"));
+    await waitFor(() => expect(ask).toHaveBeenCalled());
+    expect(saved).toEqual([]);
+    ask.mockRestore();
+  });
+
+  it("tells an organiser who just posted the poll why they're here", async () => {
+    state.grid = grid;
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/poll/p1/mine", state: { justPosted: true } }]}>
+        <Routes>
+          <Route path="/poll/:id/mine" element={<MyTimes />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/Poll posted in the group/)).toBeTruthy();
+  });
+});

@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from supabase import acreate_client
@@ -256,9 +257,19 @@ def create_app(
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
-        if request.url.path.startswith(("/api/", "/internal/")):
+        path = request.url.path
+        if path.startswith(("/api/", "/internal/")):
             response.headers["Cache-Control"] = "no-store"
+        elif path.startswith("/app/assets/") and response.status_code == 200:
+            # Built files have a content hash in their name, so a new build is a new URL.
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path.startswith("/app"):
+            # The page itself must be checked each time, so a deploy is picked up.
+            response.headers["Cache-Control"] = "no-cache"
         return response
+
+    # The Mini App's script is ~240 KB; compressed it is ~75 KB, a big difference on mobile data.
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # The built Mini App, when present, is served from this same origin.
     dist = Path(__file__).resolve().parents[1] / "web" / "dist"

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, refusal } from "../api";
 import { ClashBanner } from "../components/ClashBanner";
-import { day, span, time, toInput, fromInput } from "../format";
+import { day, span, toInput, fromInput } from "../format";
 import { closeApp, confirm, haptic } from "../telegram";
 import type { Answer, GroupEventDetail } from "../types";
 import { useLoad } from "../useLoad";
@@ -18,12 +18,11 @@ const ANSWERS: [Answer, string][] = [
 export function GroupEvent() {
   const { id = "" } = useParams();
   const [params] = useSearchParams();
-  const loaded = useLoad(() => api.groupEvent(id), [id]);
-  const [event, setEvent] = useState<GroupEventDetail | null>(null);
+  const loaded = useLoad(() => api.groupEvent(id), [id], `event:${id}`);
   const [note, setNote] = useState(params.get("posted") ? "Posted in the group." : "");
   const [error, setError] = useState("");
   const [clash, setClash] = useState(false);
-  const current = event ?? loaded.data;
+  const current = loaded.data;
 
   if (loaded.error) return <NotInGroup error={loaded.error} />;
   if (!current) return <p className="hint">Loading…</p>;
@@ -33,7 +32,7 @@ export function GroupEvent() {
     setError("");
     try {
       const result = await work();
-      setEvent("event" in result ? result.event : result);
+      loaded.update("event" in result ? result.event : result);
       if ("message" in result && result.message) setNote(result.message);
       else if (done) setNote(done);
       haptic("success");
@@ -55,7 +54,7 @@ export function GroupEvent() {
   return (
     <>
       <p>
-        <Link to={`/g/${e.chat}`}>‹ All events</Link>
+        <Link to={`/g/${e.chat}`}>‹ Back to group</Link>
       </p>
       <h1>{e.title}</h1>
       <p>
@@ -78,8 +77,7 @@ export function GroupEvent() {
 
       {live && (
         <section className="card">
-          <p className="hint">Am I free? Only you see this.</p>
-          <ClashBanner availability={e.availability} />
+          <h2 className="answer-heading">Are you going?</h2>
           <div className="segmented" role="group" aria-label="Your answer">
             {ANSWERS.map(([status, label]) => (
               <button key={status} type="button" className={e.my_status === status ? "on" : ""} aria-pressed={e.my_status === status} onClick={() => answer(status)}>
@@ -87,6 +85,8 @@ export function GroupEvent() {
               </button>
             ))}
           </div>
+          <p className="hint">Your schedule at that time (only you see this):</p>
+          <ClashBanner availability={e.availability} />
           {clash && (
             <div className="banner clash">
               That clashes with something you have.{" "}
@@ -134,6 +134,10 @@ function Organiser({ event: e, run }: { event: GroupEventDetail; run: Run }) {
   const manage = e.manage!;
   const { summary } = manage;
   const live = e.status === "ACTIVE" && !e.ended;
+  const untilStart = new Date(e.start_at).getTime() - Date.now();
+  // Confirmations go out the day before; check-in opens 30 minutes before.
+  const soon = untilStart <= 30 * 3600 * 1000;
+  const started = untilStart <= 30 * 60 * 1000;
 
   const message = (work: () => Promise<{ message: string }>) =>
     run(async () => ({ event: e, message: (await work()).message }));
@@ -144,7 +148,7 @@ function Organiser({ event: e, run }: { event: GroupEventDetail; run: Run }) {
       {live && !editing && (
         <div className="row">
           <button type="button" onClick={() => setEditing(true)}>Edit</button>
-          <button type="button" onClick={() => message(() => api.nudge(e.id))}>Nudge</button>
+          <button type="button" onClick={() => message(() => api.nudge(e.id))}>Remind people who haven't answered</button>
           <button
             type="button"
             className="danger"
@@ -208,39 +212,47 @@ function Organiser({ event: e, run }: { event: GroupEventDetail; run: Run }) {
         </div>
       )}
 
-      <h3>Still coming?</h3>
-      <p className="hint">
-        {new Date(e.start_at).getTime() - Date.now() > 30 * 3600 * 1000
-          ? `Members marked Going are asked the day before. Going: ${summary.going}.`
-          : `${summary.confirmed} confirmed · ${summary.dropped} dropped · ${summary.no_reply} no reply`}
-      </p>
-
-      <h3>Who came ({manage.came})</h3>
-      {manage.people.length === 0 ? (
-        <p className="hint">Nobody has answered yet.</p>
-      ) : (
+      {!soon && (
+        <p className="hint">
+          {summary.going} going so far. The day before, AmIFree asks them to confirm, and check-in opens 30 minutes
+          before the start. Those tools appear here then.
+        </p>
+      )}
+      {soon && (
         <>
-          <ul className="people">
-            {manage.people.map((person) => (
-              <li key={person.id}>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={person.present}
-                    onChange={(ev) => run(() => api.markAttendance(e.id, person.id, ev.target.checked))}
-                  />
-                  {person.name}
-                  <span className="hint"> · {LABEL[person.answer ?? ""] ?? "checked in"}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <button type="button" onClick={() => run(() => api.markAttendance(e.id, null), "Marked everyone who said Going.")}>
-            Everyone who said Going came
-          </button>
+          <h3>Still coming?</h3>
+          <p className="hint">{`${summary.confirmed} confirmed · ${summary.dropped} dropped · ${summary.no_reply} no reply`}</p>
         </>
       )}
-      <p className="hint">Starts {time(e.start_at)}. Check-in opens 30 minutes before.</p>
+      {started && (
+        <>
+          <h3>Who came ({manage.came})</h3>
+          {manage.people.length === 0 ? (
+            <p className="hint">Nobody has answered yet.</p>
+          ) : (
+            <>
+              <ul className="people">
+                {manage.people.map((person) => (
+                  <li key={person.id}>
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={person.present}
+                        onChange={(ev) => run(() => api.markAttendance(e.id, person.id, ev.target.checked))}
+                      />
+                      {person.name}
+                      <span className="hint"> · {LABEL[person.answer ?? ""] ?? "checked in"}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <button type="button" onClick={() => run(() => api.markAttendance(e.id, null), "Marked everyone who said Going.")}>
+                Everyone who said Going came
+              </button>
+            </>
+          )}
+        </>
+      )}
     </section>
   );
 }

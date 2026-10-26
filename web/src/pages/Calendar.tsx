@@ -12,7 +12,7 @@ function thisMonday(): Date {
 
 export function Calendar() {
   const [start, setStart] = useState(thisMonday);
-  const { data, error } = useLoad(() => api.calendar(start, addDays(start, 7)), [start.getTime()]);
+  const { data, error } = useLoad(() => api.calendar(start, addDays(start, 7)), [start.getTime()], `calendar:${start.getTime()}`);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   return (
     <section>

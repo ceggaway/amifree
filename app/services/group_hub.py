@@ -7,6 +7,7 @@ person made the card. Names and headcounts follow the same rules as the cards in
 "Who's going?" names only people who said Going, and nobody else's schedule is ever shown.
 """
 
+import asyncio
 import logging
 import time as monotonic
 from datetime import date, datetime, time, timedelta
@@ -167,8 +168,14 @@ class GroupHub:
     async def overview(self, user, chat_id: int) -> dict:
         await self.require_member(user, chat_id)
         now = self.clock()
-        shown, series_seen = [], set()
-        for event in await self.repo.chat_events(chat_id, now):
+        # Each lookup is a round trip to the database: run them side by side, not one by one.
+        events, found_polls, members = await asyncio.gather(
+            self.repo.chat_events(chat_id, now),
+            self.repo.chat_polls(chat_id, now),
+            self.repo.group_member_ids(chat_id),
+        )
+        chosen, series_seen = [], set()
+        for event in events:
             # A series shows its next session only; the rest are a tap away on that card.
             if event.series_id:
                 if event.series_id in series_seen:
@@ -176,39 +183,49 @@ class GroupHub:
                 series_seen.add(event.series_id)
             if event.start_at > now + timedelta(days=60):
                 break
-            shown.append(await self.summary(user, event))
-            if len(shown) == 30:
+            chosen.append(event)
+            if len(chosen) == 30:
                 break
-        polls = []
-        for poll in await self.repo.chat_polls(chat_id, now):
-            people = await self.repo.poll_participants(poll.id)
-            submitted = await self.repo.get_availability(poll.id, user.id)
-            polls.append(
-                {
-                    "id": poll.id,
-                    "title": poll.title,
-                    "status": poll.status,
-                    "duration_minutes": poll.duration_minutes,
-                    "joined": len(people),
-                    "joined_by_me": user.id in people,
-                    "availability_submitted": submitted is not None,
-                    "organiser": poll.creator_user_id == user.id,
-                    "deadline_at": poll.deadline_at.isoformat() if poll.deadline_at else None,
-                    "min_joined": MIN_PARTICIPANTS,
-                }
+
+        async def poll_row(poll) -> dict:
+            people, submitted = await asyncio.gather(
+                self.repo.poll_participants(poll.id),
+                self.repo.get_availability(poll.id, user.id),
             )
+            return {
+                "id": poll.id,
+                "title": poll.title,
+                "status": poll.status,
+                "duration_minutes": poll.duration_minutes,
+                "joined": len(people),
+                # Known members who haven't filled in yet: who a reminder would reach.
+                "waiting": len(set(members) - set(people) - {poll.creator_user_id}),
+                "joined_by_me": user.id in people,
+                "availability_submitted": submitted is not None,
+                "organiser": poll.creator_user_id == user.id,
+                "deadline_at": poll.deadline_at.isoformat() if poll.deadline_at else None,
+                "min_joined": MIN_PARTICIPANTS,
+            }
+
+        title, admin, shown, polls = await asyncio.gather(
+            self.title(chat_id),
+            self.admin_or_not(user, chat_id),
+            asyncio.gather(*(self.summary(user, event) for event in chosen)),
+            asyncio.gather(*(poll_row(poll) for poll in found_polls)),
+        )
         return {
             "chat": chat_code(chat_id),
-            "title": await self.title(chat_id),
-            "events": shown,
-            "polls": polls,
-            "admin": await self.admin_or_not(user, chat_id),
+            "title": title,
+            "events": list(shown),
+            "polls": list(polls),
+            "admin": admin,
             "detection": False,
         }
 
     async def summary(self, user, event: GroupEvent) -> dict:
-        counts = await self.repo.group_counts(event.id)
-        linked = await self.repo.linked_event(user.id, event.id)
+        counts, linked = await asyncio.gather(
+            self.repo.group_counts(event.id), self.repo.linked_event(user.id, event.id)
+        )
         return {
             "id": event.id,
             "title": event.title,
@@ -224,12 +241,14 @@ class GroupHub:
     async def detail(self, user, event: GroupEvent) -> dict:
         """Everything the event page shows. "availability" is the caller's own clash check."""
         now = self.clock()
-        linked = await self.repo.linked_event(user.id, event.id)
-        counts = await self.repo.group_counts(event.id)
+        linked, counts, answers, names, present = await asyncio.gather(
+            self.repo.linked_event(user.id, event.id),
+            self.repo.group_counts(event.id),
+            self.repo.group_answers(event.id),
+            self.repo.member_names(event.chat_id),
+            self.repo.attendees(event.id),
+        )
         found = await self.scheduling.availability(user, event, linked.id if linked else None)
-        answers = await self.repo.group_answers(event.id)
-        names = await self.repo.member_names(event.chat_id)
-        present = await self.repo.attendees(event.id)
         going = sorted(
             (member_label(names, u) for u, s in answers.items() if s == Status.GOING.value),
             key=str.lower,
@@ -256,9 +275,11 @@ class GroupHub:
             "organiser": organiser,
         }
         if organiser:
-            people, labels, _ = await self.groups.people_for(event)
+            (people, labels, _), summary = await asyncio.gather(
+                self.groups.people_for(event), self.groups.attendance_summary(event)
+            )
             data["manage"] = {
-                "summary": await self.groups.attendance_summary(event),
+                "summary": summary,
                 "came": len(present),
                 "people": [
                     {
@@ -443,8 +464,24 @@ class GroupHub:
     async def poll_detail(self, user, poll) -> dict:
         """The poll page: suggested times with counts, the caller's own answers, and (for the
         organiser) what they can do next. Counts only, never who answered what."""
-        people = await self.repo.poll_participants(poll.id)
-        tally = await self.repo.poll_tally(poll.id)
+        people, tally, mine = await asyncio.gather(
+            self.repo.poll_participants(poll.id),
+            self.repo.poll_tally(poll.id),
+            self.repo.poll_my_votes(poll.id, user.id),
+        )
+        organiser = poll.creator_user_id == user.id
+        progress = None
+        if organiser:
+            # Who has filled in and who hasn't: never their times, only whether they answered.
+            members, names = await asyncio.gather(
+                self.repo.group_member_ids(poll.chat_id), self.repo.member_names(poll.chat_id)
+            )
+            waiting = set(members) - set(people) - {poll.creator_user_id}
+
+            def labels(ids) -> list[str]:
+                return sorted((member_label(names, u) for u in ids), key=str.lower)
+
+            progress = {"done": labels(people), "waiting": labels(waiting)}
         return {
             "id": poll.id,
             "chat": chat_code(poll.chat_id),
@@ -465,10 +502,9 @@ class GroupHub:
                 }
                 for index, slot in enumerate(poll.slots or [])
             ],
-            "mine": {
-                str(k): v for k, v in (await self.repo.poll_my_votes(poll.id, user.id)).items()
-            },
-            "organiser": poll.creator_user_id == user.id,
+            "mine": {str(k): v for k, v in mine.items()},
+            "organiser": organiser,
+            "people": progress,
         }
 
     async def poll_join(self, user, poll) -> dict:

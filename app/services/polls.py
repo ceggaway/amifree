@@ -318,7 +318,10 @@ class PollService:
             poll,
             joined,
             await self.repo.poll_tally(poll.id),
-            s.heatmap_link(poll.id),
+            # While collecting, the button goes straight to the member's own grid.
+            s.availability_link(poll.id)
+            if poll.status == "COLLECTING"
+            else s.heatmap_link(poll.id),
             self.scheduling.clock(),
         )
 

@@ -34,12 +34,11 @@ afterEach(() => {
 });
 
 describe("FindTime", () => {
-  it("explains the days and the deadline", () => {
+  it("asks for the days and an optional reply-by date", () => {
     show();
-    expect(screen.getByText("Which days can the meeting be on?")).toBeTruthy();
-    expect(screen.getByText(/for these days only/)).toBeTruthy();
-    expect(screen.getByText(/Deadline to fill in availabilities/)).toBeTruthy();
-    expect(screen.getByText(/Then AmIFree suggests the best times/)).toBeTruthy();
+    expect(screen.getByText("Which days?")).toBeTruthy();
+    expect(screen.getByText(/Reply by/)).toBeTruthy();
+    expect(screen.getByText(/Leave blank for/)).toBeTruthy();
   });
 
   it("posts a custom length", async () => {

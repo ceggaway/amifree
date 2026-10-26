@@ -85,7 +85,6 @@ export function GroupEvent() {
               </button>
             ))}
           </div>
-          <p className="hint">Your schedule at that time (only you see this):</p>
           <ClashBanner availability={e.availability} />
           {clash && (
             <div className="banner clash">
@@ -148,7 +147,7 @@ function Organiser({ event: e, run }: { event: GroupEventDetail; run: Run }) {
       {live && !editing && (
         <div className="row">
           <button type="button" onClick={() => setEditing(true)}>Edit</button>
-          <button type="button" onClick={() => message(() => api.nudge(e.id))}>Remind people who haven't answered</button>
+          <button type="button" onClick={() => message(() => api.nudge(e.id))}>Remind the rest</button>
           <button
             type="button"
             className="danger"
@@ -212,12 +211,6 @@ function Organiser({ event: e, run }: { event: GroupEventDetail; run: Run }) {
         </div>
       )}
 
-      {!soon && (
-        <p className="hint">
-          {summary.going} going so far. The day before, AmIFree asks them to confirm, and check-in opens 30 minutes
-          before the start. Those tools appear here then.
-        </p>
-      )}
       {soon && (
         <>
           <h3>Still coming?</h3>

@@ -133,12 +133,11 @@ export function NewEvent() {
             Until
             <input type="date" value={form.until} min={form.date} required onChange={(e) => set({ until: e.target.value })} />
           </label>
-          <p className="hint">Each session gets its own card, posted a few days before it.</p>
+          <p className="hint">Each week gets its own card.</p>
         </div>
       )}
       {mine && (
         <section>
-          <p className="hint">Your own schedule at that time (only you see this):</p>
           <ClashBanner availability={mine} />
         </section>
       )}

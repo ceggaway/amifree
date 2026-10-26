@@ -97,16 +97,12 @@ export function FindTime() {
   return (
     <form className="stack" onSubmit={submit}>
       <h1>Find a time together</h1>
-      <p className="hint">
-        Members fill in when they're free, and AmIFree suggests the best times. The group only ever sees how
-        many people are free, never who is busy.
-      </p>
       <label>
         What for
         <input value={title} maxLength={200} required placeholder="Project meeting" onChange={(e) => setTitle(e.target.value)} />
       </label>
       <fieldset>
-        <legend>How long is the meeting?</legend>
+        <legend>How long?</legend>
         <div className="row">
           {LENGTHS.map(([value, label]) => {
             const on = !customLength && minutes === value;
@@ -148,10 +144,7 @@ export function FindTime() {
         )}
       </fieldset>
       <fieldset>
-        <legend>Which days can the meeting be on?</legend>
-        <p className="hint">
-          Members fill in their free times for these days only, and AmIFree suggests times within them.
-        </p>
+        <legend>Which days?</legend>
         <div className="row">
           {RANGES.map(([name, label]) => (
             <button
@@ -187,13 +180,10 @@ export function FindTime() {
       </fieldset>
       <label>
         <span>
-          Deadline to fill in availabilities <span className="hint">(optional)</span>
+          Reply by <span className="hint">(optional)</span>
         </span>
         <input type="date" value={replyBy} min={todayKey()} max={last} onChange={(e) => setReplyBy(e.target.value)} />
-        <span className="hint">
-          Members fill in their free times until the end of this day. Then AmIFree suggests the best times
-          for the organiser to choose from. Leave blank to use {defaultDeadline(last)}.
-        </span>
+        <span className="hint">Leave blank for {defaultDeadline(last)}.</span>
       </label>
       {error && <p className="error">{error}</p>}
       <button type="submit" className="on big" disabled={busy}>

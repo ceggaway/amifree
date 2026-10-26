@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
-import { dragState, paint, setDay, ticked } from "../availability";
+import { dragState, paint, ticked } from "../availability";
 import { capitaliseFirst, time } from "../format";
 import { confirm } from "../telegram";
 import { dayLabel, rowTimes } from "../heatmap";
@@ -84,7 +84,7 @@ export function MyTimes() {
     if (!grid) return;
     if (
       ticked(grid).length === 0 &&
-      !(await confirm("You haven't marked any free times. Submit anyway? You'll be counted as busy the whole time."))
+      !(await confirm("No free times marked. Submit anyway?"))
     )
       return;
     setSaving(true);
@@ -94,7 +94,7 @@ export function MyTimes() {
       // The poll and group pages now show you as counted in: don't flash the old copy.
       forget(`poll:${id}`);
       forget("group:");
-      const note = `Saved. You're counted in.${done.dropped ? " A few times clashed with your calendar and were left out." : ""}`;
+      const note = done.dropped ? "Saved. Times that clash with your calendar were left out." : "Saved.";
       // Back to the poll, which now shows "You're in." and the new count.
       navigate(`/poll/${id}`, { replace: true, state: { note } });
     } catch (e) {
@@ -107,19 +107,15 @@ export function MyTimes() {
   return (
     <section className="heatmap">
       <h1>{title}</h1>
-      {justPosted && <p className="banner ok">Poll posted in the group ✓ Now add your own free times. You count too.</p>}
-      <p className="instruction">Tap the times you're <strong>free</strong>.</p>
-      <p className="hint">
-        Tap a slot or drag across several. Tap again to undo. Times your calendar or timetable says you're busy are
-        already blocked.
-      </p>
+      {justPosted && <p className="banner ok">Poll posted ✓ Now add your own times.</p>}
+      <p className="instruction">Tap or drag over the times you're <strong>free</strong>.</p>
       <div className="grid-legend">
-        <span><i className="swatch free" aria-hidden="true">✓</i> Available</span>
-        <span><i className="swatch off" aria-hidden="true" /> Unavailable</span>
-        <span><i className="swatch busy" aria-hidden="true" /> Calendar / class clash</span>
+        <span><i className="swatch free" aria-hidden="true">✓</i> Free</span>
+        <span><i className="swatch off" aria-hidden="true" /> Not free</span>
+        <span><i className="swatch busy" aria-hidden="true" /> Busy (calendar)</span>
       </div>
       {grid.from_usual && !grid.submitted && (
-        <p className="banner info">Pre-filled from your usual times. Change them with /usual in the bot.</p>
+        <p className="banner info">Pre-filled from your usual times.</p>
       )}
       <div
         className="heat-scroll availability-scroll"
@@ -132,26 +128,11 @@ export function MyTimes() {
       >
         <div className="heat-grid" style={{ gridTemplateColumns: `3.2rem repeat(${grid.days.length}, minmax(22%, 1fr))` }}>
           <div className="heat-corner" />
-          {grid.days.map((day) => {
-            const open = day.cells.filter((c) => c.state !== "busy");
-            const full = open.length > 0 && open.every((c) => c.state === "free");
-            return (
-              <div key={day.date} className="heat-head">
-                {dayLabel(day.date)}
-                {open.length > 0 && (
-                  <button
-                    type="button"
-                    className={`day-fill${full ? " on" : ""}`}
-                    aria-pressed={full}
-                    aria-label={`${full ? "Clear" : "Free all day on"} ${dayLabel(day.date)}`}
-                    onClick={() => setGrid((current) => current && setDay(current, day.date, full ? "off" : "free"))}
-                  >
-                    {full ? "Clear" : "Free all day"}
-                  </button>
-                )}
-              </div>
-            );
-          })}
+          {grid.days.map((day) => (
+            <div key={day.date} className="heat-head">
+              {dayLabel(day.date)}
+            </div>
+          ))}
           {rows.map((time) => (
             <Row key={time} time={time} grid={grid} lookup={lookup} begin={begin} over={over} tap={tap} />
           ))}
@@ -171,7 +152,7 @@ export function MyTimes() {
 
 /** "6 hrs free" from a count of ticked half hours. */
 export function freeHours(halves: number): string {
-  if (halves === 0) return "No free times marked yet";
+  if (halves === 0) return "None marked";
   const hours = halves / 2;
   return `${hours} hr${hours === 1 ? "" : "s"} free`;
 }

@@ -79,7 +79,7 @@ describe("poll page", () => {
     show(base);
     expect(await screen.findByText(/The organiser is choosing the time/)).toBeTruthy();
     expect(screen.getAllByText("4 of 5 free")).toHaveLength(3);
-    expect(screen.queryByRole("button", { name: "Create event at this time" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Choose" })).toBeNull();
     expect(screen.queryByText("Vote for this time")).toBeNull();
   });
 
@@ -93,14 +93,14 @@ describe("poll page", () => {
 
   it("shows a member who already filled in that they're in", async () => {
     show({ ...base, status: "COLLECTING", slots: [], joined: 3, joined_by_me: true });
-    expect(await screen.findByText("You're in.")).toBeTruthy();
+    expect(await screen.findByText(/You're in\./)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Update my availabilities" })).toBeTruthy();
   });
 
   it("lets the organiser choose a time, which opens the posted event", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     show({ ...base, organiser: true });
-    const picks = await screen.findAllByRole("button", { name: "Create event at this time" });
+    const picks = await screen.findAllByRole("button", { name: "Choose" });
     fireEvent.click(picks[2]);
     expect(await screen.findByText("Event page")).toBeTruthy();
     expect(calls).toEqual([["pick", 2]]);
@@ -109,7 +109,7 @@ describe("poll page", () => {
   it("does not create an event when the organiser cancels confirmation", async () => {
     const confirmation = vi.spyOn(window, "confirm").mockReturnValue(false);
     show({ ...base, organiser: true });
-    fireEvent.click((await screen.findAllByRole("button", { name: "Create event at this time" }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: "Choose" }))[0]);
     expect(confirmation).toHaveBeenCalledWith("Create an event at this time? This closes the poll and posts the event in the group for RSVPs.");
     expect(calls).toEqual([]);
     expect(screen.queryByText("Event page")).toBeNull();
@@ -119,9 +119,9 @@ describe("poll page", () => {
 describe("poll progress", () => {
   it("shows the step and tells a new member what to do", async () => {
     show({ ...base, status: "COLLECTING", slots: [], joined: 1 });
-    const current = await screen.findByText("Everyone fills in");
+    const current = await screen.findByText("Fill in");
     expect(current.closest("li")?.getAttribute("aria-current")).toBe("step");
-    expect(screen.getByText(/mark when you're free/)).toBeTruthy();
+    expect(screen.getByText("Mark when you're free.")).toBeTruthy();
   });
 
   it("tells a member who filled in that they're done", async () => {
@@ -131,8 +131,8 @@ describe("poll progress", () => {
 
   it("tells the organiser to pick once results are in", async () => {
     show({ ...base, organiser: true });
-    expect(await screen.findByText(/pick one of the times below/)).toBeTruthy();
-    expect(screen.getByText("Best times shown").closest("li")?.getAttribute("aria-current")).toBe("step");
+    expect(await screen.findByText("Pick a time below.")).toBeTruthy();
+    expect(screen.getByText("Best times").closest("li")?.getAttribute("aria-current")).toBe("step");
   });
 });
 
@@ -145,7 +145,7 @@ describe("organiser progress", () => {
     expect(screen.getByText("Chloe")).toBeTruthy();
     cleanup();
     show({ ...base, status: "COLLECTING", slots: [], people: null });
-    await screen.findByText(/mark when you're free/);
+    await screen.findByText("Mark when you're free.");
     expect(screen.queryByText(/Filled in \(/)).toBeNull();
   });
 });

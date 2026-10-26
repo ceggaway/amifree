@@ -122,16 +122,16 @@ describe("organiser tools by timing", () => {
         people: [{ id: "u2", name: "Angel", answer: "GOING", present: false }],
       },
     });
-    expect(await screen.findByText(/2 going so far/)).toBeTruthy();
+    expect(await screen.findByText("You're the organiser")).toBeTruthy();
     expect(screen.queryByText(/Who came/)).toBeNull();
     expect(screen.queryByText("Still coming?")).toBeNull();
-    expect(screen.getByRole("button", { name: "Remind people who haven't answered" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remind the rest" })).toBeTruthy();
   });
 
   it("asks Are you going? before showing the private clash check", async () => {
     show({ ...base, start_at: "2030-01-01T19:00:00+08:00", end_at: "2030-01-01T21:00:00+08:00" });
     const question = await screen.findByRole("heading", { name: "Are you going?" });
-    const privacy = screen.getByText(/only you see this/);
+    const privacy = screen.getByText(/No clashes/);
     expect(question.compareDocumentPosition(privacy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

@@ -70,7 +70,7 @@ describe("MyTimes", () => {
   it("shows the capitalised event name and clear legend without extra controls", async () => {
     show({ ...grid, title: "dinner with friends", submitted: true });
     expect(await screen.findByRole("heading", { level: 1, name: "Dinner with friends" })).toBeTruthy();
-    for (const label of ["Available", "Unavailable", "Calendar / class clash"]) {
+    for (const label of ["Free", "Not free", "Busy (calendar)"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
     expect(screen.getByRole("button", { name: "Submit availabilities" })).toBeTruthy();
@@ -152,7 +152,7 @@ describe("MyTimes", () => {
     };
     show(wide);
     await screen.findByText("Project meeting");
-    expect(screen.getByText("Available")).toBeTruthy(); // the legend says what blue means
+    expect(screen.getByText("Free")).toBeTruthy(); // the legend says what blue means
     const first = screen.getByLabelText(/09:00: free/);
     const second = screen.getByLabelText(/09:30: free/);
     fireEvent.pointerDown(first, { pointerType: "touch" });
@@ -167,7 +167,7 @@ describe("MyTimes", () => {
 
   it("asks people with no schedule to tap the times they are free", async () => {
     show({ ...grid, known: false, days: [{ date: grid.days[0].date, cells: [{ start_at: "2026-10-13T08:00:00+08:00", state: "off" }] }] });
-    expect(await screen.findByText(/Tap a slot or drag across several/)).toBeTruthy();
+    expect(await screen.findByText(/Tap or drag over the times/)).toBeTruthy();
     fireEvent.click(screen.getByLabelText(/08:00: not free/));
     expect(screen.getByLabelText(/08:00: free/).getAttribute("aria-pressed")).toBe("true");
   });
@@ -196,14 +196,13 @@ describe("MyTimes guidance", () => {
     ],
   };
 
-  it("marks a whole day free in one tap, skipping busy times, and keeps a running total", async () => {
+  it("keeps a running total of free time, with no per-day buttons", async () => {
     show(empty);
-    expect(await screen.findByText("No free times marked yet")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Free all day on/ }));
+    expect(await screen.findByText("None marked")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Free all day|Clear/ })).toBeNull();
+    fireEvent.click(screen.getByLabelText(/08:00: not free/));
+    fireEvent.click(screen.getByLabelText(/09:00: not free/));
     expect(screen.getByText("1 hr free")).toBeTruthy();
-    expect(screen.getByLabelText(/08:30: busy/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Clear/ }));
-    expect(screen.getByText("No free times marked yet")).toBeTruthy();
   });
 
   it("checks before submitting no free times at all", async () => {
@@ -224,6 +223,6 @@ describe("MyTimes guidance", () => {
         </Routes>
       </MemoryRouter>,
     );
-    expect(await screen.findByText(/Poll posted in the group/)).toBeTruthy();
+    expect(await screen.findByText(/Poll posted/)).toBeTruthy();
   });
 });

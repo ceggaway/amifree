@@ -82,7 +82,6 @@ export function Poll() {
       <section className="card next-step">
         <NextStep poll={p} />
         {p.status === "COLLECTING" && fillIn}
-        <p className="hint">The group only sees how many people are free, never who is busy or why.</p>
       </section>
 
       {p.status === "OPEN" &&
@@ -96,7 +95,7 @@ export function Poll() {
             </p>
             {p.organiser && (
               <button type="button" className="on big" disabled={busy} onClick={() => pick(index)}>
-                Create event at this time
+                Choose
               </button>
             )}
           </section>
@@ -104,14 +103,12 @@ export function Poll() {
 
       {p.organiser && p.status === "COLLECTING" && (
         <section className="card organiser">
-          <h2>You're the organiser</h2>
           {p.people && (
             <>
               <h3>Filled in ({p.people.done.length})</h3>
-              <p className={p.people.done.length ? "" : "hint"}>{p.people.done.join(", ") || "Nobody yet."}</p>
+              {p.people.done.length > 0 && <p>{p.people.done.join(", ")}</p>}
               <h3>Not yet ({p.people.waiting.length})</h3>
-              <p className={p.people.waiting.length ? "" : "hint"}>{p.people.waiting.join(", ") || "Everyone we know of has filled in."}</p>
-              <p className="hint">Only people who have used AmIFree in this group are listed.</p>
+              {p.people.waiting.length > 0 && <p>{p.people.waiting.join(", ")}</p>}
             </>
           )}
           <div className="row">
@@ -119,19 +116,15 @@ export function Poll() {
               See best times now
             </button>
             <button type="button" disabled={busy} onClick={() => run(() => api.nudgePoll(p.id))}>
-              Remind people who haven't filled in
+              Remind the rest
             </button>
           </div>
-          <p className="hint">
-            No need to wait here: the best times also appear by themselves when the deadline passes
-            {p.joined < p.min_joined ? `, once at least ${p.min_joined} people have filled in` : ""}.
-          </p>
         </section>
       )}
 
       {p.organiser && p.status !== "CLOSED" && (
         <section className="card organiser">
-          <h2>Choose a time yourself</h2>
+          <h2>Or pick any time</h2>
           <ChooseTime pollId={p.id} />
         </section>
       )}
@@ -146,7 +139,7 @@ export function Poll() {
   );
 }
 
-const STEPS = ["Everyone fills in", "Best times shown", "Time chosen"];
+const STEPS = ["Fill in", "Best times", "Chosen"];
 
 /** Where the poll is up to, so nobody has to read a paragraph to find out. */
 function Steps({ status }: { status: PollDetail["status"] }) {
@@ -168,24 +161,13 @@ function Steps({ status }: { status: PollDetail["status"] }) {
 
 /** One line: what this person should do now, or that they're done. */
 function NextStep({ poll: p }: { poll: PollDetail }) {
-  if (p.status === "CLOSED") return <p><strong>All done.</strong> The time is chosen and posted in the group.</p>;
+  if (p.status === "CLOSED") return <p>Time chosen. It's posted in the group.</p>;
   if (p.status === "OPEN") {
-    return p.organiser ? (
-      <p><strong>Your turn:</strong> pick one of the times below. It's posted in the group so people can say Going.</p>
-    ) : (
-      <p><strong>You're done for now.</strong> The organiser is choosing the time, and it will be posted in the group.</p>
-    );
+    return <p>{p.organiser ? "Pick a time below." : "The organiser is choosing the time."}</p>;
   }
-  if (!p.joined_by_me) return <p><strong>Your turn:</strong> mark when you're free so the group can find a time.</p>;
-  return p.organiser ? (
-    <p>
-      <strong>You're in.</strong> Now wait for others to fill in. The best times appear here
-      {p.deadline_at ? ` after ${day(p.deadline_at)}` : " when the deadline passes"}, and you pick one.
-    </p>
-  ) : (
-    <p>
-      <strong>You're in.</strong> Nothing else to do. When the deadline passes, the organiser picks a time and
-      it's posted in the group.
-    </p>
-  );
+  if (!p.joined_by_me) return <p>Mark when you're free.</p>;
+  if (p.organiser) {
+    return <p>You're in. Best times show here {p.deadline_at ? `after ${day(p.deadline_at)}` : "after the deadline"}.</p>;
+  }
+  return <p>You're in. Nothing else to do.</p>;
 }

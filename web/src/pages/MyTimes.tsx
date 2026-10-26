@@ -6,7 +6,7 @@ import { capitaliseFirst, time } from "../format";
 import { confirm } from "../telegram";
 import { dayLabel, rowTimes } from "../heatmap";
 import type { MyGrid } from "../types";
-import { useLoad } from "../useLoad";
+import { forget, useLoad } from "../useLoad";
 
 /** A member's own times for a poll: busy cells are blocked, the rest can be ticked or cleared. */
 export function MyTimes() {
@@ -91,6 +91,9 @@ export function MyTimes() {
     setStatus("");
     try {
       const done = await api.saveGrid(id, ticked(grid));
+      // The poll and group pages now show you as counted in: don't flash the old copy.
+      forget(`poll:${id}`);
+      forget("group:");
       const note = `Saved. You're counted in.${done.dropped ? " A few times clashed with your calendar and were left out." : ""}`;
       // Back to the poll, which now shows "You're in." and the new count.
       navigate(`/poll/${id}`, { replace: true, state: { note } });

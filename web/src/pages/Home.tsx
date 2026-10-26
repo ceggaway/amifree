@@ -7,8 +7,8 @@ import { addDays, dayKey } from "../format";
 import { useLoad } from "../useLoad";
 
 export function Home() {
-  const me = useLoad(api.me);
-  const plans = useLoad(api.plans);
+  const me = useLoad(api.me, [], "me");
+  const plans = useLoad(api.plans, [], "plans");
   if (plans.error) return <p className="error">{plans.error}</p>;
   if (!plans.data) return <p className="hint">Loading…</p>;
   const today = dayKey(new Date());

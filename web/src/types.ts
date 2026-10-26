@@ -91,6 +91,8 @@ export type GroupPoll = {
   status: "COLLECTING" | "OPEN";
   duration_minutes: number;
   joined: number;
+  /** Known members who haven't filled in yet. */
+  waiting?: number;
   joined_by_me: boolean;
   organiser: boolean;
   availability_submitted: boolean;
@@ -182,4 +184,6 @@ export type PollDetail = {
   slots: PollSlot[];
   mine: Record<string, PollAnswer>;
   organiser: boolean;
+  /** Organiser only: who has filled in and who hasn't (never their times). */
+  people?: { done: string[]; waiting: string[] } | null;
 };

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../api";
+import { api, refusal } from "../api";
 import { Icon } from "../components/Icon";
 import { capitaliseFirst, dateNumber, day, month, span, weekday } from "../format";
 import type { GroupEventSummary, GroupPoll } from "../types";
@@ -9,11 +9,12 @@ import { useLoad } from "../useLoad";
 /** A group's events and open polls, with the two things people come here to do. */
 export function GroupHome() {
   const { code = "" } = useParams();
-  const { data, error } = useLoad(() => api.group(code), [code]);
+  const { data, error } = useLoad(() => api.group(code), [code], `group:${code}`);
   if (error) return <NotInGroup error={error} />;
   if (!data) return <p className="hint">Loading…</p>;
+  // Polls you still have to fill in, and every poll you organise (to follow its progress).
   const pending = data.polls.filter((poll) =>
-    poll.status === "COLLECTING" ? !poll.availability_submitted : poll.organiser,
+    poll.status === "COLLECTING" ? !poll.availability_submitted || poll.organiser : poll.organiser,
   );
   return (
     <>
@@ -88,20 +89,45 @@ function EventRow({ event }: { event: GroupEventSummary }) {
 
 function PollRow({ poll }: { poll: GroupPoll }) {
   const title = capitaliseFirst(poll.title);
-  const action = poll.status === "COLLECTING" ? "Add your availability" : "Choose a time";
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const collecting = poll.status === "COLLECTING";
+  const waiting = poll.waiting ?? 0;
+  const mine = collecting && !poll.availability_submitted;
+  const action = mine ? "Add your availability" : collecting ? "See who's filled in" : "Choose a time";
+  const to = mine ? `/poll/${poll.id}/mine` : `/poll/${poll.id}`;
+
+  async function remind() {
+    setBusy(true);
+    try {
+      setNote((await api.nudgePoll(poll.id)).message);
+    } catch (err) {
+      setNote(refusal(err).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <article className="card pending-card" aria-labelledby={`poll-${poll.id}-title`}>
       <h3 className="icon-label" id={`poll-${poll.id}-title`}><Icon name="calendar" size={18} />{title}</h3>
-      {poll.status === "COLLECTING" && poll.deadline_at && (
-        <p className="hint">Reply by {day(poll.deadline_at)}</p>
+      {collecting && (
+        <p className="hint">
+          {poll.deadline_at ? `Reply by ${day(poll.deadline_at)}` : "Collecting free times"}
+          {poll.organiser && ` · ${poll.joined} filled in${waiting ? ` · ${waiting} not yet` : ""}`}
+        </p>
       )}
-      <Link
-        className="group-card-button"
-        to={`/poll/${poll.id}${poll.status === "COLLECTING" ? "/mine" : ""}`}
-        aria-label={`${action} for ${title}`}
-      >
-        {action}
-      </Link>
+      <div className="row">
+        <Link className="group-card-button" to={to} aria-label={`${action} for ${title}`}>
+          {action}
+        </Link>
+        {poll.organiser && collecting && waiting > 0 && (
+          <button type="button" className="group-card-button secondary" disabled={busy} onClick={remind}>
+            Remind the {waiting}
+          </button>
+        )}
+      </div>
+      {note && <p className="banner info">{note}</p>}
     </article>
   );
 }

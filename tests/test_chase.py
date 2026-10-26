@@ -121,10 +121,8 @@ async def test_poll_nudges_members_who_have_not_filled_in(service_factory, refer
         )
     assert alerts(transport)[-1]["text"].startswith("Nudging 1 member privately")
     assert len(outbox.sent) == 1 and outbox.sent[0][0] == 3
-    assert (
-        "choosing a time for sync" in outbox.sent[0][1]
-        and "Fill in your availabilities" in outbox.sent[0][1]
-    )
+    assert "Help pick a time for sync" in outbox.sent[0][1]
+    assert "haven't marked when you're free" in outbox.sent[0][1]
     # Once results are out, nobody else has anything to do.
     repo.polls[poll.id].status = "OPEN"
     assert await non_responders(repo, repo.polls[poll.id]) == []
@@ -134,7 +132,13 @@ async def test_several_open_polls_arrive_as_one_dm(service_factory, reference):
     service, repo = service_factory()
     service.settings.bot_username = "amifree_bot"
     service.settings.mini_app_short_name = "app"
+
+    async def title(chat_id):
+        return "CS3216 Project"
+
     bot, transport = make_bot(service)
+    # The reminder names the group, since people are in several.
+    service.chat_title = title
     outbox = Outbox()
     service.notifier = Notifier(service, outbox)
     async with bot:
@@ -158,6 +162,8 @@ async def test_several_open_polls_arrive_as_one_dm(service_factory, reference):
     assert counts == {"sent": 2, "failed": 0, "skipped": 1}
     assert len(outbox.sent) == 1 and outbox.sent[0][0] == 3
     _, reply = outbox.replies[0]
-    assert "2 polls are waiting" in reply.text and "movie" not in reply.text
+    assert "2 groups are waiting" in reply.text and "movie" not in reply.text
+    assert "• sync in CS3216 Project" in reply.text
+    assert reply.keyboard.inline_keyboard[0][0].text == "🗓 sync · CS3216 Project"
     urls = [row[0].url for row in reply.keyboard.inline_keyboard]
     assert urls == [f"https://t.me/amifree_bot/app?startapp=mine_{p.id}" for p in polls[:2]]

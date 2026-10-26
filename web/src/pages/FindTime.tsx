@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
 import { day, shiftKey, startOfDay, todayKey } from "../format";
 import { haptic } from "../telegram";
+import { forget } from "../useLoad";
 
 const LENGTHS = [
   [30, "30 min"],
@@ -82,6 +83,7 @@ export function FindTime() {
         reply_by: replyBy || null,
       });
       haptic("success");
+      forget(`group:${code}`);
       // The organiser's own times come first, so the poll starts with one answer.
       navigate(`/poll/${made.id}/mine`, { replace: true, state: { justPosted: true } });
     } catch (err) {

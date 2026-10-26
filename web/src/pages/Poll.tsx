@@ -12,14 +12,13 @@ import { Heatmap } from "./Heatmap";
 export function Poll() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const loaded = useLoad(() => api.poll(id), [id]);
-  const [poll, setPoll] = useState<PollDetail | null>(null);
+  const loaded = useLoad(() => api.poll(id), [id], `poll:${id}`);
   // MyTimes sends a note back here after a save.
   const location = useLocation();
   const [note, setNote] = useState((location.state as { note?: string } | null)?.note ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const p = poll ?? loaded.data;
+  const p = loaded.data;
 
   if (loaded.error) {
     const hidden = /not found/i.test(loaded.error);
@@ -34,9 +33,8 @@ export function Poll() {
       const result = await work();
       if ("message" in result) {
         setNote(result.message);
-        setPoll(null);
         loaded.reload();
-      } else setPoll(result);
+      } else loaded.update(result);
       haptic("success");
     } catch (err) {
       haptic("error");
@@ -107,6 +105,15 @@ export function Poll() {
       {p.organiser && p.status === "COLLECTING" && (
         <section className="card organiser">
           <h2>You're the organiser</h2>
+          {p.people && (
+            <>
+              <h3>Filled in ({p.people.done.length})</h3>
+              <p className={p.people.done.length ? "" : "hint"}>{p.people.done.join(", ") || "Nobody yet."}</p>
+              <h3>Not yet ({p.people.waiting.length})</h3>
+              <p className={p.people.waiting.length ? "" : "hint"}>{p.people.waiting.join(", ") || "Everyone we know of has filled in."}</p>
+              <p className="hint">Only people who have used AmIFree in this group are listed.</p>
+            </>
+          )}
           <div className="row">
             <button type="button" className="on" disabled={busy} onClick={() => run(() => api.suggest(p.id))}>
               See best times now

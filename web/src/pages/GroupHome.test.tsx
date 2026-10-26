@@ -9,6 +9,7 @@ vi.mock("../api", () => ({
   refusal: (e: unknown) => ({ message: String(e) }),
   api: {
     group: () => Promise.resolve(state.group),
+    nudgePoll: () => Promise.resolve({ message: "Nudging 2 members privately." }),
   },
 }));
 
@@ -114,5 +115,16 @@ describe("first visit", () => {
     show(base);
     await screen.findByText("Planning something? Do you know when?");
     expect(screen.queryByText("How it works")).toBeNull();
+  });
+});
+
+describe("organiser poll progress", () => {
+  it("keeps the organiser's poll on the page with progress and a reminder", async () => {
+    show({ ...base, polls: [{ id: "mine", title: "Project meeting", status: "COLLECTING", duration_minutes: 60, joined: 3, waiting: 2, joined_by_me: true, organiser: true, availability_submitted: true, deadline_at: null, min_joined: 3 }] });
+    const card = await screen.findByRole("article", { name: "Project meeting" });
+    expect(within(card).getByText(/3 filled in · 2 not yet/)).toBeTruthy();
+    expect(within(card).getByRole("link", { name: "See who's filled in for Project meeting" }).getAttribute("href")).toBe("/poll/mine");
+    fireEvent.click(within(card).getByRole("button", { name: "Remind the 2" }));
+    expect(await within(card).findByText("Nudging 2 members privately.")).toBeTruthy();
   });
 });

@@ -123,8 +123,9 @@ class Notifier:
             if await self.repo.linked_event(user.id, event.id):
                 return None
             availability = await self.scheduling.availability(user, event)
+            group = await self.group_name(event.chat_id)
             return Reply(
-                "📣 Your group is waiting for your answer:\n\n"
+                f"📣 {group[:60] if group else 'Your group'} is waiting for your answer:\n\n"
                 + details(event)
                 + "\n\n"
                 + verdict_line(availability)
@@ -146,36 +147,57 @@ class Notifier:
             return None
         return poll
 
-    def poll_nudge(self, polls: list[Poll]) -> Reply:
+    async def group_name(self, chat_id: int) -> str | None:
+        """The group's title, so a reminder says which group it's from. None if unknown."""
+        hub = getattr(self.scheduling, "hub", None)
+        try:
+            return await hub.title(chat_id) if hub else None
+        except Exception:
+            return None
+
+    async def poll_nudge(self, polls: list[Poll]) -> Reply:
         """One DM for every poll this person still has to fill in, with a button for each."""
-        links = [(poll, self.scheduling.settings.availability_link(poll.id)) for poll in polls]
-        if len(polls) == 1:
-            poll, url = links[0]
+        settings = self.scheduling.settings
+        rows = []
+        for poll in polls:
+            group = await self.group_name(poll.chat_id)
+            rows.append((poll, group, settings.availability_link(poll.id)))
+
+        def where(group: str | None) -> str:
+            return f" in {group[:60]}" if group else ""
+
+        if len(rows) == 1:
+            poll, group, url = rows[0]
             text = (
-                f"🗳 Your group is choosing a time for {poll.title}."
-                " Fill in your availabilities so your free time is counted."
+                f"🗳 Help pick a time for {poll.title[:80]}{where(group)}\n\n"
+                "You haven't marked when you're free yet. It takes a minute, and the best time"
+                " is worked out from everyone's answers."
             )
-            if not url:
-                text += card_link(poll)
-            buttons = (
-                [[InlineKeyboardButton("🗓 Fill in my availabilities", url=url)]] if url else []
-            )
+            if poll.deadline_at:
+                text += f"\nFill in by {poll.deadline_at:%a %-d %b}."
+            text += card_link(poll)
+            buttons = [[InlineKeyboardButton("🗓 Mark when I'm free", url=url)]] if url else []
         else:
             lines = "\n".join(
-                f"• {poll.title[:80]}" + ("" if url else card_link(poll).replace("\n", " — "))
-                for poll, url in links
+                f"• {poll.title[:80]}{where(group)}"
+                + ("" if url else card_link(poll).replace("\n", " — "))
+                for poll, group, url in rows
             )
             text = (
-                f"🗳 {len(polls)} polls are waiting for your free times:\n{lines}\n\n"
-                "Fill in your availabilities so your free time is counted."
+                f"🗳 {len(rows)} groups are waiting for your free times:\n{lines}\n\n"
+                "Tap one below to mark when you're free. It takes a minute each."
             )
             buttons = [
-                [InlineKeyboardButton(f"🗓 {poll.title[:40]}", url=url)]
-                for poll, url in links
+                [
+                    InlineKeyboardButton(
+                        f"🗓 {poll.title[:30]}" + (f" · {group[:20]}" if group else ""), url=url
+                    )
+                ]
+                for poll, group, url in rows
                 if url
             ]
         return Reply(
-            text + "\n\n/reminders off stops nudges.",
+            text + "\n\n/reminders off stops these.",
             InlineKeyboardMarkup(buttons) if buttons else None,
         )
 
@@ -211,7 +233,7 @@ class Notifier:
                         await self.repo.finish_notification(row["id"], False, True)
                         counts["skipped"] += 1
                 rows = live
-                reply = self.poll_nudge(list(polls.values())) if polls else None
+                reply = await self.poll_nudge(list(polls.values())) if polls else None
             else:
                 reply = await self.render(user, rows[0])
             if reply is None:

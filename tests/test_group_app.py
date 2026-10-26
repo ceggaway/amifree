@@ -547,3 +547,29 @@ async def test_organiser_picks_any_time_through_the_api(hub, reference):
     event = repo.group_events[picked.json()["event_id"]]
     assert event.start_at.isoformat() == start and repo.polls[poll_id].status == "CLOSED"
     assert posted[-1][1].text.startswith("Sync is confirmed for")
+
+
+async def test_organiser_sees_who_has_filled_in_a_poll(hub, reference):
+    client, service, repo, posted, members = hub
+    first = reference.date() + timedelta(days=1)
+    form = {
+        "request_id": str(uuid.uuid4()),
+        "title": "Sync",
+        "minutes": 60,
+        "first": str(first),
+        "last": str(first + timedelta(days=2)),
+    }
+    poll_id = (await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)).json()[
+        "id"
+    ]
+    page = f"/api/polls/{poll_id}"
+    # Members 2 and 3 open it; only 2 fills in.
+    for member in (2, 3):
+        assert (await client.get(page, headers=bearer(member))).json()["people"] is None
+    await client.post(f"{page}/join", headers=bearer(2))
+    progress = (await client.get(page, headers=bearer(1))).json()["people"]
+    # The organiser counts as filled in from the start; member 3 is still waiting.
+    assert len(progress["done"]) == 2 and len(progress["waiting"]) == 1
+    overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()
+    row = next(p for p in overview["polls"] if p["id"] == poll_id)
+    assert row["joined"] == 2 and row["waiting"] == 1

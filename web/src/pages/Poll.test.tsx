@@ -135,3 +135,17 @@ describe("poll progress", () => {
     expect(screen.getByText("Best times shown").closest("li")?.getAttribute("aria-current")).toBe("step");
   });
 });
+
+describe("organiser progress", () => {
+  it("lists who has filled in and who hasn't, only for the organiser", async () => {
+    show({ ...base, status: "COLLECTING", slots: [], organiser: true, joined_by_me: true, people: { done: ["Angel", "Ben"], waiting: ["Chloe"] } });
+    expect(await screen.findByText("Filled in (2)")).toBeTruthy();
+    expect(screen.getByText("Angel, Ben")).toBeTruthy();
+    expect(screen.getByText("Not yet (1)")).toBeTruthy();
+    expect(screen.getByText("Chloe")).toBeTruthy();
+    cleanup();
+    show({ ...base, status: "COLLECTING", slots: [], people: null });
+    await screen.findByText(/mark when you're free/);
+    expect(screen.queryByText(/Filled in \(/)).toBeNull();
+  });
+});

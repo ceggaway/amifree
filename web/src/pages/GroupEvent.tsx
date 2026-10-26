@@ -18,12 +18,11 @@ const ANSWERS: [Answer, string][] = [
 export function GroupEvent() {
   const { id = "" } = useParams();
   const [params] = useSearchParams();
-  const loaded = useLoad(() => api.groupEvent(id), [id]);
-  const [event, setEvent] = useState<GroupEventDetail | null>(null);
+  const loaded = useLoad(() => api.groupEvent(id), [id], `event:${id}`);
   const [note, setNote] = useState(params.get("posted") ? "Posted in the group." : "");
   const [error, setError] = useState("");
   const [clash, setClash] = useState(false);
-  const current = event ?? loaded.data;
+  const current = loaded.data;
 
   if (loaded.error) return <NotInGroup error={loaded.error} />;
   if (!current) return <p className="hint">Loading…</p>;
@@ -33,7 +32,7 @@ export function GroupEvent() {
     setError("");
     try {
       const result = await work();
-      setEvent("event" in result ? result.event : result);
+      loaded.update("event" in result ? result.event : result);
       if ("message" in result && result.message) setNote(result.message);
       else if (done) setNote(done);
       haptic("success");

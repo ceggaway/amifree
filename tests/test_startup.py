@@ -125,3 +125,21 @@ def test_settings_errors_do_not_print_secrets():
         )
     assert "private-token-value" not in str(error.value)
     assert "private-key-value" not in str(error.value)
+
+
+async def test_mini_app_files_are_compressed_and_cached():
+    dist = main_module.Path(main_module.__file__).resolve().parents[1] / "web" / "dist"
+    scripts = sorted((dist / "assets").glob("*.js")) if (dist / "index.html").is_file() else []
+    if not scripts:
+        pytest.skip("Mini App not built")
+    app = create_app(Settings(_env_file=None, telegram_bot_token="123456:fake-test-token"))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://test"
+    ) as client:
+        script = await client.get(
+            f"/app/assets/{scripts[0].name}", headers={"Accept-Encoding": "gzip"}
+        )
+        assert script.headers["content-encoding"] == "gzip"
+        assert "immutable" in script.headers["cache-control"]
+        page = await client.get("/app/")
+        assert page.headers["cache-control"] == "no-cache"

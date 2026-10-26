@@ -3,7 +3,7 @@ import { PlanCard } from "../components/PlanCard";
 import { useLoad } from "../useLoad";
 
 export function Plans() {
-  const { data, error, reload } = useLoad(api.plans);
+  const { data, error, reload } = useLoad(api.plans, [], "plans");
   if (error) return <p className="error">{error}</p>;
   if (!data) return <p className="hint">Loading…</p>;
   return (

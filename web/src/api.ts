@@ -34,7 +34,16 @@ export const mockMode = import.meta.env.DEV && !initData();
 // Kept in memory only; a fresh sign-in happens each time the Mini App is opened.
 let token = "";
 
-async function signIn() {
+// One sign-in at a time: the first page often fires several requests together, and each
+// would otherwise sign in separately.
+let signingIn: Promise<void> | null = null;
+
+function signIn(): Promise<void> {
+  signingIn ??= signInOnce().finally(() => (signingIn = null));
+  return signingIn;
+}
+
+async function signInOnce() {
   const response = await fetch("/api/auth/telegram", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

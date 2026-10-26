@@ -4,6 +4,7 @@ import { api, refusal } from "../api";
 import { ClashBanner } from "../components/ClashBanner";
 import { at, shiftKey, todayKey } from "../format";
 import { haptic } from "../telegram";
+import { forget } from "../useLoad";
 import type { Availability } from "../types";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -67,6 +68,7 @@ export function NewEvent() {
         until: form.repeat ? form.until : null,
       });
       haptic("success");
+      forget(`group:${code}`);
       navigate(`/e/${made.id}?posted=1`, { replace: true });
     } catch (err) {
       haptic("error");

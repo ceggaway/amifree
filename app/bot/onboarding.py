@@ -377,13 +377,16 @@ def _button(label: str, screen: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(label, callback_data=f"setup:{screen}")
 
 
-def welcome_keyboard() -> InlineKeyboardMarkup:
+def welcome_keyboard(app_url: str | None = None) -> InlineKeyboardMarkup:
+    from app.bot.keyboards import open_app_row
+
     return InlineKeyboardMarkup(
         [
             [
                 _button("📅 Connect personal calendar", "calendar"),
                 _button("Skip calendar setup", "skip"),
             ],
+            *open_app_row(app_url),
         ]
     )
 
@@ -450,17 +453,21 @@ def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:
     )
 
 
-def first_calendar_keyboard(finish_apple: bool = False) -> InlineKeyboardMarkup:
-    """Offer calendar setup, NUSMods, and plans in a calendar app before connecting."""
+def first_calendar_keyboard(finish_apple: bool = False, feed: bool = False) -> InlineKeyboardMarkup:
+    """Offer calendar setup and NUSMods before connecting. Half-way through Apple setup, the
+    Apple button picks up where they stopped instead of sitting beside a second one."""
     from app.bot.keyboards import calendar_home_rows
 
+    finish = _button("🍎 Finish Apple setup", "apple2")
     rows = [
-        [b for b in row if b.callback_data != "setup:home"]
+        [
+            finish if finish_apple and b.callback_data == "setup:apple" else b
+            for b in row
+            if b.callback_data != "setup:home"
+        ]
         for row in pick_calendar_keyboard().inline_keyboard
     ]
-    if finish_apple:
-        rows.insert(0, [_button("🍎 Finish Apple setup", "apple2")])
-    return InlineKeyboardMarkup([*rows, *calendar_home_rows()[1:]])
+    return InlineKeyboardMarkup([*rows, *calendar_home_rows(feed)[1:]])
 
 
 PHOTOS_CAPTION = "Swipe through the pictures: the red marks show where to tap."
@@ -580,11 +587,12 @@ def google_step(
     if n == len(steps):
         rows.insert(0, [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")])
     if n == 1:
-        if device == "computer":
-            # The text says to go to calendar.google.com, so the button goes exactly there.
-            rows.append(
-                [InlineKeyboardButton("Open calendar.google.com ↗", url=GOOGLE_CALENDAR_URL)]
-            )
+        # Each button opens what its text says. Telegram buttons only take web links, so the
+        # phone one is Google's address, which phones hand to the app when it's installed.
+        label = (
+            "📅 Open Google Calendar app ↗" if device == "phone" else "Open calendar.google.com ↗"
+        )
+        rows.append([InlineKeyboardButton(label, url=GOOGLE_CALENDAR_URL)])
         rows.append(
             [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
             if device == "phone"

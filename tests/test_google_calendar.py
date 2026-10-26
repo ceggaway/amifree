@@ -362,8 +362,9 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     assert len(pictures) == 5 and "Make changes" in part.text
     first = (await service.callback(1, "gcal:start"))[0]
     assert "Google Calendar</b> app" in first.text and "💻 On a computer instead?" in labels(first)
-    # The phone part says to open the app, so it offers no web link.
-    assert not any(b.url for row in first.keyboard.inline_keyboard for b in row)
+    # The phone part says to open the app, and its button says so too.
+    [app] = [b for row in first.keyboard.inline_keyboard for b in row if b.url]
+    assert app.text == "📅 Open Google Calendar app ↗" and app.url == "https://calendar.google.com"
     computer = (await service.callback(1, tap(first, "💻 On a computer instead?")))[0]
     assert "calendar.google.com" in computer.text and "📱 On my phone instead?" in labels(computer)
     [link] = [b for row in computer.keyboard.inline_keyboard for b in row if b.url]

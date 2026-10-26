@@ -180,11 +180,15 @@ async def test_change_alert_says_synced_instead_of_buttons(online, reference):
     assert event.status == Status.GOING and "Syncing" in card.text
 
 
-async def test_the_phone_steps_sit_behind_a_button_with_a_way_back(online):
+async def test_the_feed_settings_appear_once_there_is_a_feed(online):
     service, _ = online()
     status = (await service.command(1, "calendar"))[0]
     assert "Plans in your phone's calendar: not set up" in status.text
-    feed = (await service.callback(1, tap(status, "📤 Plans in my calendar app")))[0]
+    # Not set up yet: Apple / iCloud is the way in, so there's no second button for it.
+    assert "🍎 AmIFree calendar settings" not in str(status.keyboard)
+    await service.callback(1, "setup:apple")
+    status = (await service.command(1, "calendar"))[0]
+    feed = (await service.callback(1, tap(status, "🍎 AmIFree calendar settings")))[0]
     assert "Add Subscribed Calendar" in feed.text
     back = (await service.callback(1, tap(feed, "« Back to my calendars")))[0]
     assert back.edit and "Your calendars" in back.text

@@ -1,4 +1,4 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from app.schemas.event import Event, GroupEvent, Poll, Status
 
@@ -236,7 +236,7 @@ def agenda_keyboard(
 
 
 def plans_keyboard(
-    items: list[tuple[str, str, str]], page: int, pages: int
+    items: list[tuple[str, str, str]], page: int, pages: int, app_url: str | None = None
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(label, callback_data=f"fp:{page}:{kind}:{item_id}")]
@@ -249,7 +249,7 @@ def plans_keyboard(
         navigation.append(InlineKeyboardButton("Next →", callback_data=f"plans:{page + 1}"))
     if navigation:
         rows.append(navigation)
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup(rows + open_app_row(app_url))
 
 
 def with_plans_navigation(markup: InlineKeyboardMarkup | None, page: int) -> InlineKeyboardMarkup:
@@ -343,23 +343,28 @@ def free_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def personal_calendars_keyboard(calendars) -> InlineKeyboardMarkup:
+def personal_calendars_keyboard(calendars, feed: bool = False) -> InlineKeyboardMarkup:
     """One Remove button per connected calendar, then help adding another."""
     rows = [
         [InlineKeyboardButton(f"Remove {c.label[:30]}", callback_data=f"pcal:rm:{c.id}")]
         for c in calendars
     ]
-    rows += calendar_home_rows()
+    rows += calendar_home_rows(feed)
     return InlineKeyboardMarkup(rows)
 
 
-def calendar_home_rows():
-    """Connect a calendar, add classes, or send plans to a calendar app."""
-    return [
+def calendar_home_rows(feed: bool = False):
+    """Connect a calendar, add classes, and once the AmIFree calendar exists, its link and
+    settings (New link, Turn off). Setting it up is part of Apple setup, not a button here."""
+    rows = [
         [InlineKeyboardButton("➕ Add a calendar", callback_data="setup:calendar")],
         [InlineKeyboardButton("📚 Add or update NUSMods", callback_data="setup:nusmods")],
-        [InlineKeyboardButton("📤 Plans in my calendar app", callback_data="cal:feed")],
     ]
+    if feed:
+        rows.append(
+            [InlineKeyboardButton("🍎 AmIFree calendar settings", callback_data="cal:feed")]
+        )
+    return rows
 
 
 def calendar_keyboard(event: Event, google_url: str) -> InlineKeyboardMarkup:
@@ -417,12 +422,20 @@ def feedback_choice_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def menu_keyboard() -> InlineKeyboardMarkup:
+def open_app_row(app_url: str | None) -> list[list[InlineKeyboardButton]]:
+    """The Mini App's way in from a private chat, when it is deployed."""
+    if not app_url:
+        return []
+    return [[InlineKeyboardButton("📱 Open AmIFree", web_app=WebAppInfo(url=app_url))]]
+
+
+def menu_keyboard(app_url: str | None = None) -> InlineKeyboardMarkup:
     """The four things a set-up user does most; each tap runs the matching command."""
     return InlineKeyboardMarkup(
         [
             [_menu("📋 My plans", "plans"), _menu("🕒 Am I free?", "free")],
             [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
+            *open_app_row(app_url),
         ]
     )
 

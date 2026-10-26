@@ -26,6 +26,7 @@ from app.bot.keyboards import (
     feedback_choice_keyboard,
     free_keyboard,
     menu_keyboard,
+    open_app_row,
     page_keyboard,
     personal_calendars_keyboard,
     personal_change_confirmation,
@@ -403,11 +404,17 @@ class SchedulingService:
                         + html.escape(" and ".join(connected))
                         + ".\n\n"
                         + onboarding.EVERYDAY_HELP,
-                        menu_keyboard(),
+                        menu_keyboard(self.settings.mini_app_url),
                         parse_mode="HTML",
                     )
                 ]
-            return [Reply(onboarding.WELCOME, onboarding.welcome_keyboard(), parse_mode="HTML")]
+            return [
+                Reply(
+                    onboarding.WELCOME,
+                    onboarding.welcome_keyboard(self.settings.mini_app_url),
+                    parse_mode="HTML",
+                )
+            ]
         if command == "cancel":
             await self.google_sync.discard(user.pending)
             await self.repo.set_pending(user.id, None)
@@ -497,6 +504,15 @@ class SchedulingService:
             return await self.list_deadlines(user)
         if command == "calendar":
             return await self.calendar_setup(user)
+        if command == "app":
+            if not self.settings.mini_app_url:
+                return [Reply("The AmIFree app isn't available right now.")]
+            return [
+                Reply(
+                    "Tap below to open AmIFree.",
+                    InlineKeyboardMarkup(open_app_row(self.settings.mini_app_url)),
+                )
+            ]
         if command == "free":
             return await self.free_command(user, args)
         if command == "blocks":
@@ -828,7 +844,7 @@ class SchedulingService:
             Reply(
                 "<b>Your plans</b>\nSelect a plan below to view its details.\n\n"
                 f"<i>Page {page + 1} of {pages}</i>",
-                plans_keyboard(buttons, page, pages),
+                plans_keyboard(buttons, page, pages, self.settings.mini_app_url),
                 parse_mode="HTML",
             )
         ]
@@ -1778,7 +1794,9 @@ class SchedulingService:
         if not calendars:
             # Apple part 1 done, part 2 not: one tap back to where they stopped.
             half_done = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
-            keyboard = onboarding.first_calendar_keyboard(finish_apple=half_done)
+            keyboard = onboarding.first_calendar_keyboard(
+                finish_apple=half_done, feed=bool(user.calendar_feed_token)
+            )
             if half_done:
                 status = "🍎 Apple: ✓ adding plans · ✗ not checking busy times yet"
             else:
@@ -1823,7 +1841,7 @@ class SchedulingService:
             + f"\n\n{nusmods}"
             + f"\n\n{self.feed_line(user)}\n\n{more} I refresh them every hour and keep only "
             "when you're busy, never what your events are.",
-            personal_calendars_keyboard(calendars),
+            personal_calendars_keyboard(calendars, feed=bool(user.calendar_feed_token)),
         )
 
     async def connect_calendar(self, user: User, link: str) -> list[Reply]:

@@ -303,3 +303,13 @@ def test_cards_name_the_calendar_plans_sync_to():
     assert synced(user) == "your Google Calendar and AmIFree calendar"
     user.google_connected = False
     assert synced(user) == "your AmIFree calendar"
+
+
+async def test_half_done_apple_has_one_apple_button(service_factory, reference):
+    service, repo = service_factory(app_base_url=BASE)
+    await onboard(service, reference)
+    await service.callback(1, "setup:apple")
+    await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
+    status = (await service.command(1, "calendar"))[0]
+    apple = [label for label in labels(status) if "🍎" in label]
+    assert apple == ["🍎 Finish Apple setup", "🍎 AmIFree calendar settings"]

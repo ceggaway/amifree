@@ -58,7 +58,8 @@ async def test_real_application_startup_and_shutdown(monkeypatch, mode):
         assert (await client.get("/readyz")).status_code == 200
         calls = dict(transport.calls)
         assert "setMyCommands" in calls
-        assert "Open AmIFree" in str(calls["setChatMenuButton"])
+        # The menu button lists commands; the Mini App opens from buttons in /start.
+        assert "COMMANDS" in str(calls["setChatMenuButton"])
         if mode == "webhook":
             assert calls["setWebhook"]["url"] == "https://example.test/telegram/webhook"
             assert calls["setWebhook"]["secret_token"] == "test_secret_123456"

@@ -160,4 +160,4 @@ async def test_several_open_polls_arrive_as_one_dm(service_factory, reference):
     _, reply = outbox.replies[0]
     assert "2 polls are waiting" in reply.text and "movie" not in reply.text
     urls = [row[0].url for row in reply.keyboard.inline_keyboard]
-    assert urls == [f"https://t.me/amifree_bot/app?startapp=poll_{p.id}" for p in polls[:2]]
+    assert urls == [f"https://t.me/amifree_bot/app?startapp=mine_{p.id}" for p in polls[:2]]

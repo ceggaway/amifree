@@ -115,3 +115,23 @@ describe("poll page", () => {
     expect(screen.queryByText("Event page")).toBeNull();
   });
 });
+
+describe("poll progress", () => {
+  it("shows the step and tells a new member what to do", async () => {
+    show({ ...base, status: "COLLECTING", slots: [], joined: 1 });
+    const current = await screen.findByText("Everyone fills in");
+    expect(current.closest("li")?.getAttribute("aria-current")).toBe("step");
+    expect(screen.getByText(/mark when you're free/)).toBeTruthy();
+  });
+
+  it("tells a member who filled in that they're done", async () => {
+    show({ ...base, status: "COLLECTING", slots: [], joined_by_me: true });
+    expect(await screen.findByText(/Nothing else to do/)).toBeTruthy();
+  });
+
+  it("tells the organiser to pick once results are in", async () => {
+    show({ ...base, organiser: true });
+    expect(await screen.findByText(/pick one of the times below/)).toBeTruthy();
+    expect(screen.getByText("Best times shown").closest("li")?.getAttribute("aria-current")).toBe("step");
+  });
+});

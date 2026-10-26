@@ -108,3 +108,30 @@ describe("group event page", () => {
     expect(screen.queryByRole("button", { name: "Going" })).toBeNull();
   });
 });
+
+describe("organiser tools by timing", () => {
+  it("keeps attendance tools out of the way until the event is close", async () => {
+    show({
+      ...base,
+      start_at: "2030-01-01T19:00:00+08:00",
+      end_at: "2030-01-01T21:00:00+08:00",
+      organiser: true,
+      manage: {
+        summary: { going: 2, confirmed: 0, unsure: 0, dropped: 0, no_reply: 2 },
+        came: 0,
+        people: [{ id: "u2", name: "Angel", answer: "GOING", present: false }],
+      },
+    });
+    expect(await screen.findByText(/2 going so far/)).toBeTruthy();
+    expect(screen.queryByText(/Who came/)).toBeNull();
+    expect(screen.queryByText("Still coming?")).toBeNull();
+    expect(screen.getByRole("button", { name: "Remind people who haven't answered" })).toBeTruthy();
+  });
+
+  it("asks Are you going? before showing the private clash check", async () => {
+    show({ ...base, start_at: "2030-01-01T19:00:00+08:00", end_at: "2030-01-01T21:00:00+08:00" });
+    const question = await screen.findByRole("heading", { name: "Are you going?" });
+    const privacy = screen.getByText(/only you see this/);
+    expect(question.compareDocumentPosition(privacy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

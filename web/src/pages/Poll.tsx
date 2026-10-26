@@ -61,43 +61,31 @@ export function Poll() {
   }
 
   const hours = p.duration_minutes / 60;
+  const fillIn = (
+    <button type="button" className="on big" onClick={() => navigate(`/poll/${p.id}/mine`)}>
+      {p.joined_by_me ? "Update my availabilities" : "Fill in my availabilities"}
+    </button>
+  );
   return (
     <>
       <p>
-        <Link to={`/g/${p.chat}`}>‹ All events</Link>
+        <Link to={`/g/${p.chat}`}>‹ Back to group</Link>
       </p>
       <h1>{p.title}</h1>
       <p className="hint">
         {Number.isInteger(hours * 2) ? `${hours}h` : `${p.duration_minutes} min`}
         {p.deadline_at && p.status === "COLLECTING" ? ` · fill in by ${day(p.deadline_at)}` : ""}
+        {` · ${p.joined} filled in`}
       </p>
+      <Steps status={p.status} />
       {note && <p className="banner ok">{note}</p>}
       {error && <p className="banner clash">{error}</p>}
 
-      {p.status === "CLOSED" && <p className="banner info">The time is chosen. It's posted in the group.</p>}
-
-      {p.status === "COLLECTING" && (
-        <section className="card">
-          <p>
-            {p.joined} joined. When the deadline passes, the best times are posted in the group and the organiser chooses one
-            {p.joined < p.min_joined ? ` (at least ${p.min_joined} need to join)` : ""}.
-          </p>
-          <p className="hint">The group only sees how many people are free, never who is busy or why.</p>
-          {p.joined_by_me && <p className="banner ok">You're in.</p>}
-          {/* Submitting the grid also counts the member in. */}
-          <button type="button" className="on big" onClick={() => navigate(`/poll/${p.id}/mine`)}>
-            {p.joined_by_me ? "Update my availabilities" : "Fill in my availabilities"}
-          </button>
-        </section>
-      )}
-
-      {p.status === "OPEN" && (
-        <p className="banner info">
-          {p.organiser
-            ? "Results are in. Confirm a suggested time, or choose your own below. It will be announced in the group."
-            : "Results are in. The organiser is choosing the time, and it will be posted in the group."}
-        </p>
-      )}
+      <section className="card next-step">
+        <NextStep poll={p} />
+        {p.status === "COLLECTING" && fillIn}
+        <p className="hint">The group only sees how many people are free, never who is busy or why.</p>
+      </section>
 
       {p.status === "OPEN" &&
         p.slots.map((slot, index) => (
@@ -121,13 +109,16 @@ export function Poll() {
           <h2>You're the organiser</h2>
           <div className="row">
             <button type="button" className="on" disabled={busy} onClick={() => run(() => api.suggest(p.id))}>
-              See results now
+              See best times now
             </button>
             <button type="button" disabled={busy} onClick={() => run(() => api.nudgePoll(p.id))}>
-              Nudge
+              Remind people who haven't filled in
             </button>
           </div>
-          <p className="hint">Results also arrive by themselves when the deadline passes.</p>
+          <p className="hint">
+            No need to wait here: the best times also appear by themselves when the deadline passes
+            {p.joined < p.min_joined ? `, once at least ${p.min_joined} people have filled in` : ""}.
+          </p>
         </section>
       )}
 
@@ -145,5 +136,49 @@ export function Poll() {
         </details>
       )}
     </>
+  );
+}
+
+const STEPS = ["Everyone fills in", "Best times shown", "Time chosen"];
+
+/** Where the poll is up to, so nobody has to read a paragraph to find out. */
+function Steps({ status }: { status: PollDetail["status"] }) {
+  const current = status === "COLLECTING" ? 0 : status === "OPEN" ? 1 : 2;
+  return (
+    <ol className="steps" aria-label="Poll progress">
+      {STEPS.map((label, index) => {
+        const state = index < current || status === "CLOSED" ? "done" : index === current ? "now" : "later";
+        return (
+          <li key={label} className={state} aria-current={state === "now" ? "step" : undefined}>
+            <span className="step-dot" aria-hidden="true">{state === "done" ? "✓" : index + 1}</span>
+            {label}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** One line: what this person should do now, or that they're done. */
+function NextStep({ poll: p }: { poll: PollDetail }) {
+  if (p.status === "CLOSED") return <p><strong>All done.</strong> The time is chosen and posted in the group.</p>;
+  if (p.status === "OPEN") {
+    return p.organiser ? (
+      <p><strong>Your turn:</strong> pick one of the times below. It's posted in the group so people can say Going.</p>
+    ) : (
+      <p><strong>You're done for now.</strong> The organiser is choosing the time, and it will be posted in the group.</p>
+    );
+  }
+  if (!p.joined_by_me) return <p><strong>Your turn:</strong> mark when you're free so the group can find a time.</p>;
+  return p.organiser ? (
+    <p>
+      <strong>You're in.</strong> Now wait for others to fill in. The best times appear here
+      {p.deadline_at ? ` after ${day(p.deadline_at)}` : " when the deadline passes"}, and you pick one.
+    </p>
+  ) : (
+    <p>
+      <strong>You're in.</strong> Nothing else to do. When the deadline passes, the organiser picks a time and
+      it's posted in the group.
+    </p>
   );
 }

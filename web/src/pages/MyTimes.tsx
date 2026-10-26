@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
-import { dragState, paint, ticked } from "../availability";
+import { dragState, paint, setDay, ticked } from "../availability";
 import { capitaliseFirst, time } from "../format";
+import { confirm } from "../telegram";
 import { dayLabel, rowTimes } from "../heatmap";
 import type { MyGrid } from "../types";
 import { useLoad } from "../useLoad";
@@ -11,6 +12,8 @@ import { useLoad } from "../useLoad";
 export function MyTimes() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  // FindTime sends the organiser here right after posting the poll.
+  const justPosted = Boolean((useLocation().state as { justPosted?: boolean } | null)?.justPosted);
   const { data, error } = useLoad(() => api.myGrid(id), [id]);
   const [grid, setGrid] = useState<MyGrid | null>(null);
   const [status, setStatus] = useState("");
@@ -79,11 +82,16 @@ export function MyTimes() {
 
   async function save() {
     if (!grid) return;
+    if (
+      ticked(grid).length === 0 &&
+      !(await confirm("You haven't marked any free times. Submit anyway? You'll be counted as busy the whole time."))
+    )
+      return;
     setSaving(true);
     setStatus("");
     try {
       const done = await api.saveGrid(id, ticked(grid));
-      const note = `Saved ${done.saved} half hours.${done.dropped ? ` ${done.dropped} were blocked and left out.` : ""} You're counted in.`;
+      const note = `Saved. You're counted in.${done.dropped ? " A few times clashed with your calendar and were left out." : ""}`;
       // Back to the poll, which now shows "You're in." and the new count.
       navigate(`/poll/${id}`, { replace: true, state: { note } });
     } catch (e) {
@@ -96,9 +104,11 @@ export function MyTimes() {
   return (
     <section className="heatmap">
       <h1>{title}</h1>
+      {justPosted && <p className="banner ok">Poll posted in the group ✓ Now add your own free times. You count too.</p>}
+      <p className="instruction">Tap the times you're <strong>free</strong>.</p>
       <p className="hint">
-        Tap a slot or drag across several to change your availability. Busy times from your connected
-        calendar and timetable are blocked automatically.
+        Tap a slot or drag across several. Tap again to undo. Times your calendar or timetable says you're busy are
+        already blocked.
       </p>
       <div className="grid-legend">
         <span><i className="swatch free" aria-hidden="true">✓</i> Available</span>
@@ -119,22 +129,48 @@ export function MyTimes() {
       >
         <div className="heat-grid" style={{ gridTemplateColumns: `3.2rem repeat(${grid.days.length}, minmax(22%, 1fr))` }}>
           <div className="heat-corner" />
-          {grid.days.map((day) => (
-            <div key={day.date} className="heat-head">
-              {dayLabel(day.date)}
-            </div>
-          ))}
+          {grid.days.map((day) => {
+            const open = day.cells.filter((c) => c.state !== "busy");
+            const full = open.length > 0 && open.every((c) => c.state === "free");
+            return (
+              <div key={day.date} className="heat-head">
+                {dayLabel(day.date)}
+                {open.length > 0 && (
+                  <button
+                    type="button"
+                    className={`day-fill${full ? " on" : ""}`}
+                    aria-pressed={full}
+                    aria-label={`${full ? "Clear" : "Free all day on"} ${dayLabel(day.date)}`}
+                    onClick={() => setGrid((current) => current && setDay(current, day.date, full ? "off" : "free"))}
+                  >
+                    {full ? "Clear" : "Free all day"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
           {rows.map((time) => (
             <Row key={time} time={time} grid={grid} lookup={lookup} begin={begin} over={over} tap={tap} />
           ))}
         </div>
       </div>
       {status && <p className="error" role="alert">{status}</p>}
-      <button type="button" className="on" disabled={saving} onClick={save}>
-        {saving ? "Submitting…" : "Submit availabilities"}
-      </button>
+      {/* Pinned to the bottom: the grid is long, and people missed a Submit below it. */}
+      <div className="submit-bar">
+        <p>{freeHours(ticked(grid).length)}</p>
+        <button type="button" className="on big" disabled={saving} onClick={save}>
+          {saving ? "Submitting…" : "Submit availabilities"}
+        </button>
+      </div>
     </section>
   );
+}
+
+/** "6 hrs free" from a count of ticked half hours. */
+export function freeHours(halves: number): string {
+  if (halves === 0) return "No free times marked yet";
+  const hours = halves / 2;
+  return `${hours} hr${hours === 1 ? "" : "s"} free`;
 }
 
 function Row({

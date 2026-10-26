@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import { Icon } from "../components/Icon";
@@ -19,40 +20,45 @@ export function GroupHome() {
       <header className="group-head">
         <h1>{data.title ?? "This group"}</h1>
       </header>
-      <nav className="group-actions" aria-label="Plan together">
+      <Intro />
+      {pending.length > 0 && (
+        <section aria-labelledby="pending-action-heading">
+          <h2 id="pending-action-heading">Needs you</h2>
+          {pending.map((poll) => <PollRow key={poll.id} poll={poll} />)}
+        </section>
+      )}
+      <nav className="group-actions" aria-labelledby="plan-heading">
+        <p className="plan-question" id="plan-heading">Planning something? Do you know when?</p>
         <Link className="card link group-action" to={`/g/${code}/new`}>
           <span className="icon-tile"><Icon name="plus" /></span>
           <div>
-            <h2>Create an event</h2>
-            <p className="hint">Time decided? Set details and get RSVPs.</p>
+            <h2>Yes, set the time</h2>
+            <p className="hint">Post the event. Everyone taps Going or Can't.</p>
           </div>
           <Icon name="arrow" size={18} />
         </Link>
         <Link className="card link group-action" to={`/g/${code}/find`}>
           <span className="icon-tile"><Icon name="clock" /></span>
           <div>
-            <h2>Find a common time</h2>
-            <p className="hint">Time undecided? Find a common time for the group.</p>
+            <h2>No, help us pick a time</h2>
+            <p className="hint">Everyone marks when they're free. AmIFree finds the best time.</p>
           </div>
           <Icon name="arrow" size={18} />
         </Link>
       </nav>
-      {pending.length > 0 && (
-        <section aria-labelledby="pending-action-heading">
-          <h2 id="pending-action-heading">Pending action</h2>
-          {pending.map((poll) => <PollRow key={poll.id} poll={poll} />)}
-        </section>
+      <h2>Coming up</h2>
+      {data.events.length === 0 && (
+        <p className="card empty">Nothing planned yet. Pick an option above to plan your first hangout.</p>
       )}
-      <h2>Upcoming event</h2>
-      {data.events.length === 0 && <p className="hint">No upcoming events.</p>}
       {data.events.map((event) => (
         <EventRow key={event.id} event={event} />
       ))}
-      <h2>Group tools</h2>
+      <h2>Past events</h2>
       <Link className="card link organiser-link" to={`/g/${code}/stats`}>
         <span className="icon-tile"><Icon name="chart" /></span>
         <div>
-          <h3>Attendance and insights</h3>
+          <h3>Attendance history</h3>
+          <p className="hint">Who turned up to past events.</p>
         </div>
         <Icon name="arrow" size={18} />
       </Link>
@@ -97,6 +103,42 @@ function PollRow({ poll }: { poll: GroupPoll }) {
         {action}
       </Link>
     </article>
+  );
+}
+
+const INTRO_KEY = "amifree.group-intro-seen";
+
+function seenIntro(): boolean {
+  try {
+    return localStorage.getItem(INTRO_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** A one-time "how it works" for people opening a group for the first time. */
+function Intro() {
+  const [hidden, setHidden] = useState(seenIntro);
+  if (hidden) return null;
+  function dismiss() {
+    try {
+      localStorage.setItem(INTRO_KEY, "1");
+    } catch {
+      // Private mode: it just shows again next time.
+    }
+    setHidden(true);
+  }
+  return (
+    <section className="card intro" aria-labelledby="intro-heading">
+      <h2 id="intro-heading">How it works</h2>
+      <ol>
+        <li><strong>Plan something.</strong> Set a time, or let the group find one together.</li>
+        <li><strong>Everyone answers in one tap</strong>, here or on the card in the chat.</li>
+        <li><strong>AmIFree reminds people</strong>, so you don't have to chase anyone.</li>
+      </ol>
+      <p className="hint">Your schedule stays private. The group only sees how many people are free.</p>
+      <button type="button" className="on" onClick={dismiss}>Got it</button>
+    </section>
   );
 }
 

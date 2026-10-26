@@ -148,7 +148,7 @@ class Notifier:
 
     def poll_nudge(self, polls: list[Poll]) -> Reply:
         """One DM for every poll this person still has to fill in, with a button for each."""
-        links = [(poll, self.scheduling.settings.heatmap_link(poll.id)) for poll in polls]
+        links = [(poll, self.scheduling.settings.availability_link(poll.id)) for poll in polls]
         if len(polls) == 1:
             poll, url = links[0]
             text = (

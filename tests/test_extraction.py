@@ -74,6 +74,7 @@ async def test_openai_sdk_structured_output_request(reference):
         assert body["text"]["format"]["type"] == "json_schema"
         assert body["text"]["format"]["strict"] is True
         assert body["store"] is False
+        assert body["temperature"] == 0
         assert "never decide availability" in body["input"][0]["content"].lower()
         return httpx.Response(
             200,

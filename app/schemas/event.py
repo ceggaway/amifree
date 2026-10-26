@@ -8,8 +8,24 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 SG = ZoneInfo("Asia/Singapore")
 
 
+class OtherTime(BaseModel):
+    """A second, third... time in the same message. A null field is the one before it."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str | None
+    date_text: str | None
+    start_time_text: str | None
+    end_time_text: str | None
+    end_date_text: str | None
+    location: str | None
+
+
 class Extraction(BaseModel):
-    """Required nullable fields keep the OpenAI structured-output schema strict."""
+    """Required nullable fields keep the OpenAI structured-output schema strict.
+
+    relation and other_times default to None (the schema still requires them; OpenAI drops
+    None defaults), so drafts saved before they existed still load.
+    """
 
     model_config = ConfigDict(extra="forbid")
     kind: Literal["new", "update", "cancel", "deadline", "unknown"]
@@ -22,6 +38,9 @@ class Extraction(BaseModel):
     notes: str | None
     match_title: str | None
     ambiguity: str | None
+    # "separate": several events ("and"); "alternatives": one event, choose a time ("or").
+    relation: Literal["one", "separate", "alternatives"] | None = None
+    other_times: list[OtherTime] | None = None
 
 
 class Status(StrEnum):

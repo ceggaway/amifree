@@ -43,21 +43,48 @@ _WEEKDAY_ABBR.update({"tues": 1, "weds": 2, "thur": 3, "thurs": 3})
 
 
 _PLURAL_DAY = re.compile(r"\b(mon|tues|wednes|thurs|fri|satur|sun)days\b", re.IGNORECASE)
-_EVERY_DAY = re.compile(
-    r"\b(?:every|each)\s+(mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)[a-z]*\b", re.IGNORECASE
-)
 _STEM = {"mon": 0, "tue": 1, "tues": 1, "wed": 2, "wednes": 2, "weds": 2, "thu": 3, "thur": 3}
 _STEM |= {"thurs": 3, "fri": 4, "sat": 5, "satur": 5, "sun": 6}
 
 
-def weekly_weekday(text: str) -> int | None:
-    """The weekday of a weekly event ("Saturdays", "every Tue"), or None.
+# A whole day name or a usual short form, never part of a word ("every month" is not Monday).
+_DAY_WORD = (
+    r"(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:s|nesday)?|thu(?:r(?:s(?:day)?)?)?"
+    r"|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b"
+)
+# "every Tue/Thu", "every Tuesday and Thursday", "each Mon, Wed & Fri".
+_EVERY_LIST = re.compile(
+    rf"\b(?:every|each)\s+({_DAY_WORD}(?:\s*(?:/|,|&|\+|and)\s*{_DAY_WORD})*)", re.IGNORECASE
+)
 
-    Only when exactly one weekday repeats: "Tuesdays and Thursdays" is left to ask about.
-    """
+
+def weekly_weekdays(text: str) -> list[int]:
+    """The weekdays of a weekly event ("Saturdays", "every Tue/Thu"), Monday first."""
     days = {_STEM[m.lower()] for m in _PLURAL_DAY.findall(text)}
-    days |= {_STEM[m.lower()] for m in _EVERY_DAY.findall(text)}
-    return days.pop() if len(days) == 1 else None
+    for listed in _EVERY_LIST.findall(text):
+        for day in re.findall(rf"\b{_DAY_WORD}", listed, re.IGNORECASE):
+            days.add(_WEEKDAY_ABBR[day.lower()[:3]])
+    return sorted(days)
+
+
+def next_weekday_name(weekdays: list[int], reference: datetime) -> str:
+    """The day name of whichever weekday comes first: "Thursday" for Tue/Thu on a Wednesday."""
+    names = [WEEKDAYS[d].title() for d in weekdays]
+    return min(names, key=lambda name: resolve_date(name, reference))
+
+
+def weekly_weekday(text: str) -> int | None:
+    """The weekday of a weekly event on one day only ("Saturdays", "every Tue"), or None."""
+    days = weekly_weekdays(text)
+    return days[0] if len(days) == 1 else None
+
+
+_WEEKLY = re.compile(r"\b(?:weekly|every\s+week|each\s+week)\b", re.IGNORECASE)
+
+
+def repeats_weekly(text: str) -> bool:
+    """Any weekly wording ("Tuesdays and Thursdays", "every Tue", "weekly")."""
+    return bool(_PLURAL_DAY.search(text) or _EVERY_LIST.search(text) or _WEEKLY.search(text))
 
 
 def resolve_date(raw: str, reference: datetime) -> date:
@@ -333,6 +360,17 @@ def single_event_guard(text: str) -> None:
         )
 
 
+def _bare_meridiem_end(extraction: Extraction) -> Extraction:
+    """The model split "4pm" into start "4" and end "pm": the pm belongs to the start."""
+    end = (extraction.end_time_text or "").strip().casefold().replace(".", "")
+    start = extraction.start_time_text
+    if end not in ("am", "pm") or not start:
+        return extraction
+    if not re.search(r"[ap]\.?m", start, re.I):
+        start = start.strip() + end
+    return extraction.model_copy(update={"start_time_text": start, "end_time_text": None})
+
+
 def as_written(raw: str | None, source: str) -> str | None:
     if not raw or _contains(source.casefold(), raw.strip().casefold()):
         return raw
@@ -414,6 +452,31 @@ def _with_day_part(raw: str | None, source: str) -> str | None:
 _AM_OR_PM = re.compile(r"\bam\b.*\bpm\b|\bpm\b.*\bam\b|am/pm|a\.m\.", re.IGNORECASE)
 
 
+_RELATIVE_WORD = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in sorted(RELATIVE, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _written_relative(extraction: Extraction, source: str, reference: datetime) -> Extraction:
+    """The model converted "tmr" to "13 Oct": use the word the sender wrote, if it is the same day.
+
+    Only when the converted date isn't in the message and every relative word in it ("tmr",
+    "tonight") means that one day, so a real date is never swapped for a guess.
+    """
+    value = extraction.date_text
+    if not value or in_source(value, source):
+        return extraction
+    written = _RELATIVE_WORD.findall(source)
+    try:
+        day = resolve_date(value, reference)
+        if not written or {resolve_date(w, reference) for w in written} != {day}:
+            return extraction
+    except Clarification:
+        return extraction
+    return extraction.model_copy(update={"date_text": written[0]})
+
+
 def validate_extraction(
     extraction: Extraction,
     source: str,
@@ -437,6 +500,8 @@ def validate_extraction(
             "for example: Call Friday 8-9pm."
         )
     extraction = _spoken_noon(extraction, source)
+    extraction = _bare_meridiem_end(extraction)
+    extraction = _written_relative(extraction, source, reference)
     for field in ("date_text", "start_time_text", "end_time_text", "end_date_text"):
         value = getattr(extraction, field)
         if value and not in_source(value, source):

@@ -123,8 +123,41 @@ async def test_poll_nudges_members_who_have_not_filled_in(service_factory, refer
     assert len(outbox.sent) == 1 and outbox.sent[0][0] == 3
     assert (
         "choosing a time for sync" in outbox.sent[0][1]
-        and "fill in your availabilities" in outbox.sent[0][1]
+        and "Fill in your availabilities" in outbox.sent[0][1]
     )
     # Once results are out, nobody else has anything to do.
     repo.polls[poll.id].status = "OPEN"
     assert await non_responders(repo, repo.polls[poll.id]) == []
+
+
+async def test_several_open_polls_arrive_as_one_dm(service_factory, reference):
+    service, repo = service_factory()
+    service.settings.bot_username = "amifree_bot"
+    service.settings.mini_app_short_name = "app"
+    bot, transport = make_bot(service)
+    outbox = Outbox()
+    service.notifier = Notifier(service, outbox)
+    async with bot:
+        await seed_poll_card(bot, "sync tomorrow", 30, 1)
+        await seed_poll_card(bot, "lunch friday", 31, 1)
+        await seed_poll_card(bot, "movie night", 32, 1)
+        # Member 3 is seen in the group (taps a card) but fills nothing in.
+        first = next(iter(repo.polls.values()))
+        await bot.process_update(
+            Update.de_json(group_tap(f"p:nudge:{first.id}", 3, update_id=9400), bot.bot)
+        )
+    member = next(u for u in repo.users.values() if u.telegram_user_id == 3)
+    polls = list(repo.polls.values())
+    for poll in polls:
+        await repo.enqueue_notification(
+            member.id, "NUDGE", f"poll:{poll.id}:mid", {"type": "poll", "id": poll.id}
+        )
+    # One poll was filled in while the nudge was queued: it is left out of the DM.
+    await repo.poll_join(polls[2].id, member.id)
+    counts = await service.notifier.deliver()
+    assert counts == {"sent": 2, "failed": 0, "skipped": 1}
+    assert len(outbox.sent) == 1 and outbox.sent[0][0] == 3
+    _, reply = outbox.replies[0]
+    assert "2 polls are waiting" in reply.text and "movie" not in reply.text
+    urls = [row[0].url for row in reply.keyboard.inline_keyboard]
+    assert urls == [f"https://t.me/amifree_bot/app?startapp=poll_{p.id}" for p in polls[:2]]

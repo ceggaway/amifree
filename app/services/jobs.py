@@ -6,10 +6,11 @@ stops a repeated job run, or a retried edit, from messaging anyone twice.
 
 import asyncio
 import logging
+from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta
 
-from telegram import InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.keyboards import (
     attendance_keyboard,
@@ -18,7 +19,7 @@ from app.bot.keyboards import (
     reminder_keyboard,
 )
 from app.bot.messages import Reply, details, event_card, time_range, verdict_line
-from app.schemas.event import SG, Status
+from app.schemas.event import SG, Poll, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
 from app.services.deadlines import enqueue_deadline_reminders, reminder_text
@@ -131,47 +132,111 @@ class Notifier:
                 + "\n\n/reminders off stops nudges.",
                 nudge_keyboard(event),
             )
-        if row["kind"] == "NUDGE":
-            poll = await self.repo.get_poll(payload["id"])
-            # Once results are out, only the organiser has anything left to do.
-            if not poll or poll.status != "COLLECTING":
-                return None
-            if user.id in await self.repo.poll_participants(poll.id):
-                return None
-            ask = "fill in your availabilities so your free time is counted"
-            return Reply(
-                f"🗳 Your group is choosing a time for {poll.title}. Open the poll and {ask}."
-                + card_link(poll)
-                + "\n\n/reminders off stops nudges."
-            )
         return None
+
+    async def live_poll(self, user, row: dict) -> Poll | None:
+        """The poll a nudge is about, if this person still has something to fill in."""
+        if not user.reminders_enabled:
+            return None
+        poll = await self.repo.get_poll(row["payload"]["id"])
+        # Once results are out, only the organiser has anything left to do.
+        if not poll or poll.status != "COLLECTING":
+            return None
+        if user.id in await self.repo.poll_participants(poll.id):
+            return None
+        return poll
+
+    def poll_nudge(self, polls: list[Poll]) -> Reply:
+        """One DM for every poll this person still has to fill in, with a button for each."""
+        links = [(poll, self.scheduling.settings.heatmap_link(poll.id)) for poll in polls]
+        if len(polls) == 1:
+            poll, url = links[0]
+            text = (
+                f"🗳 Your group is choosing a time for {poll.title}."
+                " Fill in your availabilities so your free time is counted."
+            )
+            if not url:
+                text += card_link(poll)
+            buttons = (
+                [[InlineKeyboardButton("🗓 Fill in my availabilities", url=url)]] if url else []
+            )
+        else:
+            lines = "\n".join(
+                f"• {poll.title[:80]}" + ("" if url else card_link(poll).replace("\n", " — "))
+                for poll, url in links
+            )
+            text = (
+                f"🗳 {len(polls)} polls are waiting for your free times:\n{lines}\n\n"
+                "Fill in your availabilities so your free time is counted."
+            )
+            buttons = [
+                [InlineKeyboardButton(f"🗓 {poll.title[:40]}", url=url)]
+                for poll, url in links
+                if url
+            ]
+        return Reply(
+            text + "\n\n/reminders off stops nudges.",
+            InlineKeyboardMarkup(buttons) if buttons else None,
+        )
 
     async def deliver(self, limit: int = 50) -> dict[str, int]:
         counts = {"sent": 0, "failed": 0, "skipped": 0}
+        # Poll nudges for the same person go out as one DM, so several open polls
+        # becoming due in the same run don't arrive as a burst of separate messages.
+        poll_nudges: dict[str, list[dict]] = defaultdict(list)
         for row in await self.repo.claim_notifications(limit):
-            user = await self.repo.get_user(row["user_id"])
-            try:
-                reply = await self.render(user, row) if user and not user.dm_blocked else None
-                if reply is None:
-                    await self.repo.finish_notification(row["id"], False, True)
-                    counts["skipped"] += 1
-                    continue
-                await self.send(user.telegram_user_id, reply)
-            except Undeliverable:
-                await self.repo.set_user_flags(user.id, dm_blocked=True)
-                await self.repo.finish_notification(row["id"], False, True)
-                counts["skipped"] += 1
-            except Exception as exc:
-                # Left pending with a backoff; the next run retries it.
-                log.warning(
-                    "notification_failed kind=%s error_type=%s", row["kind"], type(exc).__name__
-                )
-                await self.repo.finish_notification(row["id"], False, False)
-                counts["failed"] += 1
+            if row["kind"] == "NUDGE" and row["payload"].get("type") == "poll":
+                poll_nudges[row["user_id"]].append(row)
             else:
-                await self.repo.finish_notification(row["id"], True, False)
-                counts["sent"] += 1
+                await self.send_rows([row], counts)
+        for rows in poll_nudges.values():
+            await self.send_rows(rows, counts)
         return counts
+
+    async def send_rows(self, rows: list[dict], counts: dict[str, int]):
+        """Send one DM covering these rows (all for the same person), then mark each row."""
+        user = await self.repo.get_user(rows[0]["user_id"])
+        live = []
+        try:
+            if not user or user.dm_blocked:
+                reply = None
+            elif rows[0]["kind"] == "NUDGE" and rows[0]["payload"].get("type") == "poll":
+                polls: dict[str, Poll] = {}
+                for row in rows:
+                    poll = await self.live_poll(user, row)
+                    if poll:
+                        polls.setdefault(poll.id, poll)
+                        live.append(row)
+                    else:
+                        await self.repo.finish_notification(row["id"], False, True)
+                        counts["skipped"] += 1
+                rows = live
+                reply = self.poll_nudge(list(polls.values())) if polls else None
+            else:
+                reply = await self.render(user, rows[0])
+            if reply is None:
+                for row in rows:
+                    await self.repo.finish_notification(row["id"], False, True)
+                counts["skipped"] += len(rows)
+                return
+            await self.send(user.telegram_user_id, reply)
+        except Undeliverable:
+            await self.repo.set_user_flags(user.id, dm_blocked=True)
+            for row in rows:
+                await self.repo.finish_notification(row["id"], False, True)
+            counts["skipped"] += len(rows)
+        except Exception as exc:
+            # Left pending with a backoff; the next run retries it.
+            log.warning(
+                "notification_failed kind=%s error_type=%s", rows[0]["kind"], type(exc).__name__
+            )
+            for row in rows:
+                await self.repo.finish_notification(row["id"], False, False)
+            counts["failed"] += len(rows)
+        else:
+            for row in rows:
+                await self.repo.finish_notification(row["id"], True, False)
+            counts["sent"] += len(rows)
 
     async def run(self) -> dict[str, int]:
         """One idempotent tick: safe to call from a scheduler as often as wanted."""

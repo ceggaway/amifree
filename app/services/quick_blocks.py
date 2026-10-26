@@ -14,6 +14,7 @@ from app.services.date_resolution import (
     Clarification,
     resolve_date,
     validate_extraction,
+    weekly_weekdays,
 )
 
 HORIZON_DAYS = 90
@@ -44,6 +45,12 @@ def parse_block(text: str, reference: datetime, *, explicit: bool = False) -> Bl
     text = " ".join(text.split()) if explicit else text.strip()
     weekly = EVERY.search(text)
     weekly_day = weekday_token(weekly[1]) if weekly else None
+    if weekly_day and len(weekly_weekdays(text)) > 1:
+        # "every Tue/Thu": a block is one weekday, so never keep Tuesday and drop Thursday.
+        # A forwarded message goes to the weekly offer, which saves one block per day.
+        if not explicit:
+            return None
+        raise Clarification("One day per block, please: send it again for each day. " + USAGE)
     if not explicit:
         claimed = re.match(r"busy\b", text, re.IGNORECASE) or weekly_day
         if not claimed or "\n" in text or len(text) > 120:

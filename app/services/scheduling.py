@@ -35,6 +35,7 @@ from app.bot.keyboards import (
     reminder_keyboard,
     remove_block_keyboard,
     settings_keyboard,
+    times_keyboard,
     undo_keyboard,
     with_plans_navigation,
     with_undo,
@@ -49,7 +50,9 @@ from app.bot.messages import (
     personal_availability,
     personal_calendar_note,
     personal_details,
+    time_label,
     time_range,
+    times_text,
     verdict_line,
 )
 from app.config import Settings
@@ -73,9 +76,10 @@ from app.services.date_resolution import (
     asked_field,
     fill_answer,
     infer_meridiem,
+    next_weekday_name,
     single_event_guard,
     validate_extraction,
-    weekly_weekday,
+    weekly_weekdays,
 )
 from app.services.deadlines import EXAMPLE as DEADLINE_EXAMPLE
 from app.services.deadlines import card_text, due_line, validate_deadline
@@ -90,6 +94,13 @@ from app.services.google_sync import GoogleSyncService
 from app.services.group_events import GroupEventService
 from app.services.group_hub import GroupHub
 from app.services.image_reader import PictureError
+from app.services.multi_time import (
+    fold_answer,
+    is_multi,
+    item_message_id,
+    read_times,
+    settle_times,
+)
 from app.services.personal_calendar import (
     MAX_CALENDARS,
     CalendarLinkError,
@@ -668,10 +679,21 @@ class SchedulingService:
         ]
 
     async def offer_recurring(
-        self, user: User, message_id: int, extracted, source: str, reference: datetime, weekday: int
+        self,
+        user: User,
+        message_id: int,
+        extracted,
+        source: str,
+        reference: datetime,
+        weekdays: list[int],
     ) -> list[Reply] | None:
-        """A weekly event ("Saturdays, 9:30-11:30am"): ask whether it's one date or every week."""
-        day_name = WEEKDAYS[weekday].title()
+        """A weekly event ("Saturdays, 9:30-11:30am", "every Tue/Thu 7-9pm"): ask whether
+        it's one date or every week."""
+        if len(weekdays) == 1:
+            day_name = WEEKDAYS[weekdays[0]].title()
+            days = day_name + "s"
+        else:
+            day_name = days = " & ".join(WEEKDAYS[d][:3].title() for d in weekdays)
         try:
             draft = validate_extraction(
                 extracted,
@@ -688,11 +710,11 @@ class SchedulingService:
                 "stage": "recurring",
                 "nonce": nonce,
                 "message_id": message_id,
-                "weekday": weekday,
+                "weekdays": weekdays,
                 "draft": draft.model_dump(mode="json"),
             },
         )
-        when = f"{day_name}s, {time_range(draft.start_at, draft.end_at)}"
+        when = f"{days}, {time_range(draft.start_at, draft.end_at)}"
         return [
             Reply(
                 f"🔁 {draft.title}\nThis happens every week: {when}.\n\nWhat should I add?",
@@ -710,37 +732,148 @@ class SchedulingService:
             event = await self.repo.create_preview(user.id, pending["message_id"], draft)
             card = event_card(event, await self.availability(user, event, event.id))
             return [Reply(card.text, card.keyboard, edit=True, parse_mode=card.parse_mode)]
-        rule = BlockRule(
-            title=draft.title,
-            kind="WEEKLY",
-            weekday=pending["weekday"],
-            start_time=draft.start_at.timetz().replace(tzinfo=None),
-            end_time=draft.end_at.timetz().replace(tzinfo=None),
-            start_date=draft.start_at.date(),
-            until_date=draft.start_at.date() + timedelta(days=HORIZON_DAYS),
-        )
-        replies = await self.preview_block(user, rule, typed=False)
+        # One weekly block per day; an offer saved before several days existed has "weekday".
+        first = draft.start_at.date()
+        rules = [
+            BlockRule(
+                title=draft.title,
+                kind="WEEKLY",
+                weekday=weekday,
+                start_time=draft.start_at.timetz().replace(tzinfo=None),
+                end_time=draft.end_at.timetz().replace(tzinfo=None),
+                start_date=first + timedelta(days=(weekday - first.weekday()) % 7),
+                until_date=first + timedelta(days=HORIZON_DAYS),
+            )
+            for weekday in pending.get("weekdays") or [pending["weekday"]]
+        ]
+        replies = await self.preview_block(user, rules, typed=False)
         return [Reply(r.text, r.keyboard, edit=True) for r in replies]
 
-    async def preview_block(self, user: User, rule: BlockRule, typed: bool = True) -> list[Reply]:
-        if len(await self.repo.list_blocks(user.id)) >= MAX_RULES:
+    # ---- two or more times in one message ----
+
+    async def offer_times(
+        self, user: User, message_id: int, extracted: Extraction, source: str, reference: datetime
+    ) -> list[Reply] | None:
+        """ "Training Tue 7-9pm and Thu 6-8pm", "Dinner Fri 7pm or Sat 6pm": one picker.
+
+        None when only one time is left (the model repeated it): the usual card handles it.
+        """
+        times = read_times(
+            extracted, source, reference, self.settings.default_event_duration_minutes
+        )
+        if not times.drafts:
+            return [
+                Reply(
+                    "I couldn't read the times in that message. Send me one event at a time, "
+                    "for example: Bake sale Wed 11am-2pm."
+                )
+            ]
+        if len(times.drafts) == 1 and not times.unread:
+            return None
+        events = [
+            await self.repo.create_preview(user.id, item_message_id(message_id, n), draft)
+            for n, draft in enumerate(times.drafts)
+        ]
+        state = {
+            "stage": "times",
+            "nonce": secrets.token_hex(8),
+            "relation": extracted.relation,
+            "events": [event.id for event in events],
+            "added": [],
+            "unread": times.unread,
+        }
+        await self.repo.set_pending(user.id, state)
+        availabilities = [await self.availability(user, e, e.id) for e in events]
+        for event, availability in zip(events, availabilities, strict=True):
+            await self.safe_action(
+                user.id, "verdict", event.id, {"verdict": availability.verdict, "times": True}
+            )
+        return [self.times_reply(user, state, events, availabilities)]
+
+    def times_reply(
+        self, user: User, state: dict, events: list[Event], availabilities, edit: bool = False
+    ) -> Reply:
+        relation, added = state["relation"], set(state["added"])
+        done = relation != "alternatives" and len(added) == len(events)
+        keyboard = (
+            None
+            if done
+            else times_keyboard(state["nonce"], relation, [time_label(e) for e in events], added)
+        )
+        text = times_text(relation, events, availabilities, added, state["unread"], synced(user))
+        return Reply(text, keyboard, edit=edit, parse_mode="HTML")
+
+    async def choose_time(self, user: User, nonce: str, choice: str) -> list[Reply]:
+        pending = user.pending
+        if not pending or pending.get("stage") != "times" or pending.get("nonce") != nonce:
+            return [Reply("That choice expired. Forward the message again.")]
+        events = [await self.repo.get_event(user.id, event_id) for event_id in pending["events"]]
+        if any(event is None for event in events):
+            await self.repo.set_pending(user.id, None)
+            return [Reply("Those events changed. Use /plans to see your plans.")]
+        relation, added = pending["relation"], set(pending["added"])
+        if choice == "none":
+            await self.repo.set_pending(user.id, None)
+            if relation == "alternatives":
+                return [
+                    Reply(
+                        "Okay, nothing added. Forward it again once the time is fixed.", edit=True
+                    )
+                ]
+            if not added:
+                return [Reply("Okay, nothing added.", edit=True)]
+            availabilities = [await self.availability(user, e, e.id) for e in events]
+            reply = self.times_reply(user, pending, events, availabilities, edit=True)
+            return [replace(reply, keyboard=None), *await self.calendar_prompt(user)]
+        valid = choice.isascii() and choice.isdigit() and int(choice) < len(events)
+        if not valid and not (choice == "all" and relation != "alternatives"):
+            return [Reply("That button isn't valid. Forward the message again.")]
+        if relation == "alternatives":
+            # The chosen time becomes the usual card: add it, edit it or skip it from there.
+            await self.repo.set_pending(user.id, None)
+            event = events[int(choice)]
+            card = event_card(event, await self.availability(user, event, event.id))
+            return [Reply(card.text, card.keyboard, edit=True, parse_mode=card.parse_mode)]
+        for n in range(len(events)) if choice == "all" else [int(choice)]:
+            if n in added:
+                continue
+            # The clash, if any, is on the picker line right above the button.
+            result = await self.repo.rsvp(user.id, events[n], Status.GOING)
+            if result:
+                events[n] = result
+                added.add(n)
+        pending["added"] = sorted(added)
+        done = len(added) == len(events)
+        await self.repo.set_pending(user.id, None if done else pending)
+        availabilities = [await self.availability(user, e, e.id) for e in events]
+        reply = self.times_reply(user, pending, events, availabilities, edit=True)
+        return [reply, *await self.calendar_prompt(user)] if done else [reply]
+
+    async def preview_block(
+        self, user: User, rule: BlockRule | list[BlockRule], typed: bool = True
+    ) -> list[Reply]:
+        """One block, or one per day for "every Tue & Thu", saved together with one tap."""
+        rules = rule if isinstance(rule, list) else [rule]
+        if len(await self.repo.list_blocks(user.id)) + len(rules) > MAX_RULES:
             return [Reply("You've reached the busy block limit. Remove one with /blocks first.")]
         nonce = secrets.token_hex(8)
         await self.repo.set_pending(
-            user.id, {"stage": "block", "rule": rule.model_dump(mode="json"), "nonce": nonce}
+            user.id,
+            {"stage": "block", "rules": [r.model_dump(mode="json") for r in rules], "nonce": nonce},
         )
         note = (
             "\nAdd 'until <date>' to change when it stops repeating."
-            if rule.kind == "WEEKLY" and typed
+            if rules[0].kind == "WEEKLY" and typed
             else ""
         )
+        many = len(rules) > 1
         return [
             Reply(
-                "Block this time?\n\n"
-                + describe(rule)
+                ("Block these times?\n\n" if many else "Block this time?\n\n")
+                + "\n\n".join(describe(r) for r in rules)
                 + note
-                + await self.block_clashes(user, rule),
-                confirm_keyboard(nonce, "Save block"),
+                + await self.block_clashes(user, rules),
+                confirm_keyboard(nonce, "Save blocks" if many else "Save block"),
             )
         ]
 
@@ -776,15 +909,17 @@ class SchedulingService:
             return [Reply(str(exc) + "\n/cancel to stop.")]
         return await self.preview_block(user, rule)
 
-    async def block_clashes(self, user: User, rule: BlockRule) -> str:
-        """Going and Saved plans this block overlaps, so the clash shows now, not later."""
+    async def block_clashes(self, user: User, rule: BlockRule | list[BlockRule]) -> str:
+        """Going and Saved plans these blocks overlap, so the clash shows now, not later."""
         now = self.clock()
-        if rule.kind == "ONCE":
-            occurrences = [(rule.start_at, rule.end_at)]
-        else:
-            horizon = datetime.combine(rule.until_date, day_time(23, 59), SG) + timedelta(days=1)
-            occurrences = [(b.start_at, b.end_at) for b in expand_blocks([rule], now, horizon)]
-        occurrences = [(a, b) for a, b in occurrences if b > now]
+        occurrences = []
+        for r in rule if isinstance(rule, list) else [rule]:
+            if r.kind == "ONCE":
+                occurrences.append((r.start_at, r.end_at))
+            else:
+                horizon = datetime.combine(r.until_date, day_time(23, 59), SG) + timedelta(days=1)
+                occurrences += [(b.start_at, b.end_at) for b in expand_blocks([r], now, horizon)]
+        occurrences = sorted((a, b) for a, b in occurrences if b > now)
         if not occurrences:
             return ""
         plans = await self.repo.events_between(
@@ -1006,6 +1141,10 @@ class SchedulingService:
                 return await self.google_sync.verify(user, pending, text)
             # Anything else is an ordinary message; the code stays valid until it expires.
             pending = None
+        if pending and pending["stage"] == "times":
+            # A new message closes the "I found 2 events" picker; its buttons then expire.
+            await self.repo.set_pending(user.id, None)
+            user.pending = pending = None
         if quick_reminders.is_reminder(text):
             return await self.add_reminder(user, text, reference)
         if pending and pending["stage"] == "free":
@@ -1088,6 +1227,8 @@ class SchedulingService:
             )
         if extracted is None:
             extracted = await self.extractor.extract(text, reference, previous)
+        if pending:
+            extracted = fold_answer(extracted)
         if not (pending and pending.get("event_id")):  # edits of saved events keep their kind
             extracted = settle_kind(extracted, clarifying=bool(pending), text=source)
         if pending and not pending.get("event_id"):
@@ -1096,9 +1237,13 @@ class SchedulingService:
             if kind == "deadline" and not pending.get("deadline") and previous:
                 kind = "new"
             extracted = extracted.model_copy(update={"kind": kind})
+        if not pending:
+            extracted = settle_times(extracted, text)
+        multi = not pending and is_multi(extracted, text)
         if pending:
             extracted = settle_ambiguity(extracted, text)
-        elif extracted.kind == "new":
+        elif extracted.kind == "new" and not multi:
+            # Two time ranges the model didn't list as two times: still never one event.
             try:
                 single_event_guard(text)
             except Clarification as exc:
@@ -1110,6 +1255,13 @@ class SchedulingService:
                 )
             except Exception as exc:
                 log.warning("extraction_audit_failed error_type=%s", type(exc).__name__)
+        if multi:
+            offer = await self.offer_times(user, message_id, extracted, source, reference)
+            if offer:
+                return offer
+        # From here on it is one draft: the first time, with any field it left empty taken
+        # from the model's other_times ("Training every Tue/Thu 7-9pm" listed there).
+        extracted = fold_answer(extracted, answer=False)
         state = {
             "stage": "clarify",
             "source": source,
@@ -1166,11 +1318,12 @@ class SchedulingService:
                     "try sending just the relevant line with the event, date and start time."
                 )
             ]
-        weekly = None if pending else weekly_weekday(text)
-        if weekly is not None and extracted.kind == "new":
+        weekly = [] if pending else weekly_weekdays(text)
+        if weekly and extracted.kind == "new":
             # "Saturdays" isn't a date: use the coming Saturday, so any follow-up question is
-            # about what's really missing (usually the end time), not "what date?".
-            day_name = WEEKDAYS[weekly].title()
+            # about what's really missing (usually the end time), not "what date?". For
+            # "Tuesdays and Thursdays", the sooner of the two.
+            day_name = next_weekday_name(weekly, reference)
             extracted = extracted.model_copy(update={"date_text": day_name, "ambiguity": None})
             source = f"{source}\n{day_name}"
             state.update(source=source, extraction=extracted.model_dump(mode="json"))
@@ -2115,6 +2268,8 @@ class SchedulingService:
             return await self.choose_field(user, parts[1], parts[2])
         if data.startswith("rec:") and len(parts) == 3 and parts[1] in ("once", "weekly"):
             return await self.choose_recurring(user, parts[1], parts[2])
+        if action == "mt" and len(parts) == 3:
+            return await self.choose_time(user, parts[1], parts[2])
         if (
             action == "set"
             and len(parts) == 3
@@ -2247,15 +2402,19 @@ class SchedulingService:
                 text = "Your AmIFree data has been deleted. Use /start to set up again."
                 return [Reply(text + ("\n\n" + guide if guide else ""), links, parse_mode="HTML")]
             if pending["stage"] == "block":
-                rule = BlockRule.model_validate(pending["rule"])
-                await self.repo.create_block(user.id, rule)
+                # "rule" is a preview saved before several blocks could be saved at once.
+                rules = [
+                    BlockRule.model_validate(r) for r in pending.get("rules") or [pending["rule"]]
+                ]
+                for rule in rules:
+                    await self.repo.create_block(user.id, rule)
                 await self.repo.set_pending(user.id, None)
                 await self.safe_action(user.id, "block")
-                clashes = await self.block_clashes(user, rule)
+                clashes = await self.block_clashes(user, rules)
                 return [
                     Reply(
                         "Blocked: "
-                        + describe(rule)
+                        + "\n\n".join(describe(rule) for rule in rules)
                         + clashes
                         + ("\nOpen /plans to change one of them." if clashes else "")
                         + "\n/blocks lists your blocks.",

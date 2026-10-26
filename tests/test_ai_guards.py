@@ -236,3 +236,43 @@ def test_a_reply_that_is_a_date_becomes_the_date():
     assert (fixed.date_text, fixed.ambiguity) == ("Saturday", None)
     # A reply that isn't a date doesn't touch the date.
     assert settle_ambiguity(kept, "7pm").date_text == "Friday or Saturday"
+
+
+# ---- 26 Oct eval (several times in one message) ----
+
+
+def test_an_explicit_change_is_an_update_even_if_the_model_found_nothing():
+    nothing = extraction(
+        kind="unknown",
+        title=None,
+        date_text=None,
+        start_time_text=None,
+        end_time_text=None,
+        location=None,
+    )
+    text = "Change of venue for the project meeting: now at COM2 SR4 instead"
+    assert settle_kind(nothing, clarifying=False, text=text).kind == "update"
+    assert settle_kind(nothing, clarifying=False, text="lol ok see u later").kind == "unknown"
+
+
+def test_4pm_split_into_4_and_pm_is_4pm():
+    split = extraction(date_text="30 October", start_time_text="4", end_time_text="pm")
+    draft = validate_extraction(split, "Rehearsal 30 October 4pm.", MONDAY, default_minutes=120)
+    assert f"{draft.start_at:%H:%M}-{draft.end_at:%H:%M}" == "16:00-18:00"
+    assert draft.assumed_duration
+
+
+def test_tmr_converted_to_a_date_is_the_written_tmr():
+    text = "eh guys dinner tmr can? 7 to 9pm at clementi mall, the ramen place"
+    converted = extraction(date_text="13 Oct", start_time_text="7", end_time_text="9pm")
+    draft = validate_extraction(converted, text, MONDAY)
+    assert f"{draft.start_at:%d %b %H:%M}" == "13 Oct 19:00"
+
+
+def test_a_converted_date_that_is_not_the_written_day_is_still_refused():
+    # "tmr" is 13 Oct; a model that says 14 Oct invented it.
+    with pytest.raises(Clarification, match="verify"):
+        validate_extraction(extraction(date_text="14 Oct"), "dinner tmr 7-9pm", MONDAY)
+    # Two relative days written: never guess which one was meant.
+    with pytest.raises(Clarification, match="verify"):
+        validate_extraction(extraction(date_text="13 Oct"), "lunch today, dinner tmr 7-9pm", MONDAY)

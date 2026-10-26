@@ -331,6 +331,35 @@ def recurring_keyboard(nonce: str, next_date: str, day_name: str) -> InlineKeybo
     )
 
 
+def times_keyboard(
+    nonce: str, relation: str, labels: list[str], added: set[int] = frozenset()
+) -> InlineKeyboardMarkup:
+    """Buttons under the picker for a message with two or more times."""
+    if relation == "alternatives":
+        rows = [
+            [InlineKeyboardButton(label, callback_data=f"mt:{nonce}:{n}")]
+            for n, label in enumerate(labels)
+        ]
+        rows.append([InlineKeyboardButton("Not decided yet", callback_data=f"mt:{nonce}:none")])
+        return InlineKeyboardMarkup(rows)
+    left = [n for n in range(len(labels)) if n not in added]
+    rows = []
+    if len(left) > 1:
+        everything = "Add both" if len(labels) == 2 else "Add all"
+        rows.append([InlineKeyboardButton(everything, callback_data=f"mt:{nonce}:all")])
+    # "Add 1 · Tue 27 Oct": the number matches the list above, the date tells them apart.
+    buttons = [
+        InlineKeyboardButton(
+            f"Add {n + 1} · {labels[n].split(',')[0]}", callback_data=f"mt:{nonce}:{n}"
+        )
+        for n in left
+    ]
+    rows.extend(buttons[i : i + 2] for i in range(0, len(buttons), 2))
+    done = "Done" if added else "Neither" if len(labels) == 2 else "None of them"
+    rows.append([InlineKeyboardButton(done, callback_data=f"mt:{nonce}:none")])
+    return InlineKeyboardMarkup(rows)
+
+
 def free_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

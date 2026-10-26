@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from app.schemas.event import OtherTime
 from evals.extraction.run import (
     Prediction,
     load_cases,
@@ -17,7 +18,7 @@ from evals.extraction.run import (
 from tests.conftest import extraction
 
 CASES = load_cases()
-OUTCOMES = {"event", "clarify", "update", "cancel", "not_event"}
+OUTCOMES = {"event", "multi", "recurring", "clarify", "update", "cancel", "not_event"}
 
 
 def test_dataset_is_well_formed():
@@ -29,6 +30,14 @@ def test_dataset_is_well_formed():
             assert local(exp["end"]) > local(exp["start"]), case["id"]
             assert local(exp["start"]) >= reference_of(case).replace(hour=0, minute=0), case["id"]
             assert exp["title_any"], case["id"]
+        if exp["outcome"] == "recurring":
+            assert exp["weekdays"] and exp["title_any"], case["id"]
+            assert local(exp["end"]) > local(exp["start"]), case["id"]
+        if exp["outcome"] == "multi":
+            assert exp["relation"] in ("separate", "alternatives"), case["id"]
+            assert len(exp["times"]) >= 2 and exp["title_any"], case["id"]
+            for start, end in exp["times"]:
+                assert local(end) > local(start), case["id"]
 
 
 def by_id(case_id):
@@ -54,7 +63,56 @@ def test_wrong_time_is_critical():
 
 
 def test_saving_an_unclear_message_is_critical():
-    assert score(by_id("clarify-04"), Prediction(outcome="event"))["verdict"] == "false_save"
+    assert score(by_id("clarify-06"), Prediction(outcome="event"))["verdict"] == "false_save"
+
+
+def two_trainings():
+    other = OtherTime(
+        title=None,
+        date_text="Thu",
+        start_time_text="6",
+        end_time_text="8pm",
+        end_date_text=None,
+        location=None,
+    )
+    return extraction(
+        title="Training",
+        date_text="Tue",
+        start_time_text="7",
+        end_time_text="9pm",
+        location="UTown",
+        relation="separate",
+        other_times=[other],
+    )
+
+
+def test_a_picker_with_every_time_scores_correct():
+    case = by_id("times-01")
+    pred = predict(two_trainings(), case["text"], reference_of(case))
+    assert (pred.outcome, pred.relation) == ("multi", "separate")
+    assert score(case, pred)["verdict"] == "correct"
+
+
+def test_picker_scoring():
+    case = by_id("times-01")
+    tue = ["2026-10-13T19:00+08:00", "2026-10-13T21:00+08:00"]
+    thu = ["2026-10-15T18:00+08:00", "2026-10-15T20:00+08:00"]
+    wrong = ["2026-10-15T06:00+08:00", "2026-10-15T08:00+08:00"]
+
+    def verdict(**fields):
+        return score(case, Prediction(outcome="multi", **fields))["verdict"]
+
+    assert verdict(relation="separate", times=[tue, wrong]) == "wrong_time"
+    assert verdict(relation="separate", times=[tue]) == "dropped_time"
+    assert verdict(relation="alternatives", times=[tue, thu]) == "wrong_relation"
+    assert score(case, Prediction(outcome="event"))["verdict"] == "dropped_time"
+    assert score(by_id("basic-01"), Prediction(outcome="multi"))["verdict"] == "false_split"
+
+
+def test_a_recurring_message_is_never_split():
+    case = by_id("times-09")  # "Badminton Tuesdays and Thursdays 7-9pm at USC"
+    pred = predict(two_trainings(), case["text"], reference_of(case))
+    assert pred.outcome != "multi"
 
 
 def test_parser_rejection_is_attributed_to_the_parser():
@@ -158,7 +216,59 @@ def test_multi_turn_conversation_reaches_the_event():
     pred = asyncio.run(converse(bot, case))
     assert pred.asks == ["date", "end", None]
     assert score(case, pred)["verdict"] == "correct"
-    assert bot.previous[1]["start_time_text"] == "730pm"  # the draft is carried forward
+    # Like the bot, "this saturday" and "till 10pm" answer its own questions without the model.
+    assert bot.previous == [None] and len(bot.answers) == 2
+
+
+def test_an_answer_the_code_cannot_read_goes_to_the_model():
+    from evals.extraction.run import converse
+
+    case = by_id("multi-04")  # Coffee chat Wed 3pm -> "till 4pm"
+    first = extraction(
+        title="Coffee chat", date_text="Wed", start_time_text="3pm", end_time_text=None
+    )
+    case = {**case, "turns": [case["turns"][0], "ends when the boss says so"]}
+    bot = ScriptedExtractor(first, first)
+    asyncio.run(converse(bot, case))
+    assert bot.previous[1]["start_time_text"] == "3pm"  # the draft is carried forward
+
+
+def test_tuesdays_and_thursdays_get_the_recurring_offer():
+    case = by_id("times-09")  # "Badminton Tuesdays and Thursdays 7-9pm at USC"
+    parsed = extraction(
+        title="Badminton",
+        date_text=None,
+        start_time_text="7",
+        end_time_text="9pm",
+        location="USC",
+        ambiguity="recurring",
+    )
+    pred = predict(parsed, case["text"], reference_of(case))
+    assert (pred.outcome, pred.weekdays) == ("recurring", [1, 3])
+    assert score(case, pred)["verdict"] == "correct"
+    wrong = Prediction(outcome="recurring", start=pred.start, end=pred.end, weekdays=[1])
+    assert score(case, wrong)["verdict"] == "wrong_days"
+
+
+def test_a_quick_block_never_reaches_the_model():
+    from evals.extraction.run import converse
+
+    case = by_id("clarify-07")  # "Yoga every Tuesday 7-8pm at UTown gym"
+    bot = ScriptedExtractor()
+    pred = asyncio.run(converse(bot, case))
+    assert bot.previous == []  # the bot reads it as a weekly block before the model
+    assert (pred.outcome, pred.weekdays) == ("recurring", [1])
+    assert score(case, pred)["verdict"] == "correct"
+
+
+def test_the_timezone_question_counts_as_asking_about_it():
+    case = by_id("clarify-06")  # "Call with mentor Friday 8-9pm UK time"
+    parsed = extraction(
+        title="Call with mentor", date_text="Friday", start_time_text="8", end_time_text="9pm"
+    )
+    pred = predict(parsed, case["text"], reference_of(case))
+    assert pred.clarify_reason == "timezone"
+    assert score(case, pred)["verdict"] == "correct"
 
 
 def test_eval_catches_the_repeating_question_bug():

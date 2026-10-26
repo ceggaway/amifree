@@ -321,6 +321,62 @@ def personal_event_card(event: Event, availability: Availability, synced: bool |
     )
 
 
+def time_label(event: EventDraft) -> str:
+    """A short button label for one time: "Tue 27 Oct, 7pm"."""
+    start = event.start_at.astimezone(SG)
+    return f"{start:%a %-d %b}, {personal_time(start)}"
+
+
+def times_text(
+    relation: str,
+    events: list[Event],
+    availabilities: list[Availability],
+    added: set[int] = frozenset(),
+    unread: list[str] = (),
+    synced: bool | str = False,
+) -> str:
+    """The picker for a message with two or more times (see app.services.multi_time)."""
+    pairs = list(enumerate(zip(events, availabilities, strict=True), 1))
+    found = len(events) + len(unread)
+    if relation == "alternatives":
+        first = events[0]
+        text = (
+            f"🤔 <b>{escape(first.title[:80])}</b> has {found} possible times. "
+            "Which one are you going for?"
+        )
+        if first.location:
+            text += "\n📍 " + escape(first.location[:80])
+        for n, (event, availability) in pairs:
+            text += f"\n\n{n}. 📅 {personal_when(event.start_at, event.end_at)}"
+            if event.location and event.location != first.location:
+                text += "\n📍 " + escape(event.location[:80])
+            text += "\n" + personal_availability(availability)
+        if any(event.assumed_duration for event in events):
+            text += "\n\nEnd time estimated."
+    else:
+        text = f"I found {found} events in that message:"
+        for n, (event, availability) in pairs:
+            text += f"\n\n{n}. " + personal_details(event, compact=True) + "\n"
+            text += (
+                "☑️ Added to your plans." if n - 1 in added else personal_availability(availability)
+            )
+    if unread:
+        text += (
+            "\n\nI couldn't read the date or time of "
+            + ", ".join(escape(title[:60]) for title in unread)
+            + ". Send it on its own to add it."
+        )
+    if relation != "alternatives" and len(added) == len(events):
+        text += "\n\n☑️ <b>All added to your plans.</b>"
+        if synced:
+            text += f"\nSyncing to {synced_line(synced)} (/calendar to change)."
+    elif not added:
+        note = personal_calendar_note(availabilities[0])
+        if note:
+            text += "\n\n<i>" + note + "</i>"
+    return text
+
+
 def event_card(event: Event, availability: Availability, synced: bool | str = False) -> Reply:
     """synced: where the user's plans go by themselves ("your Google Calendar"), if anywhere."""
     if not event.group_event_id:

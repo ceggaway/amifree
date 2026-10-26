@@ -116,3 +116,13 @@ async def test_block_command_list_remove_and_isolation(service_factory, referenc
         end_at=datetime(2026, 10, 10, 16, tzinfo=SG),
     )
     assert (await repo.busy(user.id, draft))[0] == []
+
+
+def test_several_weekdays_are_never_one_block():
+    reference = datetime(2026, 10, 4, 12, tzinfo=SG)
+    # Forwarded: left to the weekly offer, which saves one block per day.
+    assert parse_block("Training every Tue/Thu 7-9pm", reference) is None
+    # /block: asked again rather than keeping Tuesday and dropping Thursday.
+    with pytest.raises(Clarification, match="One day per block"):
+        parse_block("gym every Tue and Thu 6-8pm", reference, explicit=True)
+    assert parse_block("work every Wed 6-10pm", reference).weekday == 2

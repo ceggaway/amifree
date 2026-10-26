@@ -27,6 +27,7 @@ from app.schemas.event import SG, EventDraft, GroupEvent, Status
 from app.services.app_links import group_link
 from app.services.chase import enqueue_nudges
 from app.services.date_resolution import Clarification, validate_extraction
+from app.services.multi_time import is_multi, settle_times
 from app.services.recurrence import (
     Recurrence,
     first_date,
@@ -152,6 +153,14 @@ class GroupEventService:
                 return await self.create_series(
                     user, chat_id, message_id, text, reference, extracted, recurrence
                 )
+            extracted = settle_times(extracted, text)
+            if is_multi(extracted, text):
+                # One card per /event: never quietly keep only the first of several times.
+                if extracted.relation == "alternatives":
+                    hint = "Pick one time first, or run /whosfree to find one that works."
+                else:
+                    hint = "Send one /event per plan, for example: " + EXAMPLE
+                return GroupResult(post=Reply("That message has more than one time. " + hint))
             draft = validate_extraction(
                 extracted,
                 text,

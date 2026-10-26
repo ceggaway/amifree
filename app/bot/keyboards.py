@@ -236,8 +236,13 @@ def agenda_keyboard(
 
 
 def plans_keyboard(
-    items: list[tuple[str, str, str]], page: int, pages: int, app_url: str | None = None
+    items: list[tuple[str, str, str]],
+    page: int,
+    pages: int,
+    app_url: str | None = None,
+    later_page: int | None = None,
 ) -> InlineKeyboardMarkup:
+    """later_page is the first page past the days /plans writes out: Next to it reads Later plans."""
     rows = [
         [InlineKeyboardButton(label, callback_data=f"fp:{page}:{kind}:{item_id}")]
         for label, kind, item_id in items
@@ -246,7 +251,8 @@ def plans_keyboard(
     if page:
         navigation.append(InlineKeyboardButton("← Previous", callback_data=f"plans:{page - 1}"))
     if page + 1 < pages:
-        navigation.append(InlineKeyboardButton("Next →", callback_data=f"plans:{page + 1}"))
+        label = "Later plans →" if page + 1 == later_page else "Next →"
+        navigation.append(InlineKeyboardButton(label, callback_data=f"plans:{page + 1}"))
     if navigation:
         rows.append(navigation)
     return InlineKeyboardMarkup(rows + open_app_row(app_url))
@@ -469,10 +475,26 @@ def menu_keyboard(app_url: str | None = None) -> InlineKeyboardMarkup:
     )
 
 
-def settings_keyboard(reminders_on: bool) -> InlineKeyboardMarkup:
+PLANS_DAYS = (3, 7, 14, 30)
+
+
+def settings_keyboard(reminders_on: bool, plans_days: int = 7) -> InlineKeyboardMarkup:
     label, target = ("Turn off", "off") if reminders_on else ("Turn on", "on")
+    days = [
+        InlineKeyboardButton(
+            f"✓ {n} days" if n == plans_days else f"{n} days", callback_data=f"set:plansdays:{n}"
+        )
+        for n in PLANS_DAYS
+    ]
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(f"🔔 {label} reminders", callback_data=f"set:reminders:{target}")]]
+        [
+            [
+                InlineKeyboardButton(
+                    f"🔔 {label} reminders", callback_data=f"set:reminders:{target}"
+                )
+            ],
+            days,
+        ]
     )
 
 

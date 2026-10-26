@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
 from datetime import time as day_time
+from typing import NamedTuple
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from telegram import InlineKeyboardMarkup
 from app.bot import onboarding
 from app.bot.delivery import telegram_profile
 from app.bot.keyboards import (
+    PLANS_DAYS,
     agenda_keyboard,
     calendar_settings_keyboard,
     change_keyboard,
@@ -50,6 +52,9 @@ from app.bot.messages import (
     personal_availability,
     personal_calendar_note,
     personal_details,
+    plans_day,
+    plans_line,
+    shorten,
     time_label,
     time_range,
     times_text,
@@ -213,6 +218,20 @@ def decided_card(event: Event, availability, note: str, user: User) -> Reply:
 UNDO_WINDOW = timedelta(minutes=30)
 AGENDA_PAGE = 10
 PLANS_PAGE = 7
+BUTTON_PREFIXES = {"pc": "", "dc": "Due: ", "bc": "Busy: ", "rc": "Reminder: "}
+
+
+class PlanItem(NamedTuple):
+    """One /plans line: an event, deadline, reminder or the next time of a busy block."""
+
+    start: datetime
+    kind: str
+    id: str
+    title: str
+    end: datetime | None = None
+    location: str | None = None
+    maybe: bool = False
+
 
 # Menu button -> the command it runs.
 MENU_COMMANDS = {
@@ -643,9 +662,10 @@ class SchedulingService:
             '• "Still coming?" checks\n'
             "• Nudges to reply to group plans and polls\n\n"
             "Even when off, you'll still get updates to plans you've added "
-            "and reminders you set with /remind."
+            "and reminders you set with /remind.\n\n"
+            f"📋 /plans shows: next {user.plans_days} days"
         )
-        return Reply(text, settings_keyboard(on))
+        return Reply(text, settings_keyboard(on, user.plans_days))
 
     async def usual_command(self, user: User, args: str) -> list[Reply]:
         """/usual tue evenings, sat all day: standing free times that pre-fill poll grids."""
@@ -944,42 +964,96 @@ class SchedulingService:
         return "\n\n⚠️ This clashes with your plans:\n" + "\n".join(lines) + more
 
     async def agenda(self, user: User, page: int = 0) -> list[Reply]:
-        """Seven upcoming items per page, each opened by its date-and-name button."""
+        """Upcoming items written out by day, seven per page, each opened by its button.
+
+        The pages first cover the user's next plans_days days; the rest follow behind
+        Later plans, so a plan far ahead can still be opened and changed."""
         now = self.clock()
-        items: list[tuple[datetime, str, str, str]] = []
+        items: list[PlanItem] = []
         for event in await self.repo.recent_events(user.id):
             if event.end_at >= now and event.status in (Status.GOING, Status.SAVED, Status.MAYBE):
-                items.append((event.start_at, "pc", event.id, event.title))
+                items.append(
+                    PlanItem(
+                        event.start_at,
+                        "pc",
+                        event.id,
+                        event.title,
+                        event.end_at,
+                        event.location,
+                        event.status == Status.MAYBE,
+                    )
+                )
         for deadline in await self.repo.deadlines_between(now, now + timedelta(days=120), user.id):
-            items.append((deadline.due_at, "dc", deadline.id, "Due: " + deadline.title))
+            items.append(PlanItem(deadline.due_at, "dc", deadline.id, deadline.title))
         for reminder in await self.repo.reminders_between(now, now + timedelta(days=60), user.id):
-            items.append((reminder.remind_at, "rc", reminder.id, "Reminder: " + reminder.text))
+            items.append(PlanItem(reminder.remind_at, "rc", reminder.id, reminder.text))
         for rule in await self.repo.list_blocks(user.id):
             upcoming = [
                 b for b in expand_blocks([rule], now, now + timedelta(days=60)) if b.end_at > now
             ]
             if upcoming:
                 block = min(upcoming, key=lambda b: b.start_at)
-                items.append((block.start_at, "bc", rule.id, "Busy: " + rule.title))
+                items.append(PlanItem(block.start_at, "bc", rule.id, rule.title, block.end_at))
         if not items:
             return [Reply("Nothing coming up. Forward a plan, or add a deadline with /deadline.")]
-        items.sort(key=lambda item: (item[0], item[1], item[2]))
-        pages = (len(items) + PLANS_PAGE - 1) // PLANS_PAGE
+        items.sort(key=lambda item: (item.start, item.kind, item.id))
+        today = now.astimezone(SG).date()
+        days = user.plans_days
+        cutoff = datetime.combine(today + timedelta(days=days), day_time(), SG)
+        soon = [item for item in items if item.start < cutoff]
+        later = items[len(soon) :]
+        soon_pages = max(1, (len(soon) + PLANS_PAGE - 1) // PLANS_PAGE)
+        pages = soon_pages + (len(later) + PLANS_PAGE - 1) // PLANS_PAGE
         page = max(0, min(page, pages - 1))
-        buttons = []
-        for when, kind, item_id, title in items[page * PLANS_PAGE : (page + 1) * PLANS_PAGE]:
-            title = " ".join(title.split())
-            if len(title) > 32:
-                short = title[:31]
-                if not title[31].isspace() and " " in short:
-                    short = short.rsplit(" ", 1)[0]
-                title = short.rstrip(" ,.:;·-–—") + "…"
-            buttons.append((f"{when.astimezone(SG):%-d %b} · {title}", kind, item_id))
+        if page < soon_pages:
+            section, first, count = soon, 0, soon_pages
+            lines = [f"<b>Your plans · next {days} days</b>"]
+        else:
+            section, first, count = later, soon_pages, pages - soon_pages
+            lines = ["<b>Later plans</b>"]
+        shown = section[(page - first) * PLANS_PAGE : (page - first + 1) * PLANS_PAGE]
+        day = None
+        for item in shown:
+            # A plan already under way is listed under today, not the day it began.
+            starts = max(item.start, now).astimezone(SG).date()
+            if starts != day:
+                day = starts
+                lines += ["", plans_day(day, today)]
+            lines.append(
+                plans_line(item.kind, item.title, item.start, item.end, item.location, item.maybe)
+            )
+        if not shown:
+            next_day = later[0].start.astimezone(SG).date()
+            lines.append(
+                f"\nNothing in the next {days} days. "
+                f"Your next plan is on {plans_day(next_day, today)}."
+            )
+        elif page == soon_pages - 1 and later:
+            last = today + timedelta(days=days - 1)
+            lines.append(f"\n+ {len(later)} more after {last:%a %-d %b}")
+        if shown:
+            lines.append("\nTap a plan below to edit or remove it.")
+        if count > 1:
+            lines.append(f"<i>Page {page - first + 1} of {count}</i>")
+        buttons = [
+            (
+                f"{item.start.astimezone(SG):%-d %b} · "
+                + shorten(BUTTON_PREFIXES[item.kind] + item.title, 32),
+                item.kind,
+                item.id,
+            )
+            for item in shown
+        ]
         return [
             Reply(
-                "<b>Your plans</b>\nSelect a plan below to view its details.\n\n"
-                f"<i>Page {page + 1} of {pages}</i>",
-                plans_keyboard(buttons, page, pages, self.settings.mini_app_url),
+                "\n".join(lines),
+                plans_keyboard(
+                    buttons,
+                    page,
+                    pages,
+                    self.settings.mini_app_url,
+                    soon_pages if later else None,
+                ),
                 parse_mode="HTML",
             )
         ]
@@ -2277,6 +2351,13 @@ class SchedulingService:
             and parts[2] in ("on", "off")
         ):
             await self.repo.set_user_flags(user.id, reminders_enabled=parts[2] == "on")
+            user = await self.repo.ensure_user(telegram_id)
+            panel = self.settings_panel(user)
+            return [Reply(panel.text, panel.keyboard, edit=True)]
+        if action == "set" and len(parts) == 3 and parts[1] == "plansdays":
+            if parts[2] not in [str(n) for n in PLANS_DAYS]:
+                return [Reply("That button isn't valid. Use /settings.")]
+            await self.repo.set_user_flags(user.id, plans_days=int(parts[2]))
             user = await self.repo.ensure_user(telegram_id)
             panel = self.settings_panel(user)
             return [Reply(panel.text, panel.keyboard, edit=True)]

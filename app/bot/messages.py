@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from html import escape
 
 from telegram import InlineKeyboardMarkup, LinkPreviewOptions
@@ -100,6 +100,51 @@ def time_range(start: datetime, end: datetime) -> str:
     if a[-2:] == b[-2:]:
         a = a[:-2]
     return f"{a}–{b}"
+
+
+def shorten(text: str, limit: int) -> str:
+    """One line of at most limit characters, cut at a word with … when it is longer."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    short = text[: limit - 1]
+    if not text[limit - 1].isspace() and " " in short:
+        short = short.rsplit(" ", 1)[0]
+    return short.rstrip(" ,.:;·-–—") + "…"
+
+
+def plans_day(day: date, today: date) -> str:
+    """Today · Mon 26 Oct, Tomorrow · Tue 27 Oct, Thu 29 Oct, Mon 4 Jan 2027."""
+    label = f"{day:%a %-d %b}" + (f" {day:%Y}" if day.year != today.year else "")
+    if day == today:
+        label = "Today · " + label
+    elif day == today + timedelta(days=1):
+        label = "Tomorrow · " + label
+    return f"<b>{label}</b>"
+
+
+PLAN_MARKS = {"pc": "", "dc": "📝 Due: ", "bc": "🚫 Busy: ", "rc": "⏰ "}
+
+
+def plans_line(
+    kind: str,
+    title: str,
+    start: datetime,
+    end: datetime | None = None,
+    location: str | None = None,
+    maybe: bool = False,
+) -> str:
+    """• 7–9pm · Training · 📍 UTown: one /plans item, short enough for a phone line or two."""
+    if end is None:
+        when = clock(start)
+    elif start.astimezone(SG).date() == end.astimezone(SG).date():
+        when = time_range(start, end)
+    else:
+        when = f"{clock(start)} – {end.astimezone(SG):%-d %b} {clock(end)}"
+    line = f"• {when} · {PLAN_MARKS[kind]}{escape(shorten(title, 30))}"
+    if location:
+        line += f" · 📍 {escape(shorten(location, 20))}"
+    return line + (" (maybe)" if maybe else "")
 
 
 def duration(minutes: int) -> str:

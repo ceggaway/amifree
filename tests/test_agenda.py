@@ -1,4 +1,4 @@
-"""/plans: seven date-and-name buttons per page, with item details and return navigation."""
+"""/plans: the next days written out, seven date-and-name buttons per page, Later plans after."""
 
 from datetime import timedelta
 
@@ -37,9 +37,12 @@ async def test_agenda_labels_plans_deadlines_and_blocks(service_factory, referen
     block = (await service.message(1, 5, "work every wed 6-10pm", reference))[0]
     await service.callback(1, tap(block, "Save block"))
     reply = (await service.command(1, "plans"))[0]
-    assert reply.text.startswith("<b>Your plans</b>\nSelect a plan below to view its details.")
-    assert "CCA dinner" not in reply.text
-    assert reply.text.endswith("<i>Page 1 of 1</i>")
+    assert reply.text == (
+        "<b>Your plans · next 7 days</b>\n\n"
+        "<b>Wed 7 Oct</b>\n• 6–10pm · 🚫 Busy: Work\n\n"
+        "<b>Fri 9 Oct</b>\n• 7–9pm · CCA dinner · 📍 Vivo\n• 11:59pm · 📝 Due: CS3244 report\n\n"
+        "Tap a plan below to edit or remove it."
+    )
     labels = [row[0].text for row in reply.keyboard.inline_keyboard]
     assert labels == ["7 Oct · Busy: Work", "9 Oct · CCA dinner", "9 Oct · Due: CS3244 report"]
     assert all(len(row) == 1 for row in reply.keyboard.inline_keyboard)
@@ -153,14 +156,19 @@ async def populate_plans(service_factory, reference, count):
 async def test_plan_pages_and_back_restore_same_page(service_factory, reference):
     service, _ = await populate_plans(service_factory, reference, 16)
     first = (await service.command(1, "plans"))[0]
-    assert "Page 1 of 3" in first.text
-    second = (await service.callback(1, tap(first, "Next →")))[0]
-    assert "Page 2 of 3" in second.text and second.edit
-    assert [b.text for b in second.keyboard.inline_keyboard[-1]] == ["← Previous", "Next →"]
+    # Plans 1-6 fall in the next 7 days (Sun 4 to Sat 10 Oct); 7-16 wait behind Later plans.
+    assert "Page" not in first.text and "+ 10 more after Sat 10 Oct" in first.text
+    assert [b.text for b in first.keyboard.inline_keyboard[-1]] == ["Later plans →"]
+    later = (await service.callback(1, tap(first, "Later plans →")))[0]
+    assert later.text.startswith("<b>Later plans</b>") and "Page 1 of 2" in later.text
+    second = (await service.callback(1, tap(later, "Next →")))[0]
+    assert "Page 2 of 2" in second.text and second.edit
+    assert [b.text for b in later.keyboard.inline_keyboard[-1]] == ["← Previous", "Next →"]
+    assert (await service.callback(1, tap(later, "← Previous")))[0].text == first.text
     label = second.keyboard.inline_keyboard[0][0].text
-    assert label == "12 Oct · Plan 8"
+    assert label == "18 Oct · Plan 14"
     card = (await service.callback(1, tap(second, label)))[0]
-    assert "<b>Plan 8</b>" in card.text and "📍 Clementi Mall" in card.text
+    assert "<b>Plan 14</b>" in card.text and "📍 Clementi Mall" in card.text
     assert card.edit and card.parse_mode == "HTML"
     back = (await service.callback(1, tap(card, "← Back to plans")))[0]
     assert back.edit and back.text == second.text
@@ -172,14 +180,16 @@ async def test_plan_pages_and_back_restore_same_page(service_factory, reference)
 
 
 async def test_back_after_removing_last_item_clamps_page(service_factory, reference):
-    service, _ = await populate_plans(service_factory, reference, 8)
+    service, _ = await populate_plans(service_factory, reference, 7)
     second = (await service.callback(1, "plans:1"))[0]
+    assert second.text.startswith("<b>Later plans</b>")
     card = (await service.callback(1, second.keyboard.inline_keyboard[0][0].callback_data))[0]
     removed = (await service.callback(1, tap(card, "Remove from plans")))[0]
     assert "Not in your plans" in removed.text
     back = (await service.callback(1, tap(removed, "← Back to plans")))[0]
-    assert "Page 1 of 1" in back.text and back.edit
-    assert len(back.keyboard.inline_keyboard) == 7
+    assert back.text.startswith("<b>Your plans · next 7 days</b>") and back.edit
+    assert "more after" not in back.text
+    assert len(back.keyboard.inline_keyboard) == 6
 
 
 async def test_list_page_survives_edits_and_service_restart(service_factory, reference):
@@ -196,7 +206,7 @@ async def test_list_page_survives_edits_and_service_restart(service_factory, ref
     saved = (await restarted.callback(1, tap(preview, "Save changes")))[-1]
     assert "7PM–9PM SGT" in saved.text
     back = (await restarted.callback(1, tap(saved, "← Back to plans")))[0]
-    assert back.edit and "Page 2 of 2" in back.text
+    assert back.edit and back.text.startswith("<b>Later plans</b>")
 
 
 async def test_long_titles_are_shortened_only_in_list(service_factory, reference):
@@ -280,3 +290,53 @@ async def test_app_command_and_plans_open_the_mini_app(service_factory, referenc
     assert last.text == "📱 Open AmIFree" and last.web_app.url == url
     plain, _ = service_factory()
     assert "isn't available" in (await plain.command(1, "app"))[0].text
+
+
+async def test_plans_list_marks_kinds_days_and_odd_plans(service_factory, reference):
+    service, repo = await populate_plans(service_factory, reference, 3)
+    first, second, third = repo.events.values()
+    # Under way since yesterday: listed under today, with its own end date.
+    first.start_at, first.end_at = reference - timedelta(days=1), reference + timedelta(days=1)
+    first.title, first.location = "Event", None
+    second.status = Status.MAYBE
+    third.title = "Hackathon <briefing> for the whole computing cohort"
+    third.location = "COM3 Seminar Room 1 & Lounge"
+    await service.message(1, 9, "remind me at 9pm tomorrow to call mum", reference)
+    text = (await service.command(1, "plans"))[0].text
+    assert "<b>Today · Sun 4 Oct</b>\n• 12pm – 5 Oct 12pm · Event" in text
+    assert "<b>Tomorrow · Mon 5 Oct</b>\n• 9pm · ⏰ Call mum" in text
+    assert "<b>Tue 6 Oct</b>\n• 12–2pm · Plan 2 · 📍 Clementi Mall (maybe)" in text
+    assert "• 12–2pm · Hackathon &lt;briefing&gt; for the… · 📍 COM3 Seminar Room 1…" in text
+
+
+async def test_settings_choose_how_many_days_plans_shows(service_factory, reference):
+    service, repo = await populate_plans(service_factory, reference, 10)
+    await onboard(service, reference)
+    panel = (await service.command(1, "settings"))[0]
+    assert "📋 /plans shows: next 7 days" in panel.text
+    days = [b.text for b in panel.keyboard.inline_keyboard[-1]]
+    assert days == ["3 days", "✓ 7 days", "14 days", "30 days"]
+    chosen = (await service.callback(1, tap(panel, "14 days")))[0]
+    assert chosen.edit and "next 14 days" in chosen.text
+    assert (await repo.ensure_user(1)).plans_days == 14
+    plans = (await service.command(1, "plans"))[0]
+    assert plans.text.startswith("<b>Your plans · next 14 days</b>")
+    assert "more after" not in plans.text and "Page 1 of 2" in plans.text
+    for data in ("set:plansdays:5", "set:plansdays:x", "set:plansdays:007"):
+        assert "isn't valid" in (await service.callback(1, data))[0].text
+    assert (await repo.ensure_user(1)).plans_days == 14
+
+
+async def test_nothing_soon_points_to_later_plans(service_factory, reference):
+    service, repo = await populate_plans(service_factory, reference, 1)
+    event = next(iter(repo.events.values()))
+    event.start_at += timedelta(days=20)
+    event.end_at += timedelta(days=20)
+    plans = (await service.command(1, "plans"))[0]
+    assert plans.text == (
+        "<b>Your plans · next 7 days</b>\n\n"
+        "Nothing in the next 7 days. Your next plan is on <b>Sun 25 Oct</b>."
+    )
+    assert [b.text for row in plans.keyboard.inline_keyboard for b in row] == ["Later plans →"]
+    later = (await service.callback(1, tap(plans, "Later plans →")))[0]
+    assert "25 Oct · Plan 1" in [row[0].text for row in later.keyboard.inline_keyboard]

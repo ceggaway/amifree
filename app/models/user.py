@@ -14,6 +14,7 @@ class User(BaseModel):
     coverage_end: datetime | None = None
     pending: dict | None = None
     reminders_enabled: bool = True
+    plans_days: int = 7
     dm_blocked: bool = False
     calendar_feed_token: str | None = None
     calendar_feed_seen_at: datetime | None = None

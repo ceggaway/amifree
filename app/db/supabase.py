@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -53,7 +53,7 @@ class SupabaseRepository:
         # Check everything the current code needs (tables, columns and the calendar function),
         # not merely that the host responds. A missing migration fails here, by name, in the log.
         required = {
-            "users": "id,calendar_feed_token,calendar_feed_seen_at,google_connected",
+            "users": "id,calendar_feed_token,calendar_feed_seen_at,google_connected,plans_days",
             "timetable_blocks": "id",
             "events": "id",
             "event_extractions": "id",
@@ -633,7 +633,7 @@ class SupabaseRepository:
         result = await self.client.table("users").select("*").eq("id", user_id).limit(1).execute()
         return User.model_validate(result.data[0]) if result.data else None
 
-    async def set_user_flags(self, user_id: str, **flags: bool):
+    async def set_user_flags(self, user_id: str, **flags: bool | int):
         await self.client.table("users").update(flags).eq("id", user_id).execute()
 
     async def list_calendars(self, user_id: str) -> list[PersonalCalendar]:

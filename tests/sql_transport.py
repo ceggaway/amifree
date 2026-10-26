@@ -194,6 +194,7 @@ COLUMNS = {
     "start_min",
     "end_min",
     "google_connected",
+    "plans_days",
     "calendar_email",
     "connected_at",
     "synced_version",

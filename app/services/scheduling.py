@@ -791,16 +791,28 @@ class SchedulingService:
         return [self.times_reply(user, state, events, availabilities)]
 
     def times_reply(
-        self, user: User, state: dict, events: list[Event], availabilities, edit: bool = False
+        self,
+        user: User,
+        state: dict,
+        events: list[Event],
+        availabilities,
+        edit: bool = False,
+        finished: bool = False,
     ) -> Reply:
+        """finished: Done was tapped with some added, so the picker closes as if all were."""
         relation, added = state["relation"], set(state["added"])
-        done = relation != "alternatives" and len(added) == len(events)
-        keyboard = (
-            None
-            if done
-            else times_keyboard(state["nonce"], relation, [time_label(e) for e in events], added)
+        done = relation != "alternatives" and (finished or len(added) == len(events))
+        if not done:
+            keyboard = times_keyboard(
+                state["nonce"], relation, [time_label(e) for e in events], added
+            )
+        else:
+            # Plans that go nowhere else yet: Apple or Google setup is one tap away, here
+            # instead of the separate "Set up (1 min)" prompt the single cards get.
+            keyboard = None if synced(user) else onboarding.calendar_setup_keyboard()
+        text = times_text(
+            relation, events, availabilities, added, state["unread"], synced(user), finished=done
         )
-        text = times_text(relation, events, availabilities, added, state["unread"], synced(user))
         return Reply(text, keyboard, edit=edit, parse_mode="HTML")
 
     async def choose_time(self, user: User, nonce: str, choice: str) -> list[Reply]:
@@ -823,8 +835,7 @@ class SchedulingService:
             if not added:
                 return [Reply("Okay, nothing added.", edit=True)]
             availabilities = [await self.availability(user, e, e.id) for e in events]
-            reply = self.times_reply(user, pending, events, availabilities, edit=True)
-            return [replace(reply, keyboard=None), *await self.calendar_prompt(user)]
+            return [self.times_reply(user, pending, events, availabilities, True, finished=True)]
         valid = choice.isascii() and choice.isdigit() and int(choice) < len(events)
         if not valid and not (choice == "all" and relation != "alternatives"):
             return [Reply("That button isn't valid. Forward the message again.")]
@@ -846,8 +857,7 @@ class SchedulingService:
         done = len(added) == len(events)
         await self.repo.set_pending(user.id, None if done else pending)
         availabilities = [await self.availability(user, e, e.id) for e in events]
-        reply = self.times_reply(user, pending, events, availabilities, edit=True)
-        return [reply, *await self.calendar_prompt(user)] if done else [reply]
+        return [self.times_reply(user, pending, events, availabilities, edit=True)]
 
     async def preview_block(
         self, user: User, rule: BlockRule | list[BlockRule], typed: bool = True

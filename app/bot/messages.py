@@ -334,8 +334,12 @@ def times_text(
     added: set[int] = frozenset(),
     unread: list[str] = (),
     synced: bool | str = False,
+    finished: bool = False,
 ) -> str:
-    """The picker for a message with two or more times (see app.services.multi_time)."""
+    """The picker for a message with two or more times (see app.services.multi_time).
+
+    finished: the picker is closed, every time added or Done tapped after adding some.
+    """
     pairs = list(enumerate(zip(events, availabilities, strict=True), 1))
     found = len(events) + len(unread)
     if relation == "alternatives":
@@ -364,9 +368,9 @@ def times_text(
             + ", ".join(escape(title[:60]) for title in unread)
             + ". Send it on its own to add it."
         )
-    if relation != "alternatives" and len(added) == len(events):
-        text += "\n\n☑️ <b>All added to /plans.</b>\n" + where_plans_go(synced, done=True)
-        return text
+    if relation != "alternatives" and (finished or len(added) == len(events)):
+        heading = "All added to /plans." if len(added) == len(events) else "Added to /plans."
+        return f"{text}\n\n☑️ <b>{heading}</b>\n" + where_plans_go(synced, done=True)
     text += "\n\n" + where_plans_go(synced)
     if not added:
         note = personal_calendar_note(availabilities[0])
@@ -382,10 +386,8 @@ def where_plans_go(synced: bool | str, done: bool = False) -> str:
             return f"📅 Syncing to {synced_line(synced)} too (/calendar to change)."
         return f"➕ What you add goes to /plans and syncs to {synced_line(synced)}."
     if done:
-        return (
-            "📅 Only in AmIFree for now. Connect Google or Apple Calendar in /calendar "
-            "to see your plans there too."
-        )
+        # The picker shows Apple and Google setup buttons right under this.
+        return "📅 Only in AmIFree for now. Connect a calendar to see your plans there too:"
     return (
         "➕ What you add goes to /plans. Want it in Google or Apple Calendar too? "
         "Connect one in /calendar."

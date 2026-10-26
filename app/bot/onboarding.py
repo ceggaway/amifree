@@ -442,6 +442,13 @@ def calendar_prompt_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def calendar_setup_keyboard() -> InlineKeyboardMarkup:
+    """Under plans that go nowhere else yet: the same Apple and Google setup as /calendar."""
+    return InlineKeyboardMarkup(
+        [[_button("🍎 Apple Calendar", "apple"), _button("📅 Google Calendar", "google")]]
+    )
+
+
 def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

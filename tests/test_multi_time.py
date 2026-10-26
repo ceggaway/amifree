@@ -180,6 +180,19 @@ async def test_the_picker_names_the_calendar_plans_sync_to(service_factory, refe
     assert "Want it in Google" not in picker.text
     replies = await service.callback(1, tap(picker, "Add both"))
     assert "📅 Syncing to your Google Calendar too (/calendar to change)." in replies[0].text
+    assert replies[0].keyboard is None  # plans already go to a calendar: nothing to set up
+
+
+async def test_done_after_adding_some_offers_the_calendar_buttons(service_factory, reference):
+    service, repo = service_factory(trainings())
+    [picker] = await service.message(1, 7, TRAINING, reference)
+    [first] = await service.callback(1, tap(picker, "Add 1 · Tue 6 Oct"))
+    replies = await service.callback(1, tap(first, "Done"))
+    assert len(replies) == 1
+    assert "☑️ <b>Added to /plans.</b>\n📅 Only in AmIFree for now." in replies[0].text
+    assert tap(replies[0], "🍎 Apple Calendar") == "setup:apple"
+    assert tap(replies[0], "📅 Google Calendar") == "setup:google"
+    assert (await repo.ensure_user(1)).pending is None
 
 
 async def test_an_untitled_extraction_is_named_from_the_message(service_factory, reference):
@@ -200,7 +213,13 @@ async def test_add_one_then_the_other(service_factory, reference):
     statuses = sorted(e.status for e in repo.events.values())
     assert statuses == sorted([Status.GOING, Status.PREVIEW])
     replies = await service.callback(1, tap(first, "Add 2 · Thu 8 Oct"))
-    assert "All added to /plans." in replies[0].text and replies[0].keyboard is None
+    assert "All added to /plans." in replies[0].text
+    # No calendar connected: setup is one tap away, in the picker, not in a second message.
+    assert len(replies) == 1
+    assert [b.text for row in replies[0].keyboard.inline_keyboard for b in row] == [
+        "🍎 Apple Calendar",
+        "📅 Google Calendar",
+    ]
     assert {e.status for e in repo.events.values()} == {Status.GOING}
     assert (await repo.ensure_user(1)).pending is None
 

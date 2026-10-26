@@ -26,6 +26,7 @@ from app.bot.keyboards import (
     feedback_choice_keyboard,
     free_keyboard,
     menu_keyboard,
+    open_app_row,
     page_keyboard,
     personal_calendars_keyboard,
     personal_change_confirmation,
@@ -503,6 +504,15 @@ class SchedulingService:
             return await self.list_deadlines(user)
         if command == "calendar":
             return await self.calendar_setup(user)
+        if command == "app":
+            if not self.settings.mini_app_url:
+                return [Reply("The AmIFree app isn't available right now.")]
+            return [
+                Reply(
+                    "Tap below to open AmIFree.",
+                    InlineKeyboardMarkup(open_app_row(self.settings.mini_app_url)),
+                )
+            ]
         if command == "free":
             return await self.free_command(user, args)
         if command == "blocks":
@@ -834,7 +844,7 @@ class SchedulingService:
             Reply(
                 "<b>Your plans</b>\nSelect a plan below to view its details.\n\n"
                 f"<i>Page {page + 1} of {pages}</i>",
-                plans_keyboard(buttons, page, pages),
+                plans_keyboard(buttons, page, pages, self.settings.mini_app_url),
                 parse_mode="HTML",
             )
         ]

@@ -238,7 +238,7 @@ def agenda_keyboard(
 
 
 def plans_keyboard(
-    items: list[tuple[str, str, str]], page: int, pages: int
+    items: list[tuple[str, str, str]], page: int, pages: int, app_url: str | None = None
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(label, callback_data=f"fp:{page}:{kind}:{item_id}")]
@@ -251,7 +251,7 @@ def plans_keyboard(
         navigation.append(InlineKeyboardButton("Next →", callback_data=f"plans:{page + 1}"))
     if navigation:
         rows.append(navigation)
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup(rows + open_app_row(app_url))
 
 
 def with_plans_navigation(markup: InlineKeyboardMarkup | None, page: int) -> InlineKeyboardMarkup:

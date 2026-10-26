@@ -265,3 +265,18 @@ async def test_start_opens_the_mini_app_from_a_button(service_factory, reference
         for row in (await plain.command(1, "start"))[0].keyboard.inline_keyboard
         for b in row
     )
+
+
+async def test_app_command_and_plans_open_the_mini_app(service_factory, reference):
+    url = "https://example.test/app/"
+    service, _ = service_factory(extraction(), mini_app_url=url)
+    opened = (await service.command(1, "app"))[0]
+    assert opened.keyboard.inline_keyboard[0][0].web_app.url == url
+    await onboard(service, reference)
+    card = (await service.message(1, 2, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
+    await service.callback(1, tap(card, "Add to plans"))
+    plans = (await service.command(1, "plans"))[0]
+    last = plans.keyboard.inline_keyboard[-1][0]
+    assert last.text == "📱 Open AmIFree" and last.web_app.url == url
+    plain, _ = service_factory()
+    assert "isn't available" in (await plain.command(1, "app"))[0].text

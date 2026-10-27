@@ -127,7 +127,7 @@ def test_clashes_appear_once_and_survive_adding():
         assert card.text.count("CS3216 meeting") == 1
         assert "Conflicts:" not in card.text and "miss the first" not in card.text
         if status == Status.GOING:
-            assert "☑️ <b>Added to your plans.</b>" in card.text
+            assert "☑️ <b>Added to /plans.</b>" in card.text
             assert rows(card) == [["Edit details", "Remove from plans"]]
         elif status == Status.DECLINED:
             assert "❌ <b>Not in your plans.</b>" in card.text
@@ -168,14 +168,15 @@ def test_added_calendar_explanation_matches_export_buttons(personal_connected, s
         ),
         synced=synced,
     )
-    assert "☑️ <b>Added to your plans.</b>" in card.text
+    assert "☑️ <b>Added to /plans.</b>" in card.text
     assert "<i>Connect your" not in card.text
     buttons = [label for row in rows(card) for label in row]
     exports = not personal_connected and not synced
     assert ("📅 Google Calendar" in buttons) == exports
     assert ("🍎 Apple Calendar" in buttons) == exports
-    assert ("Want this event in your personal calendar?" in card.text) == exports
-    assert ("connect calendar syncing through /calendar" in card.text) == exports
+    assert ("Add just this one to your calendar" in card.text) == exports
+    # Adding every plan automatically is the separate, counted prompt, never on the card.
+    assert "automatically" not in card.text
     # An imported calendar is not evidence of automatic outbound syncing.
     assert ("Syncing to your calendar" in card.text) == synced
 
@@ -189,9 +190,8 @@ async def test_connected_personal_calendar_hides_exports_after_add(service_facto
     preview = (await service.message(1, 2, "Dinner Friday 7-9pm at Vivo", reference))[0]
     added = (await service.callback(1, tap(preview, "Add to plans")))[0]
     assert rows(added) == [["Edit details", "Remove from plans"]]
-    assert "☑️ <b>Added to your plans.</b>" in added.text
-    assert "Want this event in your personal calendar?" not in added.text
-    assert "connect calendar syncing" not in added.text
+    assert "☑️ <b>Added to /plans.</b>" in added.text
+    assert "Add just this one" not in added.text
 
 
 def test_cancelled_and_group_cards():
@@ -215,7 +215,7 @@ async def test_actions_and_edits_keep_html(service_factory, reference, clash):
     action = "Add anyway" if clash else "Add to plans"
     added = (await service.callback(1, tap(card, action)))[0]
     assert added.edit and added.parse_mode == "HTML"
-    assert added.text.count("Added to your plans.") == 1
+    assert added.text.count("Added to /plans.") == 1
     assert added.text.startswith("⚠️ Overlaps with" if clash else "✅ No clashes found")
     removed = (await service.callback(1, tap(added, "Remove from plans")))[0]
     assert removed.parse_mode == "HTML" and rows(removed) == [[action, "Edit details"]]

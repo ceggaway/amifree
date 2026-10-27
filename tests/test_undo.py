@@ -18,7 +18,7 @@ async def test_removing_a_plan_can_be_added_back(service_factory, reference):
         "Edit details",
     ]
     back = (await service.callback(1, tap(removed, "Add to plans")))[0]
-    assert "Added to your plans" in back.text
+    assert "Added to /plans" in back.text
     assert next(iter(repo.events.values())).status == Status.GOING
     assert [b.text for row in back.keyboard.inline_keyboard for b in row][:2] == [
         "Edit details",

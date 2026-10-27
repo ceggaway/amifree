@@ -5,6 +5,7 @@ from html import escape
 from telegram import InlineKeyboardMarkup, LinkPreviewOptions
 
 from app.bot.keyboards import event_keyboard, group_keyboard
+from app.bot.onboarding import LAST_CALENDAR_ASK
 from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
 from app.services.availability import Availability
 
@@ -335,6 +336,7 @@ def times_text(
     unread: list[str] = (),
     synced: bool | str = False,
     finished: bool = False,
+    ask: str = "later",
 ) -> str:
     """The picker for a message with two or more times (see app.services.multi_time).
 
@@ -370,8 +372,9 @@ def times_text(
         )
     if relation != "alternatives" and (finished or len(added) == len(events)):
         heading = "All added to /plans." if len(added) == len(events) else "Added to /plans."
-        return f"{text}\n\n☑️ <b>{heading}</b>\n" + where_plans_go(synced, done=True)
-    text += "\n\n" + where_plans_go(synced)
+        where = where_plans_go(synced, done=True, ask=ask)
+        return f"{text}\n\n☑️ <b>{heading}</b>" + (f"\n{where}" if where else "")
+    text += "\n\n" + where_plans_go(synced, ask=ask)
     if not added:
         note = personal_calendar_note(availabilities[0])
         if note:
@@ -379,19 +382,30 @@ def times_text(
     return text
 
 
-def where_plans_go(synced: bool | str, done: bool = False) -> str:
-    """Before and after Add: plans land in /plans, and in a calendar only once one is set up."""
+def where_plans_go(synced: bool | str, done: bool = False, ask: str = "later") -> str:
+    """Before and after Add: plans land in /plans, and in a calendar only once one is set up.
+
+    ask (SchedulingService.calendar_ask): "ask" and "last" come with setup buttons under
+    the picker; "later" only mentions /calendar; "never" stops suggesting it at all.
+    """
     if synced:
         if done:
             return f"📅 Syncing to {synced_line(synced)} too (/calendar to change)."
         return f"➕ What you add goes to /plans and syncs to {synced_line(synced)}."
-    if done:
-        # The picker shows Apple and Google setup buttons right under this.
+    if not done:
+        if ask == "never":
+            return "➕ What you add goes to /plans."
+        return (
+            "➕ What you add goes to /plans. Want it in Google or Apple Calendar too? "
+            "Connect one in /calendar."
+        )
+    if ask == "ask":
         return "📅 Only in AmIFree for now. Connect a calendar to see your plans there too:"
-    return (
-        "➕ What you add goes to /plans. Want it in Google or Apple Calendar too? "
-        "Connect one in /calendar."
-    )
+    if ask == "last":
+        return "📅 Only in AmIFree for now.\n\n" + LAST_CALENDAR_ASK
+    if ask == "later":
+        return "📅 Only in AmIFree for now. Connect a calendar any time in /calendar."
+    return ""
 
 
 def event_card(event: Event, availability: Availability, synced: bool | str = False) -> Reply:

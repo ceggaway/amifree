@@ -183,6 +183,43 @@ async def test_the_picker_names_the_calendar_plans_sync_to(service_factory, refe
     assert replies[0].keyboard is None  # plans already go to a calendar: nothing to set up
 
 
+async def test_pickers_share_the_three_calendar_asks_then_stop(service_factory, reference):
+    from app.bot import onboarding
+
+    service, _ = service_factory(*(trainings() for _ in range(4)))
+    replies = []
+    for n in range(4):
+        [picker] = await service.message(1, 10 + n, TRAINING, reference)
+        replies.append(picker)
+        [done] = await service.callback(1, tap(picker, "Add both"))
+        replies.append(done)
+    first, second, third, fourth = replies[1], replies[3], replies[5], replies[7]
+    # Plans 2, 4 and 6 reach the asks at 1, 3 and 6 plans: buttons each time.
+    for done in (first, second, third):
+        assert tap(done, "🍎 Apple Calendar") == "setup:apple"
+    assert onboarding.LAST_CALENDAR_ASK not in second.text
+    assert onboarding.LAST_CALENDAR_ASK in third.text  # says it's the last time
+    # After three asks: no buttons, no "connect a calendar", just where the plans went.
+    assert fourth.keyboard is None
+    assert fourth.text.endswith("☑️ <b>All added to /plans.</b>")
+    assert "➕ What you add goes to /plans.\n" in replies[6].text + "\n"
+    assert "Want it in Google" not in replies[6].text
+
+
+async def test_a_card_ask_counts_for_the_picker_too(service_factory, reference):
+    lunch = extraction(title="Lunch", date_text="Monday", start_time_text="12", end_time_text="1pm")
+    service, _ = service_factory(lunch, trainings())
+    card = (await service.message(1, 6, "Lunch Monday 12-1pm", reference))[0]
+    asked = await service.callback(1, tap(card, "Add to plans"))
+    assert len(asked) == 2  # the card's own "Set up (1 min)" prompt: ask 1
+    [picker] = await service.message(1, 7, TRAINING, reference)
+    [first] = await service.callback(1, tap(picker, "Add 1 · Tue 6 Oct"))
+    [done] = await service.callback(1, tap(first, "Done"))
+    # 2 plans, and the next ask waits for 3: no buttons, just where to connect later.
+    assert done.keyboard is None
+    assert "📅 Only in AmIFree for now. Connect a calendar any time in /calendar." in done.text
+
+
 async def test_done_after_adding_some_offers_the_calendar_buttons(service_factory, reference):
     service, repo = service_factory(trainings())
     [picker] = await service.message(1, 7, TRAINING, reference)

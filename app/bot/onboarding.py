@@ -56,10 +56,16 @@ NOT_SURE = (
     "💻 Computer: if you check your calendar at calendar.google.com, it's Google."
 )
 
-# Shown once after the first plan is saved, and once more after the third.
+# Asked after the first plan is kept, at 3 plans and at 6 (CALENDAR_ASK_AT in scheduling),
+# counting the multi-time picker's setup buttons too.
 CALENDAR_PROMPT = (
     "📅 Want plans like this on your calendar automatically?\n"
     "I'll also warn you about clashes and help your groups find a free time."
+)
+# Added to the third and final ask, so stopping is said, not silent.
+LAST_CALENDAR_ASK = (
+    "This is the last time I'll ask. You can connect a calendar any time in /calendar, "
+    "and until then I'll still check new plans for clashes with the ones you've added here."
 )
 PROMPT_LATER = (
     "No problem. Tap 🍎 or 📅 on a plan to add it yourself, or set this up any time with /calendar."

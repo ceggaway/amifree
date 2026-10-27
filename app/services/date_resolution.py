@@ -48,19 +48,30 @@ _STEM |= {"thurs": 3, "fri": 4, "sat": 5, "satur": 5, "sun": 6}
 
 
 # A whole day name or a usual short form, never part of a word ("every month" is not Monday).
-_DAY_WORD = (
+_DAY_NAME = (
     r"(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:s|nesday)?|thu(?:r(?:s(?:day)?)?)?"
-    r"|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b"
+    r"|fri(?:day)?|sat(?:urday)?|sun(?:day)?)"
 )
+_DAY_WORD = _DAY_NAME + r"\b"
 # "every Tue/Thu", "every Tuesday and Thursday", "each Mon, Wed & Fri".
 _EVERY_LIST = re.compile(
     rf"\b(?:every|each)\s+({_DAY_WORD}(?:\s*(?:/|,|&|\+|and)\s*{_DAY_WORD})*)", re.IGNORECASE
 )
 
 
+# Days listed together: "Wednesday and Thursdays", "Mon/Weds". One plural day in the list
+# makes all of them weekly; "Wednesdayand" (a missing space) still counts as a list.
+_ANY_DAY = rf"(?:(?:mon|tues|wednes|thurs|fri|satur|sun)days\b|{_DAY_NAME}(?=\b|and\b))"
+_DAY_LIST = re.compile(rf"\b{_ANY_DAY}(?:\s*(?:/|,|&|\+|and\b)\s*{_ANY_DAY})+", re.IGNORECASE)
+
+
 def weekly_weekdays(text: str) -> list[int]:
     """The weekdays of a weekly event ("Saturdays", "every Tue/Thu"), Monday first."""
     days = {_STEM[m.lower()] for m in _PLURAL_DAY.findall(text)}
+    for match in _DAY_LIST.finditer(text):
+        if _PLURAL_DAY.search(match[0]):
+            for day in re.findall(rf"\b{_ANY_DAY}", match[0], re.IGNORECASE):
+                days.add(_WEEKDAY_ABBR[day.lower()[:3]])
     for listed in _EVERY_LIST.findall(text):
         for day in re.findall(rf"\b{_DAY_WORD}", listed, re.IGNORECASE):
             days.add(_WEEKDAY_ABBR[day.lower()[:3]])

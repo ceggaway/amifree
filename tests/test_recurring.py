@@ -82,7 +82,7 @@ async def test_every_week_becomes_a_weekly_busy_block(service_factory, reference
 async def test_neither_and_expired_choices(service_factory, reference):
     service, repo = service_factory(BHID)
     offer = (await service.message(1, 1, BHID_POST, reference))[0]
-    assert "Kept unchanged" in (await service.callback(1, tap(offer, "Neither")))[0].text
+    assert "not added" in (await service.callback(1, tap(offer, "Neither")))[0].text
     assert not (await repo.ensure_user(1)).pending
     assert "expired" in (await service.callback(1, tap(offer, "Every Saturday")))[0].text
 
@@ -97,6 +97,12 @@ async def test_neither_and_expired_choices(service_factory, reference):
         ("Yoga every Tuesday 7-8pm", [1]),
         ("meet every month to plan", []),  # "month" is not Monday
         ("CCA dinner Friday 7-9pm", []),
+        # One plural day makes the days listed with it weekly too.
+        ("Badminton wednesday and Thursdays 7-9pm", [2, 3]),
+        ("Badminton Wednesdayand Thursdays 7-9pm", [2, 3]),
+        ("Sat and Sundays 9am", [5, 6]),
+        ("Training Tuesdays 7pm and Thursday dinner", [1]),
+        ("Dinner Wednesday and Thursday 7pm", []),  # two dates, not weekly
     ],
 )
 def test_weekly_weekdays(text, days):
@@ -189,3 +195,12 @@ async def test_a_weekly_post_without_an_end_time_asks_for_it(service_factory, re
     service, _ = service_factory(no_end)
     reply = (await service.message(1, 1, "Volunteering Saturdays from 9:30am", reference))[0]
     assert reply.text.startswith("What time does this event end?")
+
+
+async def test_a_new_message_closes_the_every_week_question(service_factory, reference):
+    service, repo = service_factory(BADMINTON, BADMINTON)
+    first = (await service.message(1, 1, TWICE, reference))[0]
+    again = (await service.message(1, 2, TWICE, reference))[0]
+    assert again.text.startswith("🔁 Badminton")
+    assert (await repo.ensure_user(1)).pending["message_id"] == 2
+    assert "expired" in (await service.callback(1, tap(first, "Every Tue & Thu")))[0].text

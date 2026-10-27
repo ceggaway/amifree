@@ -5,6 +5,7 @@ from html import escape
 from telegram import InlineKeyboardMarkup, LinkPreviewOptions
 
 from app.bot.keyboards import event_keyboard, group_keyboard
+from app.bot.onboarding import LAST_CALENDAR_ASK
 from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
 from app.services.availability import Availability
 
@@ -334,8 +335,13 @@ def times_text(
     added: set[int] = frozenset(),
     unread: list[str] = (),
     synced: bool | str = False,
+    finished: bool = False,
+    ask: str = "later",
 ) -> str:
-    """The picker for a message with two or more times (see app.services.multi_time)."""
+    """The picker for a message with two or more times (see app.services.multi_time).
+
+    finished: the picker is closed, every time added or Done tapped after adding some.
+    """
     pairs = list(enumerate(zip(events, availabilities, strict=True), 1))
     found = len(events) + len(unread)
     if relation == "alternatives":
@@ -357,24 +363,49 @@ def times_text(
         text = f"I found {found} events in that message:"
         for n, (event, availability) in pairs:
             text += f"\n\n{n}. " + personal_details(event, compact=True) + "\n"
-            text += (
-                "☑️ Added to your plans." if n - 1 in added else personal_availability(availability)
-            )
+            text += "☑️ Added to /plans." if n - 1 in added else personal_availability(availability)
     if unread:
         text += (
             "\n\nI couldn't read the date or time of "
             + ", ".join(escape(title[:60]) for title in unread)
             + ". Send it on its own to add it."
         )
-    if relation != "alternatives" and len(added) == len(events):
-        text += "\n\n☑️ <b>All added to your plans.</b>"
-        if synced:
-            text += f"\nSyncing to {synced_line(synced)} (/calendar to change)."
-    elif not added:
+    if relation != "alternatives" and (finished or len(added) == len(events)):
+        heading = "All added to /plans." if len(added) == len(events) else "Added to /plans."
+        where = where_plans_go(synced, done=True, ask=ask)
+        return f"{text}\n\n☑️ <b>{heading}</b>" + (f"\n{where}" if where else "")
+    text += "\n\n" + where_plans_go(synced, ask=ask)
+    if not added:
         note = personal_calendar_note(availabilities[0])
         if note:
             text += "\n\n<i>" + note + "</i>"
     return text
+
+
+def where_plans_go(synced: bool | str, done: bool = False, ask: str = "later") -> str:
+    """Before and after Add: plans land in /plans, and in a calendar only once one is set up.
+
+    ask (SchedulingService.calendar_ask): "ask" and "last" come with setup buttons under
+    the picker; "later" only mentions /calendar; "never" stops suggesting it at all.
+    """
+    if synced:
+        if done:
+            return f"📅 Syncing to {synced_line(synced)} too (/calendar to change)."
+        return f"➕ What you add goes to /plans and syncs to {synced_line(synced)}."
+    if not done:
+        if ask == "never":
+            return "➕ What you add goes to /plans."
+        return (
+            "➕ What you add goes to /plans. Want it in Google or Apple Calendar too? "
+            "Connect one in /calendar."
+        )
+    if ask == "ask":
+        return "📅 Only in AmIFree for now. Connect a calendar to see your plans there too:"
+    if ask == "last":
+        return "📅 Only in AmIFree for now.\n\n" + LAST_CALENDAR_ASK
+    if ask == "later":
+        return "📅 Only in AmIFree for now. Connect a calendar any time in /calendar."
+    return ""
 
 
 def event_card(event: Event, availability: Availability, synced: bool | str = False) -> Reply:

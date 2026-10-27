@@ -255,6 +255,26 @@ def test_an_explicit_change_is_an_update_even_if_the_model_found_nothing():
     assert settle_kind(nothing, clarifying=False, text="lol ok see u later").kind == "unknown"
 
 
+@pytest.mark.parametrize(
+    "text,title",
+    [
+        ("Training Tue 7-9pm and Thu 6-8pm", "Training"),
+        ("Dinner Fri 7pm or Sat 6pm, whichever works", "Dinner"),
+        ("eh makan tmr 12-1pm or thurs 6-7pm? either can", "Makan"),
+        ("Consult slots: Mon 19 Oct 2-3pm, Tue 20 Oct 3-4pm", "Consult slots"),
+        ("Badminton Tuesdays and Thursdays 7-9pm at USC", "Badminton"),
+        ("CS3244 consultation Wed 3pm", "CS3244 consultation"),
+        ("Workshop 16/10 9am-12pm", "Workshop"),
+        ("7-9pm dinner Fri", "Event"),  # starts with the time: nothing to name it by
+        ("Hey guys so for Steph's bday we're doing a surprise at her place Sat", "Event"),
+    ],
+)
+def test_an_untitled_plan_is_named_from_the_message(text, title):
+    from app.services.date_resolution import title_from_text
+
+    assert title_from_text(text) == title
+
+
 def test_4pm_split_into_4_and_pm_is_4pm():
     split = extraction(date_text="30 October", start_time_text="4", end_time_text="pm")
     draft = validate_extraction(split, "Rehearsal 30 October 4pm.", MONDAY, default_minutes=120)

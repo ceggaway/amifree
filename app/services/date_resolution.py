@@ -360,6 +360,37 @@ def single_event_guard(text: str) -> None:
         )
 
 
+# Where the name of a plan stops: a day, a relative day, a date or time number, or "at"/"on".
+_TITLE_END = re.compile(
+    r"\b(?:(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)(?:day)?s?"
+    r"|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?"
+    r"|today|tonight|tdy|tmr|tmrw|tml|tomorrow|this|next|every|each|on|at|from)\b"
+    r"|(?<![A-Za-z0-9])\d|@",  # "CS3244" stays a name; "16/10" and "7pm" end it
+    re.IGNORECASE,
+)
+# Chatty openers that are not part of the name: "eh guys makan tmr" is "Makan".
+_TITLE_LEAD = re.compile(
+    r"^(?:(?:eh|hey|hi|hello|yo|oi|guys|all|everyone|so|ok|okay|reminder|let'?s|lets|jio)\b"
+    r"[\s,!:.-]*)+",
+    re.IGNORECASE,
+)
+
+
+def title_from_text(source: str) -> str:
+    """A name for a plan the model left untitled: the words before its first day or time.
+
+    "Training Tue 7-9pm and Thu 6-8pm" is "Training". "Event" only when the message
+    starts with the time, or the opening is too long to be a name.
+    """
+    line = next((s.strip() for s in source.splitlines() if s.strip()), "")
+    end = _TITLE_END.search(line)
+    head = _TITLE_LEAD.sub("", line[: end.start()] if end else line)
+    head = re.sub(r"[^\w&'+/()#-]+$", "", re.sub(r"^\W+", "", head)).strip()
+    if not head or len(head.split()) > 6:
+        return "Event"
+    return head[:1].upper() + head[1:]
+
+
 def _bare_meridiem_end(extraction: Extraction) -> Extraction:
     """The model split "4pm" into start "4" and end "pm": the pm belongs to the start."""
     end = (extraction.end_time_text or "").strip().casefold().replace(".", "")
@@ -603,7 +634,7 @@ def validate_extraction(
             "Please clarify the start and end dates; events longer than seven days aren't supported."
         )
     return EventDraft(
-        title=(extraction.title or (existing.title if existing else "Event"))[:200],
+        title=(extraction.title or (existing.title if existing else title_from_text(source)))[:200],
         start_at=start,
         end_at=end,
         location=(

@@ -213,6 +213,9 @@ def decided_card(event: Event, availability, note: str, user: User) -> Reply:
 UNDO_WINDOW = timedelta(minutes=30)
 AGENDA_PAGE = 10
 PLANS_PAGE = 7
+# Calendar setup is asked about at most three times, on cards and pickers together: after the
+# first plan kept, then once there are 3 plans, then (saying it's the last time) at 6.
+CALENDAR_ASK_AT = (1, 3, 6)
 
 # Menu button -> the command it runs.
 MENU_COMMANDS = {
@@ -789,19 +792,48 @@ class SchedulingService:
             await self.safe_action(
                 user.id, "verdict", event.id, {"verdict": availability.verdict, "times": True}
             )
-        return [self.times_reply(user, state, events, availabilities)]
+        ask = await self.calendar_mention(user)
+        return [self.times_reply(user, state, events, availabilities, ask=ask)]
+
+    async def calendar_mention(self, user: User) -> str:
+        """While a picker is open: "later" mentions /calendar, "never" once we've asked enough."""
+        asked = await self.repo.count_actions(user.id, "calendar_prompt")
+        return "never" if asked >= len(CALENDAR_ASK_AT) else "later"
 
     def times_reply(
-        self, user: User, state: dict, events: list[Event], availabilities, edit: bool = False
+        self,
+        user: User,
+        state: dict,
+        events: list[Event],
+        availabilities,
+        edit: bool = False,
+        finished: bool = False,
+        ask: str = "later",
     ) -> Reply:
+        """finished: Done was tapped with some added, so the picker closes as if all were.
+        ask: calendar_ask's answer once it closes, calendar_mention's while it's open."""
         relation, added = state["relation"], set(state["added"])
-        done = relation != "alternatives" and len(added) == len(events)
-        keyboard = (
-            None
-            if done
-            else times_keyboard(state["nonce"], relation, [time_label(e) for e in events], added)
+        done = relation != "alternatives" and (finished or len(added) == len(events))
+        if not done:
+            keyboard = times_keyboard(
+                state["nonce"], relation, [time_label(e) for e in events], added
+            )
+        elif ask in ("ask", "last"):
+            # Apple or Google setup one tap away, here instead of the separate "Set up (1 min)"
+            # prompt the single cards get: the same ask, counted once, never twice.
+            keyboard = onboarding.calendar_setup_keyboard()
+        else:
+            keyboard = None
+        text = times_text(
+            relation,
+            events,
+            availabilities,
+            added,
+            state["unread"],
+            synced(user),
+            finished=done,
+            ask=ask,
         )
-        text = times_text(relation, events, availabilities, added, state["unread"], synced(user))
         return Reply(text, keyboard, edit=edit, parse_mode="HTML")
 
     async def choose_time(self, user: User, nonce: str, choice: str) -> list[Reply]:
@@ -824,8 +856,12 @@ class SchedulingService:
             if not added:
                 return [Reply("Okay, nothing added.", edit=True)]
             availabilities = [await self.availability(user, e, e.id) for e in events]
-            reply = self.times_reply(user, pending, events, availabilities, edit=True)
-            return [replace(reply, keyboard=None), *await self.calendar_prompt(user)]
+            ask = await self.calendar_ask(user, "picker")
+            return [
+                self.times_reply(
+                    user, pending, events, availabilities, True, finished=True, ask=ask
+                )
+            ]
         valid = choice.isascii() and choice.isdigit() and int(choice) < len(events)
         if not valid and not (choice == "all" and relation != "alternatives"):
             return [Reply("That button isn't valid. Forward the message again.")]
@@ -847,8 +883,11 @@ class SchedulingService:
         done = len(added) == len(events)
         await self.repo.set_pending(user.id, None if done else pending)
         availabilities = [await self.availability(user, e, e.id) for e in events]
-        reply = self.times_reply(user, pending, events, availabilities, edit=True)
-        return [reply, *await self.calendar_prompt(user)] if done else [reply]
+        if done:
+            ask = await self.calendar_ask(user, "picker")
+        else:
+            ask = await self.calendar_mention(user)
+        return [self.times_reply(user, pending, events, availabilities, edit=True, ask=ask)]
 
     async def preview_block(
         self, user: User, rule: BlockRule | list[BlockRule], typed: bool = True
@@ -1800,23 +1839,37 @@ class SchedulingService:
             replies.append(Reply(onboarding.PHOTOS_CAPTION, photos=photos, album_group="setup"))
         return replies
 
-    async def calendar_prompt(self, user: User) -> list[Reply]:
-        """After a plan is kept: offer calendar setup on the first one, and once more when there
-        are three. Never again after that, and never once plans already go to a calendar."""
+    async def calendar_ask(self, user: User, where: str) -> str:
+        """Whether to ask about calendar setup after a plan is kept, shared by cards and the
+        picker: "ask", "last" (the final ask, which says so), "later" (wait for more plans)
+        or "never" (plans already go to a calendar, or we've asked enough). Recorded when
+        it asks."""
         if synced(user):
-            return []
+            return "never"
         shown = await self.repo.count_actions(user.id, "calendar_prompt")
-        if shown >= 2:
-            return []
-        if shown == 1:
+        if shown >= len(CALENDAR_ASK_AT):
+            return "never"
+        if shown:
             now = self.clock()
             plans = await self.repo.events_between(
                 now - FEED_PAST, now + FEED_AHEAD, [Status.GOING, Status.SAVED], user.id
             )
-            if len(plans) < 3:
-                return []
-        await self.safe_action(user.id, "calendar_prompt", metadata={"time": shown + 1})
-        return [Reply(onboarding.CALENDAR_PROMPT, onboarding.calendar_prompt_keyboard())]
+            if len(plans) < CALENDAR_ASK_AT[shown]:
+                return "later"
+        await self.safe_action(
+            user.id, "calendar_prompt", metadata={"time": shown + 1, "where": where}
+        )
+        return "last" if shown == len(CALENDAR_ASK_AT) - 1 else "ask"
+
+    async def calendar_prompt(self, user: User) -> list[Reply]:
+        """After a card's plan is kept: the separate "Set up (1 min)" prompt, when it's time."""
+        ask = await self.calendar_ask(user, "card")
+        if ask not in ("ask", "last"):
+            return []
+        text = onboarding.CALENDAR_PROMPT
+        if ask == "last":
+            text += "\n\n" + onboarding.LAST_CALENDAR_ASK
+        return [Reply(text, onboarding.calendar_prompt_keyboard())]
 
     async def ensure_feed_token(self, user: User) -> str:
         if user.calendar_feed_token:

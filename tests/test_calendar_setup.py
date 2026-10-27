@@ -40,8 +40,8 @@ class Sent:
 # ---- the prompt ----
 
 
-async def test_first_plan_asks_once_then_again_at_three_then_never(service_factory, reference):
-    service, _ = service_factory(*(plan(n) for n in range(1, 6)))
+async def test_asks_at_the_first_third_and_sixth_plan_then_never(service_factory, reference):
+    service, _ = service_factory(*(plan(n) for n in range(1, 9)))
     await onboard(service, reference)
     first = await keep(service, reference, 1)
     assert len(first) == 2 and first[1].text == onboarding.CALENDAR_PROMPT
@@ -51,6 +51,12 @@ async def test_first_plan_asks_once_then_again_at_three_then_never(service_facto
     assert len(third) == 2 and third[1].text == onboarding.CALENDAR_PROMPT
     assert len(await keep(service, reference, 4)) == 1
     assert len(await keep(service, reference, 5)) == 1
+    sixth = await keep(service, reference, 6)
+    # The last ask says it's the last, and that clashes are still checked without one.
+    assert sixth[1].text == onboarding.CALENDAR_PROMPT + "\n\n" + onboarding.LAST_CALENDAR_ASK
+    assert "still check new plans for clashes" in sixth[1].text
+    assert len(await keep(service, reference, 7)) == 1
+    assert len(await keep(service, reference, 8)) == 1
 
 
 async def test_prompt_buttons(service_factory, reference):

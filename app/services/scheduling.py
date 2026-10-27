@@ -1181,8 +1181,9 @@ class SchedulingService:
                 return await self.google_sync.verify(user, pending, text)
             # Anything else is an ordinary message; the code stays valid until it expires.
             pending = None
-        if pending and pending["stage"] == "times":
-            # A new message closes the "I found 2 events" picker; its buttons then expire.
+        if pending and pending["stage"] in ("times", "recurring"):
+            # A new message closes the "I found 2 events" picker or the "every week?"
+            # question; their buttons then expire.
             await self.repo.set_pending(user.id, None)
             user.pending = pending = None
         if quick_reminders.is_reminder(text):
@@ -1209,7 +1210,7 @@ class SchedulingService:
             user.pending = pending = None
         if pending and pending["stage"] == "edit_field":
             return await self.edit_field(user, pending, text)
-        if pending and pending["stage"] in ("confirm", "choose", "delete", "block", "recurring"):
+        if pending and pending["stage"] in ("confirm", "choose", "delete", "block"):
             return [
                 Reply(
                     "Please finish the pending action using its buttons, or send /cancel before forwarding another event."
@@ -2449,6 +2450,8 @@ class SchedulingService:
                 return [Reply("That confirmation expired. Use /events to open the latest card.")]
             if action == "dismiss":
                 await self.repo.set_pending(user.id, None)
+                if pending["stage"] == "recurring":
+                    return [Reply("Okay, not added.")]
                 return [Reply("Kept unchanged.")]
             if pending["stage"] == "delete":
                 guide, links = await self.unlink_guide(user, feed=True)  # read before it's gone

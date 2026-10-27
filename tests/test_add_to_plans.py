@@ -27,7 +27,7 @@ async def test_add_then_remove(service_factory, reference):
     await onboard(service, reference)
     card = (await service.message(1, 2, TEXT, reference))[0]
     added = (await service.callback(1, tap(card, "Add to plans")))[0]
-    assert "☑️ <b>Added to your plans.</b>" in added.text
+    assert "☑️ <b>Added to /plans.</b>" in added.text
     assert next(iter(repo.events.values())).status == Status.GOING
     assert "Edit details" in labels(added) and "Remove from plans" in labels(added)
     removed = (await service.callback(1, tap(added, "Remove from plans")))[0]

@@ -207,9 +207,11 @@ async def test_new_user_saves_without_nusmods(service_factory, reference):
     assert added[0].edit  # the tapped card is updated in place
     # The first kept plan offers calendar setup once, as its own message.
     assert len(added) == 2 and added[1].text == onboarding.CALENDAR_PROMPT
-    assert "Added to your plans" in added[0].text
-    # Export controls explain the one-off add and how to enable future syncing.
-    assert "connect calendar syncing through /calendar" in added[0].text
+    assert "Added to /plans" in added[0].text
+    # The card offers adding just this one; adding every plan automatically is only asked
+    # once, in the separate prompt, never repeated on the card.
+    assert "Add just this one to your calendar" in added[0].text
+    assert "automatically" not in added[0].text
     event = next(iter(repo.events.values()))
     assert event.status == Status.GOING
     assert "CCA dinner" in (await service.command(1, "events"))[0].text

@@ -304,14 +304,15 @@ def personal_event_card(event: Event, availability: Availability, synced: bool |
     if note and not added:
         text += "\n\n<i>" + note + "</i>"
     if added:
-        text += "\n\n☑️ <b>Added to your plans.</b>"
+        text += "\n\n☑️ <b>Added to /plans.</b>"
         if synced:
             text += f"\nSyncing to {synced_line(synced)} (/calendar to change)."
         if not hide_exports:
+            # Just this one. Adding every plan automatically is the separate, counted
+            # calendar prompt, so it is never asked twice under one card.
             text += (
-                "\n\nWant this event in your personal calendar? Tap <b>Google Calendar</b> "
-                "or <b>Apple Calendar</b> below, then confirm to add it."
-                "\n\nTo add future plans automatically, connect calendar syncing through /calendar."
+                "\n\nAdd just this one to your calendar: tap <b>Google Calendar</b> "
+                "or <b>Apple Calendar</b> below."
             )
     elif event.status in (Status.DECLINED, Status.MAYBE):
         text += "\n\n❌ <b>Not in your plans.</b>"

@@ -115,7 +115,7 @@ async def test_api_and_bot_share_plans_and_isolate_users(api, reference):
     )
     assert going.status_code == 200 and going.json()["status"] == "GOING"
     # The bot sees the Mini App's change.
-    assert "Added to your plans." in (await service.command(1, "events"))[0].text
+    assert "Added to /plans." in (await service.command(1, "events"))[0].text
     edited = await client.patch(
         url,
         headers=bearer(1),

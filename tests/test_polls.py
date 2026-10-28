@@ -96,8 +96,8 @@ async def test_slots_need_two_people_and_the_organiser(service_factory):
     service, repo = service_factory()
     bot, transport, card, taps, poll = await run_poll(service, repo, joiners=())
     assert (
-        "Who's free? project meeting (2 hours)" in card["text"]
-        and "1 person has filled in" in card["text"]
+        "Who's free? Project meeting (2 hours)" in card["text"]
+        and "👥 1 filled in · at least 2 needed" in card["text"]
     )
     assert poll.message_id == 101
     async with bot:
@@ -110,7 +110,7 @@ async def test_slots_need_two_people_and_the_organiser(service_factory):
             await bot.process_update(
                 Update.de_json(group_tap(taps["✋ Count me in"], 2, update_id=update_id), bot.bot)
             )
-        assert "2 people have filled in" in last_card(transport)["text"]
+        assert "👥 2 filled in" in last_card(transport)["text"]
         await bot.process_update(Update.de_json(group_tap(suggest, 2, update_id=8100), bot.bot))
         assert "Only the organiser" in alerts(transport)[-1]["text"]
         # Old vote buttons do nothing until results are out.

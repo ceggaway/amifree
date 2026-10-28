@@ -56,8 +56,8 @@ async def test_poll_shows_deadline_and_suggests_itself_when_it_passes(service_fa
         await seed_poll_card(bot, "sync 1h next week reply by Mon", 30, 1)
         card = transport.sent[-1]
         # Next week starts on Monday, so replies close the night before instead.
-        assert "Reply by Sun 4 Oct, 11:59pm" in card["text"]
-        assert "Looking at Mon 5 Oct to Sun 11 Oct" in card["text"]
+        assert "⏰ Reply by Sun 4 Oct, 11:59pm." in card["text"]
+        assert "📅 Mon 5 Oct – Sun 11 Oct" in card["text"]
         taps = buttons(card["reply_markup"])
         for n, member in enumerate((2, 3)):
             await bot.process_update(
@@ -94,8 +94,9 @@ async def test_deadline_does_nothing_without_enough_schedules(service_factory):
     assert repo.polls[poll.id].status == "COLLECTING"
     # The card says why no slots appeared, instead of still promising them at the reply time.
     text = last_card(transport)["text"]
-    assert "Replies have closed" in text and "taps Suggest slots" in text
-    assert "Looking at Mon 5 Oct, 08:00–22:00." in text  # one day, not "Mon 5 Oct to Mon 5 Oct"
+    assert "fewer than 2 people's free times are known" in text and "taps Suggest slots" in text
+    assert "📅 Mon 5 Oct\n" in text  # one day, not "Mon 5 Oct – Mon 5 Oct"
+    assert "Reply by" not in text  # replies have closed
     edits = len([c for c in transport.calls if c[0] == "editMessageText"])
     await service.notifier.run()  # nothing changed since: not redrawn again
     assert len([c for c in transport.calls if c[0] == "editMessageText"]) == edits
@@ -166,11 +167,11 @@ def test_a_poll_starting_today_still_gets_time_to_reply_and_says_where_times_sta
     end = datetime(2026, 10, 7, tzinfo=SG)
     deadline = reply_deadline(reference, end, 60, reference)
     assert deadline == reference + timedelta(hours=3)
-    assert "Looking at Sun 4 Oct (from 3pm) to Tue 6 Oct" in card_for(reference, end, deadline)
+    assert "📅 Sun 4 Oct (from 3pm) – Tue 6 Oct" in card_for(reference, end, deadline)
     # Posted at 9:40pm: nothing fits after replies close, so the times start the next day.
     late = datetime(2026, 10, 4, 21, 40, tzinfo=SG)
     deadline = reply_deadline(late, end, 60, late)
-    assert "Looking at Mon 5 Oct to Tue 6 Oct" in card_for(late, end, deadline)
+    assert "📅 Mon 5 Oct – Tue 6 Oct" in card_for(late, end, deadline)
     # Replies closing at 9:53am: the first half-hour slot is 10am.
     odd = datetime(2026, 10, 5, 9, 53, tzinfo=SG)
-    assert "Looking at Mon 5 Oct (from 10am)" in card_for(reference, end, odd)
+    assert "📅 Mon 5 Oct (from 10am)" in card_for(reference, end, odd)

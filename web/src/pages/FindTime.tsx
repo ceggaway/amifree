@@ -45,7 +45,8 @@ function range(choice: string): [string, string] {
     const saturday = shiftKey(week, 5);
     return [saturday < today ? today : saturday, shiftKey(week, 6)];
   }
-  return [shiftKey(today, 1), shiftKey(today, 7)];
+  // Starts the day after tomorrow: replies close the night before, so members get at least a day.
+  return [shiftKey(today, 2), shiftKey(today, 8)];
 }
 
 /** The last day replies can close: the day before the first day, so every day asked about can still be chosen. */

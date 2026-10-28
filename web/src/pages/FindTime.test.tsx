@@ -44,8 +44,8 @@ describe("FindTime", () => {
   it("limits the reply-by date to the day before the first day", () => {
     show();
     const input = screen.getByLabelText(/Reply by/) as HTMLInputElement;
-    // "Next 7 days" starts tomorrow, so replies close by today.
-    expect(input.max).toBe(todayKey());
+    // "Next 7 days" starts the day after tomorrow, so replies close by tomorrow night.
+    expect(input.max).toBe(shiftKey(todayKey(), 1));
     expect(screen.getByText(/so every day can still be chosen/)).toBeTruthy();
   });
 
@@ -67,8 +67,8 @@ describe("FindTime", () => {
     expect(sent[0]).toMatchObject({
       title: "Dinner",
       minutes: 150,
-      first: shiftKey(todayKey(), 1),
-      last: shiftKey(todayKey(), 7),
+      first: shiftKey(todayKey(), 2),
+      last: shiftKey(todayKey(), 8),
       reply_by: null,
     });
     expect(await screen.findByText("My times page")).toBeTruthy();

@@ -23,6 +23,11 @@ sender's spelling, abbreviations and am/pm exactly:
 Use null for anything not stated. Never infer a date, time, venue or duration. A missing
 date or end time is not ambiguity: just leave that field null.
 
+title: what the person will actually do, in a few words. When the times are for a part of a
+bigger event (a practice, rehearsal, briefing, tech run or meeting for it), name both, with
+short forms spelt out: "thanks for signing up for culture night, our prac will be on 8-11pm
+26 Oct" gives title "Culture Night practice", not "Culture Night".
+
 Read the whole message. A scheduled activity is a plan even when it is embedded in meeting
 notes, minutes, a task list or a status update, rather than phrased as an invitation.
 When there is exactly ONE upcoming activity to attend, extract that activity even if the

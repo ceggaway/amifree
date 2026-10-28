@@ -174,9 +174,39 @@ def read_times(
         ):
             continue  # the model repeated the first time in other_times
         drafts.append(draft)
-    return Times(drafts, unread)
+    return Times(_name_parts(drafts, source), unread)
+
+
+def _label(title: str, source: str) -> bool:
+    """Whether the message starts a line with this title as a label: "Full run: Thu 7pm"."""
+    return bool(re.search(rf"(?m)^\s*{re.escape(title)}\s*:", source, re.IGNORECASE))
+
+
+def _name_parts(drafts: list[EventDraft], source: str) -> list[EventDraft]:
+    """Labelled parts of one named event all carry its name: the model writes "Grease
+    blocking" for "Blocking: Tue 7pm" but sometimes just "Full run" for the next line."""
+    if len(drafts) < 2:
+        return drafts
+    first = drafts[0].title
+    for label in re.findall(r"(?m)^\s*([^\W\d][^:\n]{0,40}?)\s*:", source):
+        if first.casefold().endswith(" " + label.casefold()):
+            name = first[: -len(label) - 1]
+            break
+    else:
+        return drafts
+    return [drafts[0]] + [
+        d.model_copy(update={"title": f"{name} {_lower_first(d.title)}"})
+        if _label(d.title, source) and name.casefold() not in d.title.casefold()
+        else d
+        for d in drafts[1:]
+    ]
 
 
 def item_message_id(message_id: int, index: int) -> int:
     """Events are unique per source message, so each extra time gets its own negative id."""
     return message_id if index == 0 else -(message_id * 10 + index)
+
+
+def _lower_first(title: str) -> str:
+    """ "Full run" -> "full run", but "UCC tour" stays."""
+    return title[0].lower() + title[1:] if title[1:2].islower() else title

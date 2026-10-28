@@ -507,3 +507,35 @@ async def test_till_4pm_answers_the_end_time_question(service_factory, reference
     assert "end" in question.text
     [card] = await service.message(1, 8, "till 4pm", reference)
     assert card.text.startswith("✅") and "3PM–4PM" in card.text
+
+
+GREASE = "Hall Production 'Grease'\nBlocking: Tue 13 Oct 7-10pm\nFull run: Thu 15 Oct 7-10pm"
+
+
+def parts(first: str, second: str):
+    return extraction(
+        title=first,
+        date_text="Tue 13 Oct",
+        start_time_text="7",
+        end_time_text="10pm",
+        relation="separate",
+        other_times=[
+            other(title=second, date_text="Thu 15 Oct", start_time_text="7", end_time_text="10pm")
+        ],
+    )
+
+
+def test_labelled_parts_all_carry_the_event_name(reference):
+    times = read_times(parts("Grease blocking", "Full run"), GREASE, reference)
+    assert [d.title for d in times.drafts] == ["Grease blocking", "Grease full run"]
+    named = read_times(parts("Grease blocking", "Grease full run"), GREASE, reference)
+    assert named.drafts[1].title == "Grease full run"
+
+
+def test_unlabelled_or_unrelated_titles_are_left_alone(reference):
+    # "Dinner with John" ends with a word of the message, but nothing is a "Label:" line.
+    source = "Dinner with John Tue 13 Oct 7-10pm, lunch with Mary Thu 15 Oct 7-10pm"
+    times = read_times(parts("Dinner with John", "Lunch with Mary"), source, reference)
+    assert [d.title for d in times.drafts] == ["Dinner with John", "Lunch with Mary"]
+    plain = read_times(parts("Blocking", "Full run"), GREASE, reference)
+    assert [d.title for d in plain.drafts] == ["Blocking", "Full run"]

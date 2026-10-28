@@ -30,6 +30,7 @@ from app.services.image_reader import ImageReader
 from app.services.nusmods import NUSModsImporter
 from app.services.personal_calendar import CalendarReader
 from app.services.scheduling import SchedulingService
+from app.services.voice_reader import VoiceReader
 
 log = logging.getLogger(__name__)
 
@@ -133,6 +134,11 @@ def create_app(
                 image_reader=(
                     ImageReader(ai, settings.openai_vision_model or settings.openai_model)
                     if settings.read_pictures
+                    else None
+                ),
+                voice_reader=(
+                    VoiceReader(ai, settings.openai_transcribe_model)
+                    if settings.read_voice
                     else None
                 ),
             )

@@ -1,4 +1,6 @@
 import asyncio
+import dataclasses
+import html
 import logging
 import warnings
 
@@ -24,6 +26,8 @@ from app.services.image_reader import MAX_BYTES, PictureError
 from app.services.jobs import Notifier, Undeliverable
 from app.services.nusmods import ImportError
 from app.services.scheduling import SLOW_DOWN
+from app.services.voice_reader import MAX_BYTES as MAX_VOICE_BYTES
+from app.services.voice_reader import MAX_SECONDS, VoiceError
 
 log = logging.getLogger(__name__)
 GROUP_COMMANDS = {
@@ -46,6 +50,19 @@ PICTURE_UNREADABLE = (
     "I couldn't read that picture just now. Forward it with its caption, or type the"
     " details, like:\nDinner Fri 7-9pm at Vivo"
 )
+UNSUPPORTED_VOICE = (
+    "I can't listen to voice notes right now. Type the details instead, like:\n"
+    "Dinner Fri 7-9pm at Vivo"
+)
+VOICE_TOO_LONG = (
+    f"That voice note is over {MAX_SECONDS} seconds. Send a shorter one with just the plan,"
+    " like: “Dinner Friday 7 to 9pm at Vivo”."
+)
+VOICE_UNHEARD = (
+    "I couldn't make out that voice note. Try again somewhere quieter, or type the details,"
+    " like:\nDinner Fri 7-9pm at Vivo"
+)
+HEARD_PREVIEW = 300
 ERROR = "I couldn't process that message. Please try again, or send the date/time manually. /cancel clears a pending draft."
 
 
@@ -93,12 +110,19 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
                 "message",
                 kind="forward"
                 if message.forward_origin
+                else "voice"
+                if message.voice
                 else "picture"
                 if message.photo or message.document
                 else "text",
             )
             reference = message.forward_origin.date if message.forward_origin else message.date
-            text, notice = await gather_text(message, context, service, update.effective_user.id)
+            if message.voice:
+                text, notice = await hear(message, context, service, update.effective_user.id)
+            else:
+                text, notice = await gather_text(
+                    message, context, service, update.effective_user.id
+                )
             if not text.strip():
                 # Telegram delivers album pictures individually. A decorative picture
                 # with no event text is not a failed invitation: the caption or other
@@ -110,6 +134,8 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
                 replies = await service.message(
                     update.effective_user.id, message.message_id, text, reference
                 )
+                if message.voice and replies:
+                    replies[0] = with_heard(replies[0], text)
         await send(update, replies)
         service.google_sync_soon(update.effective_user.id)
     except ImportError as exc:
@@ -164,6 +190,49 @@ async def gather_text(message, context, service, telegram_id: int) -> tuple[str,
             log.warning("picture_read_failed error_type=%s", type(exc).__name__)
             notice = PICTURE_UNREADABLE
     return "\n".join(p.strip() for p in parts if p and p.strip()), notice
+
+
+async def hear(message, context, service, telegram_id: int) -> tuple[str, str | None]:
+    """The words in a voice note, and a notice to show when there are none.
+
+    The audio is downloaded into memory, handed to the speech service and dropped: it is
+    never written to disk or stored."""
+    voice = message.voice
+    if service.voice_reader is None:
+        return "", UNSUPPORTED_VOICE
+    with warnings.catch_warnings():
+        # PTB is moving `duration` from seconds to a timedelta; accept either.
+        warnings.simplefilter("ignore")
+        length = voice.duration or 0
+    seconds = length.total_seconds() if hasattr(length, "total_seconds") else length
+    if seconds > MAX_SECONDS:
+        return "", VOICE_TOO_LONG
+    try:
+        if (voice.file_size or 0) > MAX_VOICE_BYTES:
+            raise VoiceError("too large")
+        file = await context.bot.get_file(voice.file_id)
+        data = bytes(await file.download_as_bytearray())
+        heard = await service.read_voice(telegram_id, data)
+        return (heard or "", None if heard else VOICE_UNHEARD)
+    except VoiceError as exc:
+        return "", str(exc) if str(exc) == SLOW_DOWN else VOICE_UNHEARD
+    except Exception as exc:
+        # Download or speech-API trouble: say so instead of the generic error.
+        log.warning("voice_read_failed error_type=%s", type(exc).__name__)
+        return "", VOICE_UNHEARD
+
+
+def with_heard(reply: Reply, heard: str) -> Reply:
+    """The reply with what the voice note said above it, so a misheard word can be caught."""
+    if len(heard) > HEARD_PREVIEW:
+        heard = heard[: HEARD_PREVIEW - 1].rstrip() + "…"
+    if reply.parse_mode == "HTML":
+        line = f"🎙 <i>I heard: “{html.escape(heard)}”</i>"
+    elif reply.parse_mode is None:
+        line = f"🎙 I heard: “{heard}”"
+    else:
+        return reply  # Markdown would need its own escaping; no reply uses it today.
+    return dataclasses.replace(reply, text=f"{line}\n\n{reply.text}")
 
 
 def split_command(text: str) -> tuple[str, str]:
@@ -411,7 +480,7 @@ async def unsupported(update, context):
             update,
             [
                 Reply(
-                    "I can read text, posters and screenshots, but not voice notes, videos or"
+                    "I can read text, posters, screenshots and voice notes, but not videos or"
                     " stickers. Forward the post with its text or picture, or type the"
                     " details, like:\nDinner Fri 7-9pm at Vivo"
                 )
@@ -671,6 +740,8 @@ def register_handlers(application: Application, service):
             (filters.PHOTO | filters.Document.IMAGE | filters.POLL) & ~filters.COMMAND, message
         )
     )
+    # A voice note in a private chat; in groups it is left alone like other chatter.
+    application.add_handler(MessageHandler(filters.VOICE & filters.ChatType.PRIVATE, message))
     application.add_handler(MessageHandler(filters.COMMAND, command))
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, added_to_group))
     application.add_handler(MessageHandler(filters.ALL, unsupported))

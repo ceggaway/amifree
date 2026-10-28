@@ -25,7 +25,8 @@ WELCOME = (
     "Connect your <b>personal calendar</b> so I can check for clashes with existing events. "
     "If your classes aren’t included, I’ll help you connect your NUSMods timetable separately.\n\n"
     "<b>2. Send me a plan</b>\n"
-    "Forward an event message or photo, or type the details. I’ll show "
+    "Forward an event message or photo, type the details, or <b>send a voice note</b> 🎙 "
+    "like “Dinner Friday 7 to 9pm at Vivo”. I’ll show "
     "<b>whether you’re free or have any clashes</b>.\n\n"
     "<b>3. Save with a tap</b>\n"
     "Tap <b>Add to plans</b> to save the event. With calendar syncing enabled, I’ll "
@@ -294,14 +295,14 @@ PLAN_ACTIONS = (
 
 SKIPPED = (
     "<b>Send me your first plan</b>\n\n"
-    "Forward an event message or photo, or type the details.\n\n"
+    "Forward an event message or photo, send a voice note, or type the details.\n\n"
     "I’ll check for clashes with plans you’ve saved with me. Your timetable and personal "
     "calendar events won’t be included until you connect them through /calendar.\n\n" + PLAN_ACTIONS
 )
 
 SEND_PLAN = (
     "✅ <b>You’re ready to send a plan</b>\n\n"
-    "Forward an event message or photo, or type the details. I’ll check for clashes with "
+    "Forward an event message or photo, send a voice note, or type the details. I’ll check for clashes with "
     "your connected calendar and plans you’ve saved with me.\n\n" + PLAN_ACTIONS + "\n\n"
     "You can add NUSMods later with /calendar if your classes are missing."
 )
@@ -314,7 +315,7 @@ CLASSES_QUESTION = (
 
 SCHEDULE_READY = (
     "✅ <b>You’re ready to send a plan</b>\n\n"
-    "Forward an event message or photo, or type the details. I’ll check your connected "
+    "Forward an event message or photo, send a voice note, or type the details. I’ll check your connected "
     "calendar, timetable and saved plans for clashes.\n\n" + PLAN_ACTIONS
 )
 
@@ -371,7 +372,8 @@ def nusmods_added(academic_year: str, semester: int, *, personal_connected: bool
         "✅ <b>Timetable connected</b>\n"
         f"I can now check for clashes with your classes and exams, alongside {sources}.\n\n"
         "<b>Send me your first plan</b>\n"
-        "Forward an event message or photo, or type the details.\n\n" + PLAN_ACTIONS
+        "Forward an event message or photo, send a voice note, or type the details.\n\n"
+        + PLAN_ACTIONS
     )
 
 

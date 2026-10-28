@@ -220,6 +220,7 @@ def _canonical(text: str) -> str:
     for pattern, replacement in _DATE_ALIASES:
         text = re.sub(pattern, replacement, text)
     text = re.sub(r"(?<=\d)[:.](?=\d{2})", "", text)  # 7:30 / 7.30 -> 730
+    text = re.sub(r"(?<=\d)(\s*)([ap])\.m\b\.?", r"\1\2m", text)  # 9 p.m. -> 9 pm
     text = re.sub(r"(?<=\d)\s+(?=[ap]\.?m\b)", "", text)  # 11 pm -> 11pm
     return re.sub(r"\s+", " ", text).strip()
 
@@ -252,7 +253,7 @@ _SEP = r"\s*(?:-|–|—|to|till|until)\s*"
 
 def _shared_suffix_start(value: str, source: str) -> bool:
     """'2pm' for a message that says '2-4pm': the model copied the range's pm onto the start."""
-    m = re.fullmatch(r"(\d{1,2})(?:[:.]?(\d{2}))?\s*([ap])\.?m", value.strip().casefold())
+    m = re.fullmatch(r"(\d{1,2})(?:[:.]?(\d{2}))?\s*([ap])\.?m\.?", value.strip().casefold())
     if not m:
         return False
     hour, minutes, ampm = m[1], m[2] or "00", m[3]
@@ -592,8 +593,8 @@ def validate_extraction(
         else existing.start_at.date()
     )
     end_meridiem_match = re.search(
-        r"(am|pm)$", (extraction.end_time_text or "").replace(" ", "").lower()
-    )
+        r"(am|pm)$", re.sub(r"[\s.]", "", extraction.end_time_text or "").lower()
+    )  # "9pm", "9 PM" and "9 p.m." all lend their pm to a bare start
     start_raw = extraction.start_time_text
     # "7-9pm", "6.30 to 8pm", "730-9pm": the start borrows the end's am/pm.
     shared_suffix = bool(

@@ -252,7 +252,7 @@ async def test_poll_is_bound_to_its_chat_and_needs_a_topic(service_factory):
         # A retried command does not post a second poll.
         await seed_poll_card(bot, "project meeting 2h tomorrow", 30, 1)
     assert len(repo.polls) == 1 and len(repo.poll_people[poll.id]) == 1
-    assert "mini app" in (await service.command(1, "whosfree"))[0].text
+    assert "in the app" in (await service.command(1, "whosfree"))[0].text
 
 
 async def test_members_with_no_schedule_are_never_counted_as_free(service_factory):

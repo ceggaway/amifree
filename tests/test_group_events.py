@@ -251,8 +251,8 @@ async def test_groups_ignore_chatter_and_foreign_cards(service_factory, referenc
     assert "private chat" in texts[1] and "isn't valid" in texts[2]
     assert not [e for e in repo.events.values() if e.group_event_id]
     assert next(iter(repo.events.values())).status == Status.PREVIEW
-    assert "mini app" in transport.sent[-2]["text"]
-    assert "mini app" in transport.sent[-1]["text"]
+    assert "in the app" in transport.sent[-2]["text"]
+    assert "in the app" in transport.sent[-1]["text"]
     assert len(repo.group_events) == 1
 
 
@@ -271,5 +271,5 @@ async def test_retired_creation_commands_do_not_parse_or_create_plans(service_fa
             await bot.process_update(Update.de_json(update, bot.bot))
             await bot.process_update(Update.de_json(update, bot.bot))
     assert not repo.group_events and not repo.polls and not service.extractor.calls
-    assert all("mini app" in message["text"] for message in transport.sent)
-    assert "mini app" in (await service.command(1, "event"))[0].text
+    assert all("in the app" in message["text"] for message in transport.sent)
+    assert "in the app" in (await service.command(1, "event"))[0].text

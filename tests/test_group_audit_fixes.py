@@ -180,5 +180,8 @@ async def test_help_works_inside_a_group(service_factory):
     async with bot:
         for n, command in enumerate(("/help", "/start")):
             await bot.process_update(Update.de_json(group_message(command, 60 + n, 1), bot.bot))
-            assert "AmIFree in this group" in transport.sent[-1]["text"]
-            assert "/event" in transport.sent[-1]["text"] and "Manage" in transport.sent[-1]["text"]
+            text = transport.sent[-1]["text"]
+            assert "How to use AmIFree in this group" in text
+            assert "/app" in text and "/attendance" in text
+            # Retired commands are never advertised.
+            assert "/event" not in text and "/whosfree" not in text

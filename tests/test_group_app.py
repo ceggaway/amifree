@@ -381,7 +381,7 @@ async def test_app_and_help_keep_the_existing_group_entry_point(service_factory)
             await bot.process_update(Update.de_json(group_message(command, 70 + n, 1), bot.bot))
     urls = [[b["url"] for row in markup(m)["inline_keyboard"] for b in row] for m in transport.sent]
     assert urls == [[f"https://t.me/AmIFreeTestBot/app?startapp=g_{CODE}"]] * 2
-    assert "AmIFree in this group" in transport.sent[-1]["text"]
+    assert "How to use AmIFree in this group" in transport.sent[-1]["text"]
 
 
 @pytest.mark.parametrize("app_settings", [APP, {}])
@@ -401,8 +401,9 @@ async def test_creation_commands_are_retired_even_without_a_configured_app(
             )
         ):
             await bot.process_update(Update.de_json(group_message(command, 90 + n, 1), bot.bot))
-            assert "mini app" in transport.sent[-1]["text"]
-            assert "reply_markup" not in transport.sent[-1]
+            assert "in the app" in transport.sent[-1]["text"]
+            # With the app set up, the reply carries the button that opens it.
+            assert ("reply_markup" in transport.sent[-1]) == bool(app_settings)
     assert not repo.group_events and not repo.polls and not service.extractor.calls
 
 

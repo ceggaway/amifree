@@ -17,7 +17,7 @@ from telegram.ext import (
 
 from app.bot.delivery import telegram_profile, webhook_delivery
 from app.bot.keyboards import links_keyboard
-from app.bot.messages import GROUP_HELP, GROUP_WELCOME, Reply, send_reply
+from app.bot.messages import APP_MISSING, APP_ONLY, GROUP_HELP, GROUP_WELCOME, Reply, send_reply
 from app.services import analytics
 from app.services.app_links import group_links
 from app.services.image_reader import MAX_BYTES, PictureError
@@ -335,22 +335,14 @@ async def group_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, ope
             if name == "detect":
                 await send(update, [Reply("Spotting plans in chat is no longer supported.")])
                 return
-            if name in ("event", "plan", "whosfree"):
-                await send(
-                    update,
-                    [
-                        Reply(
-                            "Create events and find a common time in the mini app. Open it with /app."
-                        )
-                    ],
-                )
-                return
-            if name in ("help", "start", "app"):
+            if name in ("event", "plan", "whosfree", "help", "start", "app"):
                 links = links_keyboard(group_links(service.settings, update.effective_chat.id))
-                if name == "app" and links:
+                if name in ("event", "plan", "whosfree"):
+                    text = APP_ONLY if links else APP_MISSING
+                elif name == "app" and links:
                     text = "Open AmIFree for this group:"
                 else:
-                    text = GROUP_HELP + ("\n\nOr do it all in the app:" if links else "")
+                    text = GROUP_HELP
                 await send(update, [Reply(text, links)])
                 return
             if name not in GROUP_COMMANDS:

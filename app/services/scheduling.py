@@ -454,7 +454,8 @@ class SchedulingService:
         if command in ("event", "plan", "whosfree"):
             return [
                 Reply(
-                    "Create events and find a common time in the mini app. Open it in your group with /app."
+                    "Events and polls are made in the app, inside a group. Add me to your group,"
+                    " then send /app there to schedule an event or find a time."
                 )
             ]
         if command in (

@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     default_event_duration_minutes: int = Field(default=120, ge=0, le=1440)
     read_pictures: bool = True
     openai_vision_model: str = ""
+    # Voice notes in private chats are turned into text and read like a typed message.
+    read_voice: bool = True
+    openai_transcribe_model: str = "gpt-4o-mini-transcribe"
     retain_extractions: bool = False
     extraction_retention_days: int = Field(default=7, ge=1, le=90)
     pending_ttl_hours: int = Field(default=24, ge=1, le=168)

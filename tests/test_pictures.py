@@ -93,7 +93,7 @@ async def test_an_image_sent_as_a_file_is_read(chat, reference):
         # A PDF or other file is not an image: it is left alone.
         await feed(bot, document_payload("application/pdf", message_id=8))
     assert len(service.image_reader.calls) == 1
-    assert "I can read text, posters and screenshots" in transport.sent[-1]["text"]
+    assert "I can read text, posters, screenshots and voice notes" in transport.sent[-1]["text"]
 
 
 async def test_a_picture_with_no_event_text_says_so(chat):

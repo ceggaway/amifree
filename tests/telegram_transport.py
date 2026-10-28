@@ -116,6 +116,21 @@ def photo_payload(caption, message_id=1, telegram_id=1, *, forward_timestamp=Non
     return payload
 
 
+def voice_payload(message_id=1, telegram_id=1, *, duration=5, group=False):
+    """A voice note: no text or caption, just the recording's file id and length."""
+    payload = message_payload("x", message_id, telegram_id, group=group)
+    message = payload["message"]
+    del message["text"]
+    message["voice"] = {
+        "file_id": "voice",
+        "file_unique_id": "v1",
+        "duration": duration,
+        "mime_type": "audio/ogg",
+        "file_size": 9000,
+    }
+    return payload
+
+
 def message_payload(text, message_id=1, telegram_id=1, *, group=False, forward_timestamp=None):
     result = {
         "update_id": message_id,

@@ -128,6 +128,7 @@ from app.services.quick_blocks import (
 from app.services.ratelimit import RateLimiter
 from app.services.usual_times import describe as describe_usual
 from app.services.usual_times import parse_usual
+from app.services.voice_reader import VoiceError
 
 log = logging.getLogger(__name__)
 
@@ -245,6 +246,7 @@ class SchedulingService:
         clock: Callable[[], datetime] | None = None,
         calendar_reader=None,
         image_reader=None,
+        voice_reader=None,
         google=None,
     ):
         self.repo, self.extractor, self.importer, self.settings = (
@@ -258,6 +260,8 @@ class SchedulingService:
         self.calendar_reader = calendar_reader
         # Reads the text in forwarded pictures; None leaves pictures to their captions.
         self.image_reader = image_reader
+        # Turns private voice notes into text; None tells people to type instead.
+        self.voice_reader = voice_reader
         # AmIFree's own Google account, for students who share a calendar with it; None
         # where no key is set (the feature is then hidden).
         self.google = google
@@ -289,6 +293,7 @@ class SchedulingService:
         # Bound what one person can spend: LLM extractions and outbound calendar fetches.
         self.extraction_limit = RateLimiter(15, 300)
         self.picture_limit = RateLimiter(10, 300)  # a picture is also an extraction afterwards
+        self.voice_limit = RateLimiter(10, 300)  # so is a voice note
         self.calendar_limit = RateLimiter(8, 600)
         self.feedback_limit = RateLimiter(5, 600)
 
@@ -1110,6 +1115,16 @@ class SchedulingService:
         if not self.picture_limit.allow(telegram_id):
             raise PictureError(SLOW_DOWN)
         return await self.image_reader.read(data, mime)
+
+    async def read_voice(self, telegram_id: int, data: bytes) -> str | None:
+        """The words in a voice note. None when voice notes can't be read right now.
+
+        Raises VoiceError for a note that isn't usable or when sent too fast."""
+        if self.voice_reader is None:
+            return None
+        if not self.voice_limit.allow(telegram_id):
+            raise VoiceError(SLOW_DOWN)
+        return await self.voice_reader.read(data)
 
     async def message(
         self, telegram_id: int, message_id: int, text: str, reference: datetime

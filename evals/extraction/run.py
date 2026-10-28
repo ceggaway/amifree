@@ -88,6 +88,7 @@ class Prediction:
     # multi: "separate" or "alternatives", and [start, end] of every time in the picker.
     relation: str | None = None
     times: list[list[str]] | None = None
+    titles: list[str] | None = None  # multi: the title of every time in the picker
     # recurring: the repeating weekdays (Monday 0); start/end are the first session.
     weekdays: list[int] | None = None
 
@@ -166,6 +167,7 @@ def predict(
                 relation=extraction.relation,
                 times=[[d.start_at.isoformat(), d.end_at.isoformat()] for d in times.drafts],
                 title=times.drafts[0].title,
+                titles=[d.title for d in times.drafts],
                 location=times.drafts[0].location,
                 extraction=raw,
             )
@@ -254,6 +256,11 @@ def score(case: dict, pred: Prediction) -> dict:
         seen = {(local(s), local(e)) for s, e in pred.times}
         result["time_ok"] = wanted == seen
         result["title_ok"] = matches_any(pred.title, exp.get("title_any"))
+        if exp.get("every_title_any") is not None:
+            # "Into the Woods tech run" and "... dress rehearsal": every line names the show.
+            result["title_ok"] = result["title_ok"] is not False and all(
+                matches_any(t, exp["every_title_any"]) for t in pred.titles or [None]
+            )
         if seen - wanted:
             result["verdict"] = "wrong_time"  # the picker offers a time nobody wrote
         elif seen != wanted:
@@ -401,6 +408,8 @@ def report(summary: dict, rows: list[dict], cases: list[dict], meta: dict) -> st
         got = r["outcome"] + (f" {r['start'][:16]} → {r['end'][:16]}" if r.get("start") else "")
         if r.get("times"):
             got += f" {r['relation']} " + ", ".join(f"{s[:16]} → {e[:16]}" for s, e in r["times"])
+        if r["verdict"] == "wrong_title":
+            got += " titled " + " / ".join(r.get("titles") or [str(r.get("title"))])
         detail = r.get("clarification") or r.get("error") or ""
         case = by_id[r["id"]]
         text = " → ".join(case.get("turns") or [case["text"]]).replace("\n", " ⏎ ")

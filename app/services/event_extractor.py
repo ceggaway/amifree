@@ -23,10 +23,17 @@ sender's spelling, abbreviations and am/pm exactly:
 Use null for anything not stated. Never infer a date, time, venue or duration. A missing
 date or end time is not ambiguity: just leave that field null.
 
-title: what the person will actually do, in a few words. When the times are for a part of a
-bigger event (a practice, rehearsal, briefing, tech run or meeting for it), name both, with
+title: what the person will actually do, in a few words, so it still makes sense alone in a
+calendar. When the time is for a part of a bigger event the message names (a practice,
+rehearsal, briefing, tech run, sound check, interview or meeting for it), name both, with
 short forms spelt out: "thanks for signing up for culture night, our prac will be on 8-11pm
-26 Oct" gives title "Culture Night practice", not "Culture Night".
+26 Oct" gives "Culture Night practice", not "Culture Night"; "thanks for volunteering for
+the Open House! Briefing on 15 Oct 6-8pm" gives "Open House briefing", not "Briefing".
+This applies to every title, including each one in other_times: never a part's name alone
+("Dress rehearsal", "Full run", "Briefing"). "Into the Woods / Tech run: Sat 2-6pm / Dress
+rehearsal: Sun 2-6pm" gives "Into the Woods tech run" and other_times title "Into the
+Woods dress rehearsal". A role or group in the message is not the bigger event: "signed up
+as a helper for Sports Day, helper training 9am" gives "Sports Day helper training".
 
 Read the whole message. A scheduled activity is a plan even when it is embedded in meeting
 notes, minutes, a task list or a status update, rather than phrased as an invitation.

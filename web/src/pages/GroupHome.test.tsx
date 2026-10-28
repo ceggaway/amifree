@@ -40,7 +40,7 @@ describe("group page", () => {
     const card = await screen.findByRole("article", { name: "Dinner with friends" });
     expect(within(card).getByText("Reply by Mon, 26 Oct")).toBeTruthy();
     expect(within(card).queryByText(/joined/)).toBeNull();
-    expect(within(card).getByRole("link", { name: "Add your availability for Dinner with friends" }).getAttribute("href")).toBe("/poll/dinner/mine");
+    expect(within(card).getByRole("link", { name: "Fill in my availabilities for Dinner with friends" }).getAttribute("href")).toBe("/poll/dinner/mine");
   });
 
   it("shows an upcoming date tile, title, time and details action without extra metadata", async () => {
@@ -64,8 +64,8 @@ describe("group page", () => {
       { ...poll, id: "results", title: "Results ready", status: "OPEN" },
     ] });
     expect(await screen.findByRole("heading", { name: "Needs you" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Add your availability for Project meeting" }).getAttribute("href")).toBe("/poll/pending/mine");
-    expect(screen.getByRole("link", { name: "Add your availability for Project meeting" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Fill in my availabilities for Project meeting" }).getAttribute("href")).toBe("/poll/pending/mine");
+    expect(screen.getByRole("link", { name: "Fill in my availabilities for Project meeting" })).toBeTruthy();
     expect(screen.queryByText("Already answered")).toBeNull();
     expect(screen.queryByText("Results ready")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Finding a time" })).toBeNull();
@@ -88,7 +88,7 @@ describe("group page", () => {
   it("still asks a new organiser to submit availability after starting a poll", async () => {
     show({ ...base, polls: [{ id: "started", title: "Project meeting", status: "COLLECTING", duration_minutes: 60, joined: 1, joined_by_me: true, organiser: true, availability_submitted: false, deadline_at: null, min_joined: 3 }] });
     expect(await screen.findByRole("heading", { name: "Needs you" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Add your availability for Project meeting" }).getAttribute("href")).toBe("/poll/started/mine");
+    expect(screen.getByRole("link", { name: "Fill in my availabilities for Project meeting" }).getAttribute("href")).toBe("/poll/started/mine");
   });
 
   it("links to turnout for everyone, and hides detection from non-admins", async () => {

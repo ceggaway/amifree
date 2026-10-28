@@ -99,7 +99,7 @@ export function FindTime() {
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>Find a time together</h1>
+      <h1>Find a time that works</h1>
       <label>
         What for
         <input value={title} maxLength={200} required placeholder="Project meeting" onChange={(e) => setTitle(e.target.value)} />

@@ -108,7 +108,15 @@ export function MyTimes() {
     <section className="heatmap">
       <h1>{title}</h1>
       {justPosted && <p className="banner ok">Poll posted ✓ Now add your own times.</p>}
-      <p className="instruction">Tap or drag over the times you're <strong>free</strong>.</p>
+      <p className="instruction">
+        {grid.submitted ? (
+          <>Tap or drag to change the times you're <strong>free</strong>.</>
+        ) : grid.known && !grid.from_usual ? (
+          <>Times your calendar leaves open are ticked. Tap or drag to untick any you <strong>can't</strong> make.</>
+        ) : (
+          <>Tap or drag over the times you're <strong>free</strong>.</>
+        )}
+      </p>
       <div className="grid-legend">
         <span><i className="swatch free" aria-hidden="true">✓</i> Free</span>
         <span><i className="swatch off" aria-hidden="true" /> Not free</span>

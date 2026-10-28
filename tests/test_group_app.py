@@ -279,7 +279,7 @@ async def test_find_a_time_from_the_app(hub, reference):
     created = await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)
     assert created.status_code == 200
     poll = repo.polls[created.json()["id"]]
-    assert poll.message_id == 701 and "Who's free? Project meeting (2h)" in posted[0][1].text
+    assert poll.message_id == 701 and "Who's free? Project meeting (2 hours)" in posted[0][1].text
     # A reply-by inside the dates is moved back to the night before the first day, so no day
     # asked about is lost before the best times are worked out.
     assert poll.deadline_at == datetime.combine(reference.date(), time(23, 59), SG)

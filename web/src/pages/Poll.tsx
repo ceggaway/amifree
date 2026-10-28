@@ -65,7 +65,7 @@ export function Poll() {
   }
 
   async function pick(slot: number) {
-    if (!(await confirm("Create an event at this time? This closes the poll and posts the event in the group for RSVPs."))) return;
+    if (!(await confirm("Confirm this time? This closes the poll and announces it in the group. Everyone who's free then is added as Going."))) return;
     setBusy(true);
     try {
       const { event_id } = await api.pick(p!.id, slot);

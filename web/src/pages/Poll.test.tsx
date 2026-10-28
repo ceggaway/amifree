@@ -117,7 +117,7 @@ describe("poll page", () => {
     const confirmation = vi.spyOn(window, "confirm").mockReturnValue(false);
     show({ ...base, organiser: true });
     fireEvent.click((await screen.findAllByRole("button", { name: "Choose" }))[0]);
-    expect(confirmation).toHaveBeenCalledWith("Create an event at this time? This closes the poll and posts the event in the group for RSVPs.");
+    expect(confirmation).toHaveBeenCalledWith("Confirm this time? This closes the poll and announces it in the group. Everyone who's free then is added as Going.");
     expect(calls).toEqual([]);
     expect(screen.queryByText("Event page")).toBeNull();
   });

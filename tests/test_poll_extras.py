@@ -94,7 +94,8 @@ async def test_deadline_does_nothing_without_enough_schedules(service_factory):
     assert repo.polls[poll.id].status == "COLLECTING"
     # The card says why no slots appeared, instead of still promising them at the reply time.
     text = last_card(transport)["text"]
-    assert "The reply time has passed" in text and "taps Suggest" in text
+    assert "Replies have closed" in text and "taps Suggest slots" in text
+    assert "Looking at Mon 5 Oct, 08:00–22:00." in text  # one day, not "Mon 5 Oct to Mon 5 Oct"
     edits = len([c for c in transport.calls if c[0] == "editMessageText"])
     await service.notifier.run()  # nothing changed since: not redrawn again
     assert len([c for c in transport.calls if c[0] == "editMessageText"]) == edits

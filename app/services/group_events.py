@@ -677,7 +677,10 @@ class GroupEventService:
         started = [e for e in mine if e.status == "ACTIVE" and e.start_at <= now]
         if not started:
             return GroupResult(
-                post=Reply("You have no event that has started in the last 30 days in this group.")
+                post=Reply(
+                    "/attendance lets organisers mark who came, once their event has started."
+                    " You have no event in this group that started in the last 30 days."
+                )
             )
         event = started[-1]
         return GroupResult(

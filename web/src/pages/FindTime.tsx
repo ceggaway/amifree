@@ -45,15 +45,12 @@ function range(choice: string): [string, string] {
     const saturday = shiftKey(week, 5);
     return [saturday < today ? today : saturday, shiftKey(week, 6)];
   }
-  return [shiftKey(today, 1), shiftKey(today, 7)];
+  // Starts the day after tomorrow: replies close the night before, so members get at least a day.
+  return [shiftKey(today, 2), shiftKey(today, 8)];
 }
 
-/** The deadline the server uses when none is chosen: halfway between now and the end of the last day. */
-function defaultDeadline(last: string) {
-  const now = Date.now();
-  const end = startOfDay(shiftKey(last, 1)).getTime();
-  return day(new Date(now + (end - now) / 2));
-}
+/** The last day replies can close: the day before the first day, so every day asked about can still be chosen. */
+const lastReplyDay = (first: string) => shiftKey(first, -1);
 
 /** The /whosfree poll from a form: members add their times, the best slots are suggested. */
 export function FindTime() {
@@ -69,6 +66,12 @@ export function FindTime() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // The server closes replies by the day before the first day. A first day of today leaves no
+  // such day: replies then close a few hours after posting.
+  const replyDay = lastReplyDay(first);
+  const canChoose = replyDay >= todayKey();
+  const chosenReply = canChoose && replyBy && replyBy <= replyDay ? replyBy : "";
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -80,7 +83,7 @@ export function FindTime() {
         minutes,
         first,
         last,
-        reply_by: replyBy || null,
+        reply_by: chosenReply || null,
       });
       haptic("success");
       forget(`group:${code}`);
@@ -96,7 +99,7 @@ export function FindTime() {
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>Find a time together</h1>
+      <h1>Find a time that works</h1>
       <label>
         What for
         <input value={title} maxLength={200} required placeholder="Project meeting" onChange={(e) => setTitle(e.target.value)} />
@@ -178,13 +181,19 @@ export function FindTime() {
           </p>
         )}
       </fieldset>
-      <label>
-        <span>
-          Reply by <span className="hint">(optional)</span>
-        </span>
-        <input type="date" value={replyBy} min={todayKey()} max={last} onChange={(e) => setReplyBy(e.target.value)} />
-        <span className="hint">Leave blank for {defaultDeadline(last)}.</span>
-      </label>
+      {canChoose ? (
+        <label>
+          <span>
+            Reply by <span className="hint">(optional)</span>
+          </span>
+          <input type="date" value={chosenReply} min={todayKey()} max={replyDay} onChange={(e) => setReplyBy(e.target.value)} />
+          <span className="hint">
+            Leave blank for {day(startOfDay(replyDay))}, 11:59pm. Replies close before the first day, so every day can still be chosen.
+          </span>
+        </label>
+      ) : (
+        <p className="hint">Replies close 3 hours after you post. Times before then are skipped.</p>
+      )}
       {error && <p className="error">{error}</p>}
       <button type="submit" className="on big" disabled={busy}>
         {busy ? "Posting…" : "Post the poll to the group"}

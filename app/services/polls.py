@@ -10,7 +10,7 @@ Privacy rules, enforced here rather than left to the caller:
 import html
 import logging
 import re
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError
@@ -121,6 +121,28 @@ BY_DAY = re.compile(
     re.IGNORECASE,
 )
 DEFAULT_DEADLINE = timedelta(hours=48)
+MIN_REPLY = timedelta(hours=3)
+
+
+def reply_deadline(
+    start: datetime, end: datetime, minutes: int, now: datetime, chosen: date | None = None
+) -> datetime:
+    """When replies close: 11:59pm the day before the first day, so every day asked about can
+    still be chosen. A chosen day later than that is moved back to it.
+
+    When the first day is too soon for that, members still get MIN_REPLY to answer, and the
+    times before the deadline drop out (the card shows where the times start)."""
+    last_day = start.astimezone(SG).date() - timedelta(days=1)
+    deadline = datetime.combine(min(chosen, last_day) if chosen else last_day, time(23, 59), SG)
+    deadline = min(max(deadline, now + MIN_REPLY), end - timedelta(minutes=minutes))
+    return max(deadline, now + timedelta(minutes=30))
+
+
+def first_time(poll: Poll) -> datetime:
+    """The earliest a slot can start: suggestions are made once replies close."""
+    if poll.deadline_at and poll.deadline_at > poll.window_start:
+        return poll.deadline_at
+    return poll.window_start
 
 
 def parse_deadline(text: str, now: datetime) -> tuple[str, datetime]:
@@ -186,9 +208,7 @@ def poll_card(
     app_url: str | None = None,
     now: datetime | None = None,
 ) -> Reply:
-    hours = poll.duration_minutes / 60
-    length = f"{hours:g}h" if poll.duration_minutes % 30 == 0 else f"{poll.duration_minutes}min"
-    head = f"🗳 Who's free? {poll.title} ({length})"
+    head = f"🗳 Who's free? {poll.title} ({length_words(poll.duration_minutes)})"
     if poll.status == "CLOSED":
         return Reply(head + "\n✅ The organiser chose a time. It's posted in the group below.")
     deadline = (
@@ -198,24 +218,40 @@ def poll_card(
     )
     if poll.status == "COLLECTING":
         last = poll.window_end - timedelta(days=1)
-        suggest = "suggests them in 📱 Open" if app_url else "taps Suggest"
+        first = first_time(poll).astimezone(SG)
+        # Slots start on the half hour: 9:53am means the first slot is at 10am.
+        first += -(first - first.replace(minute=0, second=0, microsecond=0)) % STEP
+        if first + timedelta(minutes=poll.duration_minutes) > datetime.combine(
+            first.date(), DAY_END, SG
+        ):
+            first = datetime.combine(first.date() + timedelta(days=1), DAY_START, SG)
+        looking = f"{first:%a %-d %b}"
+        if first.time() > DAY_START:
+            looking += f" (from {clock(first)})"
+        if first.date() < last.date():
+            looking += f" to {last:%a %-d %b}"
+        filled = f"{joined} {'person has' if joined == 1 else 'people have'} filled in so far."
         if now and poll.deadline_at and poll.deadline_at <= now:
             # The automatic suggestion ran and could not open the poll: say why, not "soon".
+            how = (
+                "tap Fill in my availabilities"
+                if app_url
+                else "send their NUSMods or calendar link to the bot, then tap Count me in"
+            )
+            then = "taps See best times now on the poll page" if app_url else "taps Suggest slots"
             when = (
-                f"\n\nJoined: {joined}. The reply time has passed, but slots need at least"
-                f" {MIN_PARTICIPANTS} members whose schedule AmIFree can read. Members can send"
-                " their NUSMods or calendar link to the bot"
-                + (", or set their times in 📱 Open" if app_url else "")
-                + f". Then the organiser {suggest}."
+                f"\n\n{filled} Replies have closed, but the best times need at least"
+                f" {MIN_PARTICIPANTS} people whose times are known. Members can still {how}."
+                f" Then the organiser {then}."
             )
         else:
             when = (
-                f"\n\nJoined: {joined}. When the reply time passes, the best times are posted"
-                f" here and the organiser chooses one ({MIN_PARTICIPANTS} must have joined)."
+                f"\n\n{filled} When replies close, the best times are posted here for the"
+                f" organiser to choose from. At least {MIN_PARTICIPANTS} people need to fill in."
             )
         return Reply(
             head
-            + f"\nLooking at {poll.window_start:%a %-d %b} to {last:%a %-d %b}, 08:00–22:00."
+            + f"\nLooking at {looking}, 08:00–22:00."
             + deadline
             + (
                 "\n\nTap Fill in my availabilities to add your free times for this poll."
@@ -307,8 +343,8 @@ def announcement(event, free: int, of: int) -> Reply:
     lines += [
         f"👥 {free} of {of} who filled in are free",
         "",
-        "Everyone who filled in is added as Going, and to their calendar if connected."
-        " Can't make it? Update it in /plans.",
+        "Everyone who's free then is added as Going, and to their calendar if connected."
+        " Can't make it after all? Update it in /plans.",
     ]
     return Reply("\n".join(lines), parse_mode="HTML")
 
@@ -356,10 +392,8 @@ class PollService:
         request = args[:300]
         rest, deadline = parse_deadline(request, now)
         title, minutes, start, end = parse_request(rest, now)
-        # Slots must be suggested while there is still time to meet. A chosen reply-by time is
-        # kept unless it leaves no slot; the default is at most halfway through the window.
-        latest = end - timedelta(minutes=minutes) if rest != request else now + (end - now) / 2
-        deadline = max(min(deadline, latest), now + timedelta(minutes=30))
+        chosen = deadline.astimezone(SG).date() if rest != request else None
+        deadline = reply_deadline(start, end, minutes, now, chosen)
         poll = await self.repo.create_poll(
             user.id, chat_id, message_id, title, minutes, start, end, deadline
         )
@@ -541,9 +575,13 @@ class PollService:
         return event
 
     async def add_participants(self, poll: Poll, event) -> None:
-        """Everyone who submitted their availability is marked Going, so the meeting is in their
-        plans and syncs to any calendar they connected. They can change it in /plans."""
+        """Everyone who filled in and is free at the chosen time is marked Going, so the meeting
+        is in their plans and syncs to any calendar they connected. Someone busy then, or whose
+        times aren't known, is left alone. They can change it in /plans."""
         for person in await self.repo.poll_participants(poll.id):
+            busy = await self.busy_spans(poll, person)
+            if busy is None or clashes(busy, event.start_at, event.end_at):
+                continue
             await self.repo.group_rsvp(person, event, Status.GOING)
             user = await self.repo.get_user(person)
             if user:
@@ -643,7 +681,7 @@ class PollService:
         usual = await self.repo.get_usual(user_id) if submitted is None else []
         ticked = set(submitted or [])
         now = self.scheduling.clock()
-        days = heatmap_cells(poll.window_start, poll.window_end, {}, max(poll.window_start, now))
+        days = heatmap_cells(poll.window_start, poll.window_end, {}, max(first_time(poll), now))
         for day in days:
             for cell in day["cells"]:
                 start = datetime.fromisoformat(cell["start_at"])

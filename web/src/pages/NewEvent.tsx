@@ -80,7 +80,7 @@ export function NewEvent() {
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>Create an event</h1>
+      <h1>Schedule an event</h1>
       <label>
         What
         <input value={form.title} maxLength={200} required placeholder="Dinner" onChange={(e) => set({ title: e.target.value })} />

@@ -41,6 +41,22 @@ describe("FindTime", () => {
     expect(screen.getByText(/Leave blank for/)).toBeTruthy();
   });
 
+  it("limits the reply-by date to the day before the first day", () => {
+    show();
+    const input = screen.getByLabelText(/Reply by/) as HTMLInputElement;
+    // "Next 7 days" starts the day after tomorrow, so replies close by tomorrow night.
+    expect(input.max).toBe(shiftKey(todayKey(), 1));
+    expect(screen.getByText(/so every day can still be chosen/)).toBeTruthy();
+  });
+
+  it("explains the short reply time when the first day is today", () => {
+    show();
+    fireEvent.click(screen.getByRole("button", { name: "Pick dates" }));
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: todayKey() } });
+    expect(screen.queryByLabelText(/Reply by/)).toBeNull();
+    expect(screen.getByText(/Replies close 3 hours after you post/)).toBeTruthy();
+  });
+
   it("posts a custom length", async () => {
     show();
     fireEvent.change(screen.getByPlaceholderText("Project meeting"), { target: { value: "Dinner" } });
@@ -51,8 +67,8 @@ describe("FindTime", () => {
     expect(sent[0]).toMatchObject({
       title: "Dinner",
       minutes: 150,
-      first: shiftKey(todayKey(), 1),
-      last: shiftKey(todayKey(), 7),
+      first: shiftKey(todayKey(), 2),
+      last: shiftKey(todayKey(), 8),
       reply_by: null,
     });
     expect(await screen.findByText("My times page")).toBeTruthy();

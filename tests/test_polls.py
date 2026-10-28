@@ -95,7 +95,10 @@ def last_card(transport):
 async def test_slots_need_two_people_and_the_organiser(service_factory):
     service, repo = service_factory()
     bot, transport, card, taps, poll = await run_poll(service, repo, joiners=())
-    assert "Who's free? project meeting (2h)" in card["text"] and "Joined: 1" in card["text"]
+    assert (
+        "Who's free? project meeting (2 hours)" in card["text"]
+        and "1 person has filled in" in card["text"]
+    )
     assert poll.message_id == 101
     async with bot:
         suggest = taps["Suggest slots (organiser)"]
@@ -107,7 +110,7 @@ async def test_slots_need_two_people_and_the_organiser(service_factory):
             await bot.process_update(
                 Update.de_json(group_tap(taps["✋ Count me in"], 2, update_id=update_id), bot.bot)
             )
-        assert "Joined: 2" in last_card(transport)["text"]
+        assert "2 people have filled in" in last_card(transport)["text"]
         await bot.process_update(Update.de_json(group_tap(suggest, 2, update_id=8100), bot.bot))
         assert "Only the organiser" in alerts(transport)[-1]["text"]
         # Old vote buttons do nothing until results are out.
@@ -216,6 +219,11 @@ async def test_choosing_announces_the_time_with_calendar_buttons(service_factory
         row = markup["inline_keyboard"]
         assert [b["text"] for b in row[0]] == ["Option 1", "Option 2", "Option 3"]
         assert row[1][0]["text"] == "View all times"
+        # Late joiners: 4 marked no free times at all, 5 has no schedule to check.
+        busy_member = await repo.ensure_user(4)
+        await repo.poll_join(poll.id, busy_member.id)
+        await repo.set_availability(poll.id, busy_member.id, [])
+        await repo.poll_join(poll.id, (await repo.ensure_user(5)).id)
         sent_before = len(transport.sent)
         await bot.process_update(
             Update.de_json(group_tap(row[0][0]["callback_data"], 1, update_id=8700), bot.bot)
@@ -227,7 +235,8 @@ async def test_choosing_announces_the_time_with_calendar_buttons(service_factory
     assert "📅 Mon, 5 Oct 2026" in text and "🕑 08:00–10:00" in text
     # A notice, not a card: no buttons.
     assert not announced.get("reply_markup")
-    # Everyone who submitted their availability is added as Going (their calendars follow).
+    # Only people free at the chosen time are added as Going (their calendars follow). Someone
+    # busy then, or whose times aren't known, is not.
     event = next(iter(repo.group_events.values()))
     going = {e.user_id for e in repo.events.values() if e.group_event_id == event.id}
     assert going == {(await repo.ensure_user(t)).id for t in (1, 2, 3)}

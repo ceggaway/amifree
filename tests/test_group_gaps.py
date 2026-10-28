@@ -219,7 +219,7 @@ async def test_attendance_needs_an_event_that_has_started(service_factory):
     bot, transport = make_bot(service)
     async with bot:
         await run(bot, "/attendance", 91)
-    assert "no event that has started" in transport.sent[-1]["text"]
+    assert "no event in this group that started" in transport.sent[-1]["text"]
 
 
 # ---- Clubs Pro ----

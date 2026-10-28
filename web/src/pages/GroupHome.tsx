@@ -89,7 +89,7 @@ function PollRow({ poll, onCancelled }: { poll: GroupPoll; onCancelled: () => vo
   const collecting = poll.status === "COLLECTING";
   const waiting = poll.waiting ?? 0;
   const mine = collecting && !poll.availability_submitted;
-  const action = mine ? "Add your availability" : collecting ? "See who's filled in" : "Choose a time";
+  const action = mine ? "Fill in my availabilities" : collecting ? "See who's filled in" : "Choose a time";
   const to = mine ? `/poll/${poll.id}/mine` : `/poll/${poll.id}`;
 
   async function remind() {

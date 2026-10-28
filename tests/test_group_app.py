@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 import httpx
 import pytest
@@ -11,7 +11,7 @@ from telegram.error import TimedOut
 
 from app.config import Settings
 from app.main import create_app
-from app.schemas.event import EventDraft, Status
+from app.schemas.event import SG, EventDraft, Status
 from app.services.app_links import chat_code, parse_chat_code
 from app.services.group_hub import request_message_id
 from tests.conftest import extraction
@@ -279,8 +279,11 @@ async def test_find_a_time_from_the_app(hub, reference):
     created = await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)
     assert created.status_code == 200
     poll = repo.polls[created.json()["id"]]
-    assert poll.message_id == 701 and "Who's free? Project meeting (2h)" in posted[0][1].text
-    assert poll.deadline_at.date() == first + timedelta(days=1)
+    assert poll.message_id == 701 and "Who's free? Project meeting (2 hours)" in posted[0][1].text
+    # A reply-by inside the dates is moved back to the night before the first day, so no day
+    # asked about is lost before the best times are worked out.
+    assert poll.deadline_at == datetime.combine(reference.date(), time(23, 59), SG)
+    assert f"Looking at {first:%a %-d %b} to" in posted[0][1].text
     # As with /whosfree, asking for the poll counts the organiser in, and nobody else.
     assert await repo.poll_participants(poll.id) == [(await repo.ensure_user(1)).id]
     overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(2))).json()

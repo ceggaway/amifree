@@ -13,6 +13,7 @@ HELP = """<b>AmIFree</b> — forward me a plan, I'll tell you if you're free and
 
 <b>How to use me</b>
 📩 Forward or type a plan with a time, like "Dinner Fri 7-9pm at Vivo". I check it, then you tap Add to plans or Skip.
+🎙 Or send a voice note (up to a minute) saying the plan. The card shows what I heard.
 ⏰ Forward a deadline, like "report due Fri 11:59pm". I'll remind you the day before.
 📅 Connect a calendar or NUSMods so I can see your classes and busy times (optional).
 

@@ -111,6 +111,16 @@ def test_weekday_that_disagrees_with_the_date_asks():
             "19:30",
             "21:00",
         ),
+        # Speech-to-text writes "p.m." with dots; the model often copies it as "pm".
+        *[
+            (
+                "Dinner tomorrow, 7 to 9 p.m.",
+                dict(date_text="tomorrow", start_time_text=a, end_time_text=b),
+                "19:00",
+                "21:00",
+            )
+            for a, b in [("7pm", "9pm"), ("7 p.m.", "9 p.m."), ("7", "9 p.m."), ("7", "9 PM")]
+        ],
         (
             "Lunch Thursday noon to 1.30pm",
             dict(date_text="Thursday", start_time_text="noon", end_time_text="1.30pm"),

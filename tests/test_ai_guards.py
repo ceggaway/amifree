@@ -27,6 +27,7 @@ MONDAY = datetime(2026, 10, 12, 10, tzinfo=SG)
         ("Thursday", "Rehearsal Thurs 7pm"),
         ("7:30pm", "Bubble tea run tmr 730pm-830pm"),
         ("14:00", "Time: 1400 – 1500"),
+        ("11pm", "our prac will be on 8-11 pm 26 Oct"),
     ],
 )
 def test_harmless_rewording_is_accepted(value, source):

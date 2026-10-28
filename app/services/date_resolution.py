@@ -220,6 +220,7 @@ def _canonical(text: str) -> str:
     for pattern, replacement in _DATE_ALIASES:
         text = re.sub(pattern, replacement, text)
     text = re.sub(r"(?<=\d)[:.](?=\d{2})", "", text)  # 7:30 / 7.30 -> 730
+    text = re.sub(r"(?<=\d)\s+(?=[ap]\.?m\b)", "", text)  # 11 pm -> 11pm
     return re.sub(r"\s+", " ", text).strip()
 
 

@@ -179,16 +179,23 @@ GROUP_WELCOME = (
     " create an event or find a time that works for everyone."
 )
 
-GROUP_HELP = """👋 AmIFree in this group
+GROUP_HELP = """👋 How to use AmIFree in this group
 
-/event Dinner Fri 7-9pm at Vivo: post an event card (or reply /event to a plan message)
-   Everyone taps Going or Can't, and can check privately whether they're free.
-   "every Tue/Thu until week 13" makes a recurring event.
-/whosfree project meeting 2h next week: find a time; members tap the times that work
-/attendance, /stats, /export: turnout for your events (sent to you privately)
+📅 Schedule an event: you set the time and place. Everyone taps Going or Can't on the card.
+🗳 Find a time that works: everyone fills in when they're free. You get the best times privately and choose one.
 
-Organisers: tap 📱 Details (or ⚙️ Manage) on a card to edit, cancel, nudge or mark who came.
-To use your schedule, open a private chat with me and send /start."""
+Both are in the app. Send /app any time to open it.
+
+For organisers, sent to you privately:
+/attendance: mark who came to your latest event
+/stats: turnout for your events
+/export: attendance as a spreadsheet
+
+💡 To let AmIFree check when you're free, open a private chat with me and send /start."""
+APP_ONLY = (
+    "Events and polls are made in the app now. Tap below to schedule an event or find a time."
+)
+APP_MISSING = "Events and polls are made in the app now, which isn't set up for this bot yet."
 
 
 def group_card(

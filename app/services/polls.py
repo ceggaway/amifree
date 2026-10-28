@@ -208,15 +208,12 @@ def poll_card(
     app_url: str | None = None,
     now: datetime | None = None,
 ) -> Reply:
-    head = f"🗳 Who's free? {poll.title} ({length_words(poll.duration_minutes)})"
+    title = poll.title[:1].upper() + poll.title[1:]
+    head = f"🗳 Who's free? {title} ({length_words(poll.duration_minutes)})"
     if poll.status == "CLOSED":
         return Reply(head + "\n✅ The organiser chose a time. It's posted in the group below.")
-    deadline = (
-        f"\nReply by {poll.deadline_at:%a %-d %b}, {clock(poll.deadline_at)}"
-        if poll.deadline_at
-        else ""
-    )
     if poll.status == "COLLECTING":
+        # Short lines, the one thing to do first: people skim a group card.
         last = poll.window_end - timedelta(days=1)
         first = first_time(poll).astimezone(SG)
         # Slots start on the half hour: 9:53am means the first slot is at 10am.
@@ -225,44 +222,44 @@ def poll_card(
             first.date(), DAY_END, SG
         ):
             first = datetime.combine(first.date() + timedelta(days=1), DAY_START, SG)
-        looking = f"{first:%a %-d %b}"
+        days = f"{first:%a %-d %b}"
         if first.time() > DAY_START:
-            looking += f" (from {clock(first)})"
+            days += f" (from {clock(first)})"
         if first.date() < last.date():
-            looking += f" to {last:%a %-d %b}"
-        filled = f"{joined} {'person has' if joined == 1 else 'people have'} filled in so far."
-        if now and poll.deadline_at and poll.deadline_at <= now:
-            # The automatic suggestion ran and could not open the poll: say why, not "soon".
-            how = (
-                "tap Fill in my availabilities"
-                if app_url
-                else "send their NUSMods or calendar link to the bot, then tap Count me in"
+            days += f" – {last:%a %-d %b}"
+        lines = [head, f"📅 {days}"]
+        closed = bool(now and poll.deadline_at and poll.deadline_at <= now)
+        if poll.deadline_at and not closed:
+            lines.append(
+                f"⏰ Reply by {poll.deadline_at:%a %-d %b}, {clock(poll.deadline_at)}."
+                " Then the organiser picks a time."
             )
-            then = "taps See best times now on the poll page" if app_url else "taps Suggest slots"
-            when = (
-                f"\n\n{filled} Replies have closed, but the best times need at least"
-                f" {MIN_PARTICIPANTS} people whose times are known. Members can still {how}."
-                f" Then the organiser {then}."
-            )
-        else:
-            when = (
-                f"\n\n{filled} When replies close, the best times are posted here for the"
-                f" organiser to choose from. At least {MIN_PARTICIPANTS} people need to fill in."
-            )
-        return Reply(
-            head
-            + f"\nLooking at {looking}, 08:00–22:00."
-            + deadline
-            + (
-                "\n\nTap Fill in my availabilities to add your free times for this poll."
-                if app_url
-                else "\n\nTap Count me in to let AmIFree use your schedule for this poll."
-            )
-            + " The group only sees how many people are free in each slot, never who is busy"
-            + " or why."
-            + when,
-            poll_keyboard(poll, app_url),
+        lines.append("")
+        lines.append(
+            "👉 Tap Fill in my availabilities to mark when you're free."
+            if app_url
+            else "👉 Tap Count me in so AmIFree can check your schedule."
         )
+        lines.append("")
+        if closed:
+            # The automatic suggestion ran and could not open the poll: say why, not "soon".
+            # Joining isn't enough: a member's times must be known (filled in, or a schedule).
+            then = (
+                "Members can still fill in, then the organiser taps See best times now."
+                if app_url
+                else "Members can send their NUSMods or calendar link to the bot, then the"
+                " organiser taps Suggest slots."
+            )
+            lines.append(
+                f"⚠️ Replies have closed, but fewer than {MIN_PARTICIPANTS} people's free times"
+                f" are known. {then}"
+            )
+        elif joined < MIN_PARTICIPANTS:
+            lines.append(f"👥 {joined} filled in · at least {MIN_PARTICIPANTS} needed")
+        else:
+            lines.append(f"👥 {joined} filled in")
+        lines.append("🔒 The group sees how many are free, never who's busy.")
+        return Reply("\n".join(lines), poll_keyboard(poll, app_url))
     known = poll.slots[0].get("of", joined) if poll.slots else joined
     return Reply(
         head

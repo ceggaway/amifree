@@ -283,7 +283,7 @@ async def test_find_a_time_from_the_app(hub, reference):
     # A reply-by inside the dates is moved back to the night before the first day, so no day
     # asked about is lost before the best times are worked out.
     assert poll.deadline_at == datetime.combine(reference.date(), time(23, 59), SG)
-    assert f"Looking at {first:%a %-d %b} to" in posted[0][1].text
+    assert f"📅 {first:%a %-d %b} –" in posted[0][1].text
     # As with /whosfree, asking for the poll counts the organiser in, and nobody else.
     assert await repo.poll_participants(poll.id) == [(await repo.ensure_user(1)).id]
     overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(2))).json()

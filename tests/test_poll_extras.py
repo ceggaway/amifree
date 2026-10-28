@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 
 from telegram import Update
 
-from app.schemas.event import SG
-from app.services.polls import heatmap_cells, parse_deadline
+from app.schemas.event import SG, Poll
+from app.services.polls import heatmap_cells, parse_deadline, poll_card, reply_deadline
 from tests.test_group_events import alerts, buttons, group_tap, make_bot, seed_poll_card
 from tests.test_polls import last_card, run_poll, with_schedule
 
@@ -55,7 +55,9 @@ async def test_poll_shows_deadline_and_suggests_itself_when_it_passes(service_fa
     async with bot:
         await seed_poll_card(bot, "sync 1h next week reply by Mon", 30, 1)
         card = transport.sent[-1]
-        assert "Reply by Mon 5 Oct, 11:59pm" in card["text"]
+        # Next week starts on Monday, so replies close the night before instead.
+        assert "Reply by Sun 4 Oct, 11:59pm" in card["text"]
+        assert "Looking at Mon 5 Oct to Sun 11 Oct" in card["text"]
         taps = buttons(card["reply_markup"])
         for n, member in enumerate((2, 3)):
             await bot.process_update(
@@ -64,7 +66,7 @@ async def test_poll_shows_deadline_and_suggests_itself_when_it_passes(service_fa
                 )
             )
         poll = next(iter(repo.polls.values()))
-        assert poll.deadline_at == datetime(2026, 10, 5, 23, 59, tzinfo=SG)
+        assert poll.deadline_at == datetime(2026, 10, 4, 23, 59, tzinfo=SG)
         # Before the deadline nothing happens by itself.
         service.clock = lambda: reference + timedelta(hours=3)
         assert "suggested" not in await service.notifier.run()
@@ -131,3 +133,43 @@ async def test_poll_card_links_to_the_mini_app_when_configured(service_factory):
     labels = [b["text"] for row in markup["inline_keyboard"] for b in row]
     assert labels == ["🗓 Fill in my availabilities"]
     assert alerts(transport) == []
+
+
+def test_replies_close_the_night_before_the_first_day(reference):
+    # reference: Sun 4 Oct, noon. Asking about Thu 8 Oct to Sun 11 Oct.
+    start, end = datetime(2026, 10, 8, tzinfo=SG), datetime(2026, 10, 12, tzinfo=SG)
+    night_before = datetime(2026, 10, 7, 23, 59, tzinfo=SG)
+    assert reply_deadline(start, end, 60, reference) == night_before
+    # A chosen day inside the dates is moved back; an earlier one is kept.
+    assert reply_deadline(start, end, 60, reference, night_before.date().replace(day=9)) == (
+        night_before
+    )
+    earlier = datetime(2026, 10, 5, 23, 59, tzinfo=SG)
+    assert reply_deadline(start, end, 60, reference, earlier.date()) == earlier
+
+
+def card_for(start, end, deadline, minutes=60):
+    poll = Poll(
+        id="p",
+        chat_id=-1,
+        title="sync",
+        duration_minutes=minutes,
+        window_start=start,
+        window_end=end,
+        deadline_at=deadline,
+    )
+    return poll_card(poll, 1, {}).text
+
+
+def test_a_poll_starting_today_still_gets_time_to_reply_and_says_where_times_start(reference):
+    end = datetime(2026, 10, 7, tzinfo=SG)
+    deadline = reply_deadline(reference, end, 60, reference)
+    assert deadline == reference + timedelta(hours=3)
+    assert "Looking at Sun 4 Oct (from 3pm) to Tue 6 Oct" in card_for(reference, end, deadline)
+    # Posted at 9:40pm: nothing fits after replies close, so the times start the next day.
+    late = datetime(2026, 10, 4, 21, 40, tzinfo=SG)
+    deadline = reply_deadline(late, end, 60, late)
+    assert "Looking at Mon 5 Oct to Tue 6 Oct" in card_for(late, end, deadline)
+    # Replies closing at 9:53am: the first half-hour slot is 10am.
+    odd = datetime(2026, 10, 5, 9, 53, tzinfo=SG)
+    assert "Looking at Mon 5 Oct (from 10am)" in card_for(reference, end, odd)

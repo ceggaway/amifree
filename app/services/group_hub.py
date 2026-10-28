@@ -20,7 +20,7 @@ from app.schemas.event import SG, EventDraft, GroupEvent, Status
 from app.services.app_links import chat_code
 from app.services.date_resolution import Clarification
 from app.services.group_events import CHECK_IN_OPENS, member_label
-from app.services.polls import MIN_PARTICIPANTS
+from app.services.polls import MIN_PARTICIPANTS, reply_deadline
 from app.services.ratelimit import RateLimiter
 from app.services.recurrence import Recurrence
 
@@ -664,11 +664,7 @@ class GroupHub:
             raise Refused("Choose dates from today on, with the last on or after the first.")
         if (last - first).days >= POLL_DAYS:
             raise Refused(f"Choose at most {POLL_DAYS} days.")
-        latest = end - timedelta(minutes=minutes)
-        deadline = (
-            datetime.combine(reply_by, time(23, 59), SG) if reply_by else now + (end - now) / 2
-        )
-        deadline = max(min(deadline, latest), now + timedelta(minutes=30))
+        deadline = reply_deadline(start, end, minutes, now, reply_by)
         poll = await self.repo.create_poll(
             user.id, chat_id, message_id, title.strip()[:200], minutes, start, end, deadline
         )

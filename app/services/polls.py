@@ -10,7 +10,7 @@ Privacy rules, enforced here rather than left to the caller:
 import html
 import logging
 import re
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError
@@ -121,6 +121,28 @@ BY_DAY = re.compile(
     re.IGNORECASE,
 )
 DEFAULT_DEADLINE = timedelta(hours=48)
+MIN_REPLY = timedelta(hours=3)
+
+
+def reply_deadline(
+    start: datetime, end: datetime, minutes: int, now: datetime, chosen: date | None = None
+) -> datetime:
+    """When replies close: 11:59pm the day before the first day, so every day asked about can
+    still be chosen. A chosen day later than that is moved back to it.
+
+    When the first day is too soon for that, members still get MIN_REPLY to answer, and the
+    times before the deadline drop out (the card shows where the times start)."""
+    last_day = start.astimezone(SG).date() - timedelta(days=1)
+    deadline = datetime.combine(min(chosen, last_day) if chosen else last_day, time(23, 59), SG)
+    deadline = min(max(deadline, now + MIN_REPLY), end - timedelta(minutes=minutes))
+    return max(deadline, now + timedelta(minutes=30))
+
+
+def first_time(poll: Poll) -> datetime:
+    """The earliest a slot can start: suggestions are made once replies close."""
+    if poll.deadline_at and poll.deadline_at > poll.window_start:
+        return poll.deadline_at
+    return poll.window_start
 
 
 def parse_deadline(text: str, now: datetime) -> tuple[str, datetime]:
@@ -198,6 +220,18 @@ def poll_card(
     )
     if poll.status == "COLLECTING":
         last = poll.window_end - timedelta(days=1)
+        first = first_time(poll).astimezone(SG)
+        # Slots start on the half hour: 9:53am means the first slot is at 10am.
+        first += -(first - first.replace(minute=0, second=0, microsecond=0)) % STEP
+        if first.time() > DAY_START:
+            if first + timedelta(minutes=poll.duration_minutes) > datetime.combine(
+                first.date(), DAY_END, SG
+            ):
+                looking = f"{first + timedelta(days=1):%a %-d %b}"  # nothing left that day
+            else:
+                looking = f"{first:%a %-d %b} (from {clock(first)})"
+        else:
+            looking = f"{first:%a %-d %b}"
         suggest = "suggests them in 📱 Open" if app_url else "taps Suggest"
         if now and poll.deadline_at and poll.deadline_at <= now:
             # The automatic suggestion ran and could not open the poll: say why, not "soon".
@@ -215,7 +249,7 @@ def poll_card(
             )
         return Reply(
             head
-            + f"\nLooking at {poll.window_start:%a %-d %b} to {last:%a %-d %b}, 08:00–22:00."
+            + f"\nLooking at {looking} to {last:%a %-d %b}, 08:00–22:00."
             + deadline
             + (
                 "\n\nTap Fill in my availabilities to add your free times for this poll."
@@ -356,10 +390,8 @@ class PollService:
         request = args[:300]
         rest, deadline = parse_deadline(request, now)
         title, minutes, start, end = parse_request(rest, now)
-        # Slots must be suggested while there is still time to meet. A chosen reply-by time is
-        # kept unless it leaves no slot; the default is at most halfway through the window.
-        latest = end - timedelta(minutes=minutes) if rest != request else now + (end - now) / 2
-        deadline = max(min(deadline, latest), now + timedelta(minutes=30))
+        chosen = deadline.astimezone(SG).date() if rest != request else None
+        deadline = reply_deadline(start, end, minutes, now, chosen)
         poll = await self.repo.create_poll(
             user.id, chat_id, message_id, title, minutes, start, end, deadline
         )
@@ -643,7 +675,7 @@ class PollService:
         usual = await self.repo.get_usual(user_id) if submitted is None else []
         ticked = set(submitted or [])
         now = self.scheduling.clock()
-        days = heatmap_cells(poll.window_start, poll.window_end, {}, max(poll.window_start, now))
+        days = heatmap_cells(poll.window_start, poll.window_end, {}, max(first_time(poll), now))
         for day in days:
             for cell in day["cells"]:
                 start = datetime.fromisoformat(cell["start_at"])

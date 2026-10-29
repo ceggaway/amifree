@@ -261,6 +261,7 @@ class FakeGoogle:
         self.events = {}
         self.calls = []
         self.lost = False
+        self.deadlines = {}  # Google id -> event body, with "status"
 
     async def probe(self, email):
         return self.access
@@ -282,9 +283,25 @@ class FakeGoogle:
         self.calls.append(("code", email))
         return "code-event"
 
+    async def deadline_events(self, email):
+        if self.lost:
+            raise GoogleAccessLost("lost")
+        return {k: dict(v) for k, v in self.deadlines.items()}
+
+    async def put_deadline(self, email, body, existing):
+        if self.lost:
+            raise GoogleAccessLost("lost")
+        self.calls.append(("deadline", body["summary"], existing))
+        self.deadlines[body["id"]] = dict(body, status="confirmed")
+        return True
+
     async def delete_event(self, email, event_id):
         if self.lost:
             raise GoogleAccessLost("lost")
+        if event_id in self.deadlines:
+            self.calls.append(("delete deadline", event_id))
+            self.deadlines[event_id]["status"] = "cancelled"
+            return
         if event_id == "code-event":
             self.code = None
             return
@@ -455,6 +472,81 @@ async def test_new_plans_edits_and_removals_follow_the_student(with_google, refe
     await service.callback(1, tap(removed, "Add to plans"))  # Undo puts it back in Google as well
     await service.google_sync.sync(user_id)
     assert google.calls[-1] == ("upsert", "CCA dinner", False) and len(google.events) == 1
+
+
+async def test_deadlines_follow_into_google_as_free_due_events(with_google, reference):
+    from app.schemas.event import DeadlineDraft
+
+    service, repo, google = with_google()
+    await onboard(service, reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
+    user_id = repo.users[1].id
+    due = reference + timedelta(days=2)
+    essay = await repo.create_deadline(user_id, None, DeadlineDraft(title="Essay", due_at=due))
+    assert await service.google_sync.sync(user_id) == 1
+    ((google_id, body),) = google.deadlines.items()
+    assert google_id == "dl" + essay.id.replace("-", "")
+    assert body["summary"] == "Due: Essay" and body["transparency"] == "transparent"
+    assert "reminders" not in body  # the student's own Google notification setting applies
+    assert await service.google_sync.sync(user_id) == 0  # unchanged: nothing sent
+
+    repo.deadlines[essay.id].due_at = due + timedelta(hours=2)
+    assert await service.google_sync.sync(user_id) == 1
+    assert google.calls[-1] == ("deadline", "Due: Essay", True)
+
+    await repo.finish_deadline(user_id, essay.id)  # done: it leaves Google too
+    await service.google_sync.sync(user_id)
+    assert google.calls[-1] == ("delete deadline", google_id)
+
+
+async def test_a_deadline_the_student_deleted_in_google_stays_deleted(with_google, reference):
+    from app.schemas.event import DeadlineDraft
+
+    service, repo, google = with_google()
+    await onboard(service, reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
+    user_id = repo.users[1].id
+    await repo.create_deadline(
+        user_id, None, DeadlineDraft(title="Essay", due_at=reference + timedelta(days=2))
+    )
+    await service.google_sync.sync(user_id)
+    (google_id,) = google.deadlines
+    google.deadlines[google_id]["status"] = "cancelled"  # deleted in Google by the student
+    google.calls.clear()
+    assert await service.google_sync.sync(user_id) == 0 and google.calls == []
+
+
+async def test_deadline_client_reads_amifree_deadlines_and_writes_them(reference):
+    from app.schemas.event import Deadline
+    from app.services.google_calendar import deadline_body
+
+    seen = []
+
+    def route(request):
+        if request.url.path.endswith("/token"):
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        seen.append((request.method, request.url.path, dict(request.url.params)))
+        if request.method == "GET":
+            return httpx.Response(200, json={"items": [{"id": "dlabc", "status": "confirmed"}]})
+        if request.method == "POST":
+            return httpx.Response(409)  # added before: update it instead
+        return httpx.Response(200, json={})
+
+    google = GoogleCalendar(httpx.AsyncClient(transport=httpx.MockTransport(route)), KEY)
+    found = await google.deadline_events("me@gmail.com")
+    assert list(found) == ["dlabc"]
+    params = seen[0][2]
+    assert params["privateExtendedProperty"] == "amifreeDeadline=1"
+    assert params["showDeleted"] == "true"
+    deadline = Deadline(
+        id="12345678-1234-1234-1234-123456789abc",
+        user_id="u1",
+        title="Essay",
+        due_at=reference,
+    )
+    assert await google.put_deadline("me@gmail.com", deadline_body(deadline), existing=False)
+    assert [m for m, _, _ in seen[1:]] == ["POST", "PUT"]
+    assert seen[2][1].endswith("/events/dl12345678123412341234123456789abc")
 
 
 async def test_a_tap_updates_google_in_the_background(with_google, reference):

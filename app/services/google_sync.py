@@ -26,7 +26,9 @@ from app.services.google_calendar import (
     Access,
     GoogleAccessLost,
     GoogleCalendarError,
+    deadline_body,
     gcal_hash,
+    same_deadline,
 )
 from app.services.personal_calendar import MAX_CALENDARS, WINDOW_AHEAD, WINDOW_PAST, seal
 
@@ -280,6 +282,7 @@ class GoogleSyncService:
                         continue  # still a plan, just outside the dates I keep in step
                     await self.client.delete_event(email, event_id.replace("-", ""))
                     await repo.delete_google_link(user_id, event_id)
+                written += await self.sync_deadlines(user_id, email, now)
             except GoogleAccessLost:
                 await repo.mark_google_synced(user_id, now, LOST)
                 if connection.calendar_id:
@@ -290,6 +293,31 @@ class GoogleSyncService:
                 return written
             await repo.mark_google_synced(user_id, now)
             return written
+
+    async def sync_deadlines(self, user_id: str, email: str, now) -> int:
+        """Open deadlines as free "Due:" events. What's in Google is read back each time, as
+        deadlines have no version to remember. Returns how many it wrote."""
+        wanted = {
+            body["id"]: body
+            for body in map(
+                deadline_body,
+                await self.s.repo.deadlines_between(now - PLAN_PAST, now + PLAN_AHEAD, user_id),
+            )
+        }
+        remote = await self.client.deadline_events(email)
+        written = 0
+        for google_id, body in wanted.items():
+            copy = remote.get(google_id)
+            if copy and copy.get("status") == "cancelled":
+                continue  # the student deleted it in Google: leave it deleted
+            if copy and same_deadline(copy, body):
+                continue
+            await self.client.put_deadline(email, body, existing=copy is not None)
+            written += 1
+        for google_id in remote.keys() - wanted.keys():
+            if remote[google_id].get("status") != "cancelled":
+                await self.client.delete_event(email, google_id)  # done or removed
+        return written
 
     def sync_soon(self, telegram_id: int):
         """After a message or tap: update Google in the background, so the reply isn't slowed."""

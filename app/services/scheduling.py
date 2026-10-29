@@ -2298,13 +2298,14 @@ class SchedulingService:
         events = await self.repo.events_between(
             now - FEED_PAST, now + FEED_AHEAD, [Status.GOING, Status.SAVED], user.id
         )
+        deadlines = await self.repo.deadlines_between(now - FEED_PAST, now + FEED_AHEAD, user.id)
         preview = any(bot in user_agent.lower() for bot in PREVIEW_BOTS)
         seen = user.calendar_feed_seen_at
         if not preview and (seen is None or now - seen > FEED_SEEN_EVERY):
             await self.repo.mark_feed_seen(user.id, now)
             if seen is None:
                 await self.feed_working(user, user_agent)
-        return build_feed(events, now=now)
+        return build_feed(events, deadlines=deadlines, now=now)
 
     async def calendar_file(self, user: User, event_id: str) -> list[Reply]:
         try:

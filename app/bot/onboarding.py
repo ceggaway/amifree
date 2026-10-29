@@ -431,6 +431,7 @@ def pick_calendar_keyboard() -> InlineKeyboardMarkup:
         [
             [_button("📅 Google Calendar", "google"), _button("🍎 Apple / iCloud", "apple")],
             [_button("🤔 I'm not sure", "notsure")],
+            [_button("📚 NUSMods timetable", "nusmodspick")],
             [_button("📧 Outlook (soon)", "outlook"), _button("« Back", "home")],
         ]
     )
@@ -484,7 +485,8 @@ def first_calendar_keyboard(finish_apple: bool = False, feed: bool = False) -> I
         [
             finish if finish_apple and b.callback_data == "setup:apple" else b
             for b in row
-            if b.callback_data != "setup:home"
+            # /calendar has its own "Add or update NUSMods" row below.
+            if b.callback_data not in ("setup:home", "setup:nusmodspick")
         ]
         for row in pick_calendar_keyboard().inline_keyboard
     ]
@@ -743,6 +745,13 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
                 [_button("‹ Back", "classes")],
             ]
         )
+    if screen == "nusmodspick":
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("Open NUSMods ↗", url=NUSMODS_URL)],
+                [_button("« Other calendars", "calendar")],
+            ]
+        )
     if screen == "export":
         return InlineKeyboardMarkup([[_button("« NUSMods link", "nusmods")]])
     if screen == "outlook":
@@ -775,6 +784,7 @@ HTML_SCREENS = frozenset(
     {
         "home",
         "nusmods",
+        "nusmodspick",
         "ios",
         "mac",
         "google",
@@ -806,6 +816,9 @@ def screen(name: str) -> tuple[str, InlineKeyboardMarkup | None] | None:
         return GUIDES["google"], guide_keyboard("google")
     if name == "classes":
         return CLASSES_QUESTION, classes_keyboard()
+    if name == "nusmodspick":
+        # The same guide, reached from the calendar picker, so Back returns there.
+        return GUIDES["nusmods"], guide_keyboard("nusmodspick")
     if name == "skip":
         return SKIPPED, None
     if name == "sendplan":

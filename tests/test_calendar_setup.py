@@ -1,6 +1,8 @@
 """Calendar setup: asked after the first plan, one question, then Google or Apple step by step."""
 
+import re
 from datetime import timedelta
+from urllib.parse import quote
 
 import httpx
 
@@ -199,20 +201,27 @@ async def test_outlook_is_one_step_per_screen(service_factory, reference):
     pick = (await service.callback(1, "setup:calendar"))[0]
     step = (await service.callback(1, tap(pick, "📧 Outlook")))[0]
     token = repo.users[1].calendar_feed_token
-    assert "Part 1 of 2" in step.text and "Step 1 of 4" in step.text and step.edit
+    assert "Part 1 of 2" in step.text and "Step 1 of 2" in step.text and step.edit
     assert "web.telegram.org" in step.text and step.parse_mode == "HTML"
-    seen = [step.text]
-    for _ in range(3):
-        step = (await service.callback(1, tap(step, "Next ›")))[0]
-        seen.append(step.text)
-    assert "Subscribe from web" in seen[2]
-    # The link is on the step where it's pasted, on the computer.
-    assert "Step 4 of 4" in seen[-1] and f"<code>{BASE}/cal/{token}.ics</code>" in seen[-1]
-    assert "every few hours" in seen[-1]
-    # Part 2 follows part 1, and its Back returns to the last step of part 1.
-    step = (await service.callback(1, tap(step, "Done: part 2 ›")))[0]
+    assert "every few hours" in step.text
+    # One tap opens Outlook's own Subscribe from web, with the feed and name filled in.
+    links = {b.text: b.url for row in step.keyboard.inline_keyboard for b in row if b.url}
+    feed = quote(f"webcal://{BASE.split('://')[1]}/cal/{token}.ics", safe="")
+    for label, host in (("🏫 School / work Outlook", "office"), ("📧 Personal Outlook", "live")):
+        assert links[label] == (
+            f"https://outlook.{host}.com/calendar/0/addfromweb?url={feed}&name=AmIFree"
+        )
+    first = step.text
+    assert step.photo  # the marked-up Subscribe from web screen
+    # By hand if the button didn't work: the link is on that step, to copy on the computer.
+    manual = (await service.callback(1, tap(step, "Button didn't work?")))[0]
+    assert "Step 2 of 2" in manual.text and "Subscribe from web" in manual.text
+    assert f"<code>{BASE}/cal/{token}.ics</code>" in manual.text
+    assert (await service.callback(1, tap(manual, "‹ Back")))[0].text == first
+    # Part 2 follows part 1 from either step, and its Back returns to the buttons.
+    step = (await service.callback(1, tap(manual, "Done: part 2 ›")))[0]
     assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text
-    assert (await service.callback(1, tap(step, "‹ Part 1")))[0].text == seen[-1]
+    assert (await service.callback(1, tap(step, "‹ Part 1")))[0].text == first
     for _ in range(3):
         step = (await service.callback(1, tap(step, "Next ›")))[0]
     assert "Paste the link into this chat" in step.text and "Next ›" not in labels(step)
@@ -224,6 +233,17 @@ async def test_outlook_is_one_step_per_screen(service_factory, reference):
     assert repo.users[1].calendar_feed_token == token
     assert "isn't valid" in (await service.callback(1, "o:2:9"))[0].text
     assert "isn't valid" in (await service.callback(1, "o:x:1"))[0].text
+
+
+def test_outlook_steps_have_their_pictures_and_fit_a_photo_caption():
+    long_url = BASE + "/cal/" + "x" * 64 + ".ics"
+    for part, steps in onboarding.OUTLOOK_STEPS.items():
+        for n in range(1, len(steps) + 1):
+            for lead in ("", onboarding.OUTLOOK_PART1_DONE, onboarding.OUTLOOK_NO_FEED):
+                text, photo, _ = onboarding.outlook_step(part, n, long_url, lead)
+                assert (photo is not None) == ((part, n) in onboarding.OUTLOOK_PICTURES)
+                # Telegram's caption limit, counted without the HTML tags it doesn't show.
+                assert len(re.sub(r"<[^>]+>", "", text)) <= 1024, (part, n, lead)
 
 
 async def test_outlook_without_a_public_address_is_only_publishing(service_factory, reference):
@@ -242,7 +262,7 @@ async def test_first_fetch_from_outlook_moves_on_to_publishing(service_factory, 
     await service.calendar_feed(repo.users[1].calendar_feed_token, "Microsoft Office/16.0")
     [(_, step)] = sent.messages
     assert step.text.startswith(onboarding.OUTLOOK_PART1_DONE)
-    assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text and not step.photo
+    assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text and step.photo
 
 
 async def test_a_published_outlook_calendar_counts_and_unpublishing_is_explained(

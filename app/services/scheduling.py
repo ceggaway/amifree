@@ -1950,13 +1950,14 @@ class SchedulingService:
             part, n = 2, 1
         url = self.feed_url(await self.ensure_feed_token(user)) if part == 1 else ""
         lead = onboarding.OUTLOOK_NO_FEED if not has_feed and n == 1 else ""
-        text, keyboard = onboarding.outlook_step(part, n, url, lead, part1=has_feed)
+        text, photo, keyboard = onboarding.outlook_step(part, n, url, lead, part1=has_feed)
         return [
             Reply(
                 text,
                 keyboard,
                 edit=True,
                 parse_mode="HTML",
+                photo=photo,
                 clear_album_group="setup",
                 disable_link_preview=True,
             )
@@ -1999,8 +2000,8 @@ class SchedulingService:
             reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
         elif any(name in user_agent.lower() for name in OUTLOOK_AGENTS):
             # Subscribed from Outlook: its part 2 is publishing, not iCloud.
-            text, keyboard = onboarding.outlook_step(2, lead=onboarding.OUTLOOK_PART1_DONE)
-            reply = Reply(text, keyboard, parse_mode="HTML")
+            text, photo, keyboard = onboarding.outlook_step(2, lead=onboarding.OUTLOOK_PART1_DONE)
+            reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
         else:
             text, photo, keyboard = onboarding.apple_step(lead=onboarding.APPLE_PART1_DONE)
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)

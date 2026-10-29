@@ -328,6 +328,7 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
         "📅 Google Calendar",
         "🍎 Apple / iCloud",
         "🤔 I'm not sure",
+        "📚 NUSMods timetable",
         "📧 Outlook (soon)",
         "« Back",
     ]

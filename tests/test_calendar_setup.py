@@ -188,6 +188,59 @@ async def test_apple_without_a_public_address_goes_to_busy_times(service_factory
     assert "isn't available yet" in reply.text and "Part 2 of 2" in reply.text
 
 
+# ---- Outlook: subscribe from web, then publish a calendar ----
+
+OUTLOOK_CLASS = "https://outlook.office365.com/owa/calendar/abc@u.nus.edu/xyz/calendar.ics"
+
+
+async def test_outlook_part_one_shows_the_link_to_subscribe_from_web(service_factory, reference):
+    service, repo = service_factory(app_base_url=BASE)
+    await onboard(service, reference)
+    pick = (await service.callback(1, "setup:calendar"))[0]
+    part1 = (await service.callback(1, tap(pick, "📧 Outlook")))[0]
+    token = repo.users[1].calendar_feed_token
+    assert "Part 1 of 2" in part1.text and part1.parse_mode == "HTML" and part1.edit
+    assert f"<code>{BASE}/cal/{token}.ics</code>" in part1.text
+    assert "Subscribe from web" in part1.text and "every few hours" in part1.text
+    part2 = (await service.callback(1, tap(part1, "Next: check when I'm busy ›")))[0]
+    assert "Part 2 of 2" in part2.text and "Can view when I'm busy" in part2.text
+    assert (await service.callback(1, tap(part2, "‹ Part 1")))[0].text == part1.text
+    # The same link every time: subscribing twice never makes a second feed.
+    await service.callback(1, "setup:outlook")
+    assert repo.users[1].calendar_feed_token == token
+
+
+async def test_outlook_without_a_public_address_goes_to_publishing(service_factory, reference):
+    service, _ = service_factory()
+    await onboard(service, reference)
+    reply = (await service.callback(1, "setup:outlook"))[0]
+    assert "isn't available yet" in reply.text and "Part 2 of 2" in reply.text
+
+
+async def test_first_fetch_from_outlook_moves_on_to_publishing(service_factory, reference):
+    service, repo = service_factory(app_base_url=BASE)
+    service.send_private = sent = Sent()
+    await onboard(service, reference)
+    await service.callback(1, "setup:outlook")
+    await service.calendar_feed(repo.users[1].calendar_feed_token, "Microsoft Office/16.0")
+    [(_, step)] = sent.messages
+    assert step.text.startswith(onboarding.OUTLOOK_PART1_DONE)
+    assert "Publish a calendar" in step.text and not step.photo
+
+
+async def test_a_published_outlook_calendar_counts_and_unpublishing_is_explained(
+    service_factory, reference
+):
+    service, repo = service_factory()
+    service.calendar_reader = FakeReader((), None, {OUTLOOK_CLASS: "日历 calendar"})
+    await onboard(service, reference)
+    await service.message(1, 5, OUTLOOK_CLASS, reference)
+    (calendar,) = await repo.list_calendars(repo.users[1].id)
+    assert calendar.label == "日历 calendar"
+    removed = await service.callback(1, f"pcal:rm:{calendar.id}")
+    assert any("Unpublish" in r.text for r in removed)
+
+
 async def test_subscribe_page_route(service_factory, reference):
     service, repo = service_factory(app_base_url=BASE)
     await onboard(service, reference)

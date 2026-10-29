@@ -184,6 +184,8 @@ USUAL_HELP = (
     "/usual weekdays after 6pm   ·   /usual mon-fri 6-9pm   ·   /usual clear"
 )
 SLOW_DOWN = "You're sending a lot very quickly. Give me a minute, then try again."
+# Who fetches the feed after "Subscribe from web" in Outlook (best guess by name).
+OUTLOOK_AGENTS = ("microsoft", "outlook", "exchange")
 PREVIEW_BOTS = ("telegrambot", "whatsapp", "facebookexternalhit", "slackbot", "discordbot")
 # A lone time in a block with no range ("busy 14 oct 18:30"); never a date such as "14 oct".
 BLOCK_TIME = re.compile(
@@ -1921,6 +1923,24 @@ class SchedulingService:
             )
         ]
 
+    async def outlook_setup(self, user: User) -> list[Reply]:
+        """Outlook, part 1 of 2: subscribe to the AmIFree feed in Outlook on the web. Part 2
+        (outlook2) publishes their calendar so I can read when they're busy."""
+        if not self.settings.app_base_url:
+            return self.setup_screen("outlook2", lead=onboarding.OUTLOOK_NO_FEED)
+        token = await self.ensure_feed_token(user)
+        text = onboarding.OUTLOOK_PART1.replace("{url}", html.escape(self.feed_url(token)))
+        return [
+            Reply(
+                text,
+                onboarding.outlook_part1_keyboard(),
+                edit=True,
+                parse_mode="HTML",
+                clear_album_group="setup",
+                disable_link_preview=True,
+            )
+        ]
+
     def apple_step(self, device: str = "ios", n: int = 1, lead: str = "") -> list[Reply]:
         """One step of Apple part 2, as a picture with its instructions under it."""
         text, photo, keyboard = onboarding.apple_step(device, n, lead)
@@ -1942,7 +1962,7 @@ class SchedulingService:
             return None
         return calendar_export.subscribe_page(self.feed_url(token))
 
-    async def feed_working(self, user: User) -> None:
+    async def feed_working(self, user: User, user_agent: str = "") -> None:
         """The calendar app fetched the feed for the first time: say so, and carry on to
         part 2 of Apple setup if nothing tells me yet when they're busy. Best effort."""
         if not self.send_private:
@@ -1956,6 +1976,12 @@ class SchedulingService:
             )
         elif await self.repo.list_calendars(user.id):
             reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
+        elif any(name in user_agent.lower() for name in OUTLOOK_AGENTS):
+            # Subscribed from Outlook: its part 2 is publishing, not iCloud.
+            text, keyboard = onboarding.screen("outlook2")
+            reply = Reply(
+                onboarding.OUTLOOK_PART1_DONE + "\n\n" + text, keyboard, parse_mode="HTML"
+            )
         else:
             text, photo, keyboard = onboarding.apple_step(lead=onboarding.APPLE_PART1_DONE)
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
@@ -2167,7 +2193,7 @@ class SchedulingService:
         their Google share, and with feed, the AmIFree subscription. Read before deleting."""
         if calendars is None:
             calendars = await self.repo.list_calendars(user.id)
-        icloud = google_link = False
+        icloud = google_link = outlook = False
         for c in calendars:
             link = unseal(c.sealed_url, self.link_secret) or ""
             if link.startswith(GCAL_PREFIX):
@@ -2175,6 +2201,9 @@ class SchedulingService:
             host = urlparse(link).hostname or ""
             icloud |= host.endswith("icloud.com")
             google_link |= host.endswith("google.com")
+            outlook |= host.endswith(
+                ("outlook.office365.com", "outlook.office.com", "outlook.live.com")
+            )
         shared = None
         if google and user.google_connected and self.google_sync.enabled:
             connection = await self.repo.get_google_connection(user.id)
@@ -2184,6 +2213,7 @@ class SchedulingService:
             shared_email=shared,
             google_link=google_link,
             icloud=icloud,
+            outlook=outlook,
             feed=feed and bool(user.calendar_feed_token),
         )
 
@@ -2272,7 +2302,7 @@ class SchedulingService:
         if not preview and (seen is None or now - seen > FEED_SEEN_EVERY):
             await self.repo.mark_feed_seen(user.id, now)
             if seen is None:
-                await self.feed_working(user)
+                await self.feed_working(user, user_agent)
         return build_feed(events, now=now)
 
     async def calendar_file(self, user: User, event_id: str) -> list[Reply]:
@@ -2366,6 +2396,8 @@ class SchedulingService:
                 return self.google_sync.steps(phone=True)  # sharing; the link is its fallback
             if name == "apple":
                 return await self.apple_setup(user)
+            if name == "outlook":
+                return await self.outlook_setup(user)
             if name in ("apple2", "apple2mac"):
                 return self.apple_step("mac" if name == "apple2mac" else "ios")
             if name == "appleskip":

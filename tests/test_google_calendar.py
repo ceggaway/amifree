@@ -329,7 +329,7 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
         "🍎 Apple / iCloud",
         "🤔 I'm not sure",
         "📚 NUSMods timetable",
-        "📧 Outlook (soon)",
+        "📧 Outlook",
         "« Back",
     ]
     # Without the bot's Google account there is only the link.

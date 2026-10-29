@@ -52,15 +52,15 @@ PICTURE_UNREADABLE = (
 )
 UNSUPPORTED_VOICE = (
     "I can't listen to voice notes right now. Type the details instead, like:\n"
-    "Dinner Fri 7-9pm at Vivo"
+    "Dinner Fri 7-9pm at Vivo\nCS2103T report due Fri 11:59pm"
 )
 VOICE_TOO_LONG = (
-    f"That voice note is over {MAX_SECONDS} seconds. Send a shorter one with just the plan,"
-    " like: “Dinner Friday 7 to 9pm at Vivo”."
+    f"That voice note is over {MAX_SECONDS} seconds. Send a shorter one with just the plan or"
+    " deadline, like: “Dinner Friday 7 to 9pm at Vivo” or “Report due tomorrow”."
 )
 VOICE_UNHEARD = (
     "I couldn't make out that voice note. Try again somewhere quieter, or type the details,"
-    " like:\nDinner Fri 7-9pm at Vivo"
+    " like:\nDinner Fri 7-9pm at Vivo\nCS2103T report due Fri 11:59pm"
 )
 HEARD_PREVIEW = 300
 ERROR = "I couldn't process that message. Please try again, or send the date/time manually. /cancel clears a pending draft."

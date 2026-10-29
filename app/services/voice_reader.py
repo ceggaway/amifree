@@ -13,8 +13,10 @@ MAX_BYTES = 2 * 1024 * 1024
 MAX_CHARS = 2000
 # Spelling hints only: the transcript is still checked like any other message.
 PROMPT = (
-    "A student in Singapore describing a plan for their calendar: the event, day, date,"
-    " start and end times and the venue, e.g. dinner Friday 7 to 9pm at VivoCity."
+    "A student in Singapore telling their calendar bot about a plan or a deadline: the event"
+    " or assignment (often with a course code like CS2103T), day, date, start and end times"
+    " or due time, and the venue, e.g. dinner Friday 7 to 9pm at VivoCity, or CS2103T"
+    " report due tomorrow 11:59pm."
 )
 
 

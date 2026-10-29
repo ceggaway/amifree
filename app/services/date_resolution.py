@@ -555,7 +555,7 @@ _RELATIVE_WORD = re.compile(
 )
 
 
-def _written_relative(extraction: Extraction, source: str, reference: datetime) -> Extraction:
+def written_relative(extraction: Extraction, source: str, reference: datetime) -> Extraction:
     """The model converted "tmr" to "13 Oct": use the word the sender wrote, if it is the same day.
 
     Only when the converted date isn't in the message and every relative word in it ("tmr",
@@ -598,7 +598,7 @@ def validate_extraction(
         )
     extraction = _spoken_noon(extraction, source)
     extraction = _bare_meridiem_end(extraction)
-    extraction = _written_relative(extraction, source, reference)
+    extraction = written_relative(extraction, source, reference)
     for field in ("date_text", "start_time_text", "end_time_text", "end_date_text"):
         value = getattr(extraction, field)
         if value and not in_source(value, source):

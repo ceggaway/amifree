@@ -70,6 +70,26 @@ async def test_a_voice_note_becomes_a_card_that_says_what_was_heard(chat):
     assert len(repo.events) == 1
 
 
+async def test_a_voice_note_about_a_deadline_saves_a_deadline(chat):
+    # Spoken, "tmr" comes out as "tomorrow", and the model may still write a date for it.
+    said = "I have a project report due tomorrow"
+    due = extraction(
+        kind="deadline",
+        title="Project report",
+        date_text="5 Oct",
+        start_time_text=None,
+        end_time_text=None,
+        location=None,
+    )
+    bot, service, repo, transport = await chat(due, voice=FakeVoice(said))
+    async with bot:
+        await feed(bot, voice_payload(7))
+    card = transport.sent[-1]["text"]
+    assert card.startswith(f"🎙 I heard: “{said}”\n\n📌 Project report")
+    assert "Due Mon 5 Oct, 11:59pm (tomorrow)" in card
+    assert len(repo.deadlines) == 1 and not repo.events
+
+
 async def test_a_voice_note_over_a_minute_is_not_sent_to_the_speech_model(chat):
     bot, service, repo, transport = await chat()
     async with bot:

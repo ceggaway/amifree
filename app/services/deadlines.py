@@ -1,5 +1,6 @@
 """Personal deadlines: a due time to remember and be reminded of, never time you're busy."""
 
+import re
 from datetime import datetime, time, timedelta
 
 from app.bot.messages import clock
@@ -11,18 +12,30 @@ from app.services.date_resolution import (
     resolve_date,
     resolve_time,
     restore_meridiem,
+    written_relative,
 )
 
 END_OF_DAY = time(23, 59)  # "due Fri" means by the end of Friday
 REMIND_AT = time(9)  # the day before, and the morning it's due
 ASK_DATE = "What's the due date? For example fri, 20 oct or 2026-10-23."
 EXAMPLE = "For example: CS3244 report due fri 11:59pm"
+# Any time of day written in a message: 5pm, 11:59, 23.59, 2359, 2359hrs, noon, midnight.
+# Not a year or a date: "2026-10-23" and "20/10" have no time in them.
+WRITTEN_TIME = re.compile(
+    r"\d\s*(?:[ap]\.?m\b|hrs?\b)|\d[:.]\d{2}|(?<![\d/-])(?:[01]\d|2[0-3])[0-5]\d(?![\d/-])"
+    r"|\bnoon\b|\bmidnight\b",
+    re.IGNORECASE,
+)
 
 
 def validate_deadline(extraction: Extraction, source: str, reference: datetime) -> DeadlineDraft:
     if extraction.ambiguity:
         raise Clarification("Please clarify the due date or time: " + extraction.ambiguity[:200])
+    # The model writes "tmr" as "30 Oct" or "Fri": put back the word the sender used.
+    extraction = written_relative(extraction, source, reference)
     raw_time = extraction.start_time_text or extraction.end_time_text
+    if raw_time and not in_source(raw_time, source) and not WRITTEN_TIME.search(source):
+        raw_time = None  # a time the model filled in for a message with none: end of day
     for value in (extraction.date_text, raw_time):
         if value and not in_source(value, source):
             raise Clarification("I couldn't find the due date in your message. " + ASK_DATE)

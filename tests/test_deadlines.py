@@ -47,6 +47,38 @@ def test_due_time(reference, text, time_text, expected):
     assert draft.due_at == expected and draft.title == "CS3244 report"
 
 
+@pytest.mark.parametrize(
+    "date_text,time_text",
+    [
+        ("tmr", None),
+        ("tomorrow", None),
+        ("5 Oct", None),  # the model wrote tomorrow's date instead of "tmr"
+        ("2026-10-05", None),
+        ("Mon", None),
+        ("5 Oct", "23:59"),  # and filled in a time the message never gave
+        ("tomorrow", "11:59pm"),
+    ],
+)
+def test_tmr_is_understood_however_the_model_writes_it(reference, date_text, time_text):
+    # Reference is Sun 4 Oct, so "tmr" is Mon 5 Oct.
+    draft = validate_deadline(
+        due(date_text=date_text, start_time_text=time_text), "project report due tmr", reference
+    )
+    assert draft.due_at == at(5, 23, 59)
+
+
+def test_a_time_the_message_did_give_is_never_overridden(reference):
+    # Only a time the message never had is dropped; one that disagrees with it is still asked.
+    with pytest.raises(Clarification):
+        validate_deadline(
+            due(date_text="tmr", start_time_text="6pm"), "report due tmr 5pm", reference
+        )
+    draft = validate_deadline(
+        due(date_text="5 Oct", start_time_text="5pm"), "report due tmr 5pm", reference
+    )
+    assert draft.due_at == at(5, 17)
+
+
 def test_missing_or_past_dates_are_asked(reference):
     with pytest.raises(Clarification, match="What's the due date"):
         validate_deadline(due(date_text=None), "report due soon", reference)

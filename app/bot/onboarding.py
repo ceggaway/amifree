@@ -34,6 +34,8 @@ WELCOME = (
     "Tap <b>Add to plans</b> to save the event. With calendar syncing enabled, I’ll "
     "<b>automatically add it to your personal calendar</b> 🗓\n\n"
     "💡 See /help for all features and instructions.\n\n"
+    "💬 <b>We’d love to hear from you.</b> Hit a problem, or have an idea to make AmIFree "
+    "more convenient for every student? Tell us with /feedback.\n\n"
     "🔒 <b>Your privacy matters.</b> I only check your calendar’s busy times, not event "
     "details. I never read your group chats.\n\n"
     "👇 Choose <b>Connect personal calendar</b> to include your existing schedule, or "

@@ -26,14 +26,37 @@ WRITTEN_TIME = re.compile(
     r"|\bnoon\b|\bmidnight\b",
     re.IGNORECASE,
 )
+# One written time, as a token: "2359", "2359hrs", "11.59pm", "noon". Not the "21" in "ec2102".
+TIME_TOKEN = re.compile(
+    r"(?<![\w:.])(?:\d{1,2}(?:[:.]?\d{2})?\s*(?:[ap]\.?m\.?|hrs?|h)?|noon)(?![\w:])", re.IGNORECASE
+)
+
+
+def written_time(raw: str, source: str) -> str:
+    """The model rewrote "2359" as "11:59pm": use the sender's own words for the same time."""
+    if in_source(raw, source):
+        return raw
+    try:
+        wanted = resolve_time(raw)
+    except Clarification:
+        return raw
+    for token in TIME_TOKEN.findall(source):
+        try:
+            if resolve_time(token.strip()) == wanted:
+                return token.strip()
+        except Clarification:
+            continue
+    return raw
 
 
 def validate_deadline(extraction: Extraction, source: str, reference: datetime) -> DeadlineDraft:
     if extraction.ambiguity:
         raise Clarification("Please clarify the due date or time: " + extraction.ambiguity[:200])
-    # The model writes "tmr" as "30 Oct" or "Fri": put back the word the sender used.
-    extraction = written_relative(extraction, source, reference)
+    # The model writes "tmr" as "30 Oct" or "next mon" as "2 Nov": put back the sender's words.
+    extraction = written_relative(extraction, source, reference, weekdays=True)
     raw_time = extraction.start_time_text or extraction.end_time_text
+    if raw_time:
+        raw_time = written_time(raw_time, source)
     if raw_time and not in_source(raw_time, source) and not WRITTEN_TIME.search(source):
         raw_time = None  # a time the model filled in for a message with none: end of day
     for value in (extraction.date_text, raw_time):

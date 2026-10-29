@@ -294,6 +294,24 @@ class GoogleSyncService:
             await repo.mark_google_synced(user_id, now)
             return written
 
+    async def add_deadline(self, user, deadline) -> bool | None:
+        """Put a new deadline in Google straight away, so its card can say whether it's there.
+        None when Google isn't connected; False when Google didn't take it (the background
+        sync tries again)."""
+        if not self.enabled or not user.google_connected:
+            return None
+        async with self.locks.setdefault(user.id, asyncio.Lock()):
+            connection = await self.s.repo.get_google_connection(user.id)
+            if connection is None:
+                return None
+            try:
+                return await self.client.put_deadline(
+                    connection.calendar_email, deadline_body(deadline), existing=False
+                )
+            except GoogleCalendarError as exc:
+                log.warning("google_deadline_failed error_type=%s", type(exc).__name__)
+                return False
+
     async def sync_deadlines(self, user_id: str, email: str, now) -> int:
         """Open deadlines as free "Due:" events. What's in Google is read back each time, as
         deadlines have no version to remember. Returns how many it wrote."""

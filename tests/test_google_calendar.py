@@ -499,6 +499,53 @@ async def test_deadlines_follow_into_google_as_free_due_events(with_google, refe
     assert google.calls[-1] == ("delete deadline", google_id)
 
 
+DEADLINE = extraction(
+    kind="deadline",
+    title="Project report",
+    date_text="Fri",
+    start_time_text="11:59pm",
+    end_time_text=None,
+    location=None,
+)
+
+
+async def test_a_new_deadline_card_says_it_is_in_google_only_once_it_is(with_google, reference):
+    service, repo, google = with_google(DEADLINE, DEADLINE.model_copy(update={"title": "Essay"}))
+    await onboard(service, reference)
+    await connect(service, 1, "me@gmail.com", reference, 9)
+    card = (await service.command(1, "deadline", "project report due fri 11:59pm"))[0]
+    assert "📅 Added to your Google Calendar." in card.text
+    assert google.calls[-1] == ("deadline", "Due: Project report", False)
+    # The background sync after it finds Google already up to date.
+    assert await service.google_sync.sync(repo.users[1].id) == 0
+    google.lost = True  # Google refuses: the card says so instead of claiming it's there
+    card = (await service.command(1, "deadline", "essay due fri 11:59pm"))[0]
+    assert "couldn't add it to your Google Calendar" in card.text
+    assert "Added to your Google Calendar" not in card.text
+
+
+async def test_deadline_card_says_nothing_about_calendars_nobody_connected(
+    service_factory, reference
+):
+    service, repo = service_factory(DEADLINE)
+    service.google = FakeGoogle()
+    await onboard(service, reference)
+    card = (await service.command(1, "deadline", "project report due fri 11:59pm"))[0]
+    assert "📅" not in card.text and not service.google.calls
+
+
+async def test_deadline_card_mentions_the_amifree_calendar_once_it_is_subscribed(
+    service_factory, reference
+):
+    service, repo = service_factory(DEADLINE, app_base_url="https://amifree.example")
+    await onboard(service, reference)
+    await service.callback(1, "cal:feed")
+    await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
+    card = (await service.command(1, "deadline", "project report due fri 11:59pm"))[0]
+    assert "show up in your AmIFree calendar at its next refresh" in card.text
+    assert "Google" not in card.text
+
+
 async def test_a_deadline_the_student_deleted_in_google_stays_deleted(with_google, reference):
     from app.schemas.event import DeadlineDraft
 

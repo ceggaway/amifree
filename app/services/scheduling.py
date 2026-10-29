@@ -1923,17 +1923,20 @@ class SchedulingService:
             )
         ]
 
-    async def outlook_setup(self, user: User) -> list[Reply]:
-        """Outlook, part 1 of 2: subscribe to the AmIFree feed in Outlook on the web. Part 2
-        (outlook2) publishes their calendar so I can read when they're busy."""
-        if not self.settings.app_base_url:
-            return self.setup_screen("outlook2", lead=onboarding.OUTLOOK_NO_FEED)
-        token = await self.ensure_feed_token(user)
-        text = onboarding.OUTLOOK_PART1.replace("{url}", html.escape(self.feed_url(token)))
+    async def outlook_step(self, user: User, part: int = 1, n: int = 1) -> list[Reply]:
+        """One step of Outlook setup. Part 1 subscribes to the AmIFree feed in Outlook on the
+        web; part 2 publishes their calendar so I can read when they're busy. Without a public
+        address there is no feed, so only part 2."""
+        has_feed = bool(self.settings.app_base_url)
+        if not has_feed and part == 1:
+            part, n = 2, 1
+        url = self.feed_url(await self.ensure_feed_token(user)) if part == 1 else ""
+        lead = onboarding.OUTLOOK_NO_FEED if not has_feed and n == 1 else ""
+        text, keyboard = onboarding.outlook_step(part, n, url, lead, part1=has_feed)
         return [
             Reply(
                 text,
-                onboarding.outlook_part1_keyboard(),
+                keyboard,
                 edit=True,
                 parse_mode="HTML",
                 clear_album_group="setup",
@@ -1978,10 +1981,8 @@ class SchedulingService:
             reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
         elif any(name in user_agent.lower() for name in OUTLOOK_AGENTS):
             # Subscribed from Outlook: its part 2 is publishing, not iCloud.
-            text, keyboard = onboarding.screen("outlook2")
-            reply = Reply(
-                onboarding.OUTLOOK_PART1_DONE + "\n\n" + text, keyboard, parse_mode="HTML"
-            )
+            text, keyboard = onboarding.outlook_step(2, lead=onboarding.OUTLOOK_PART1_DONE)
+            reply = Reply(text, keyboard, parse_mode="HTML")
         else:
             text, photo, keyboard = onboarding.apple_step(lead=onboarding.APPLE_PART1_DONE)
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
@@ -2397,7 +2398,7 @@ class SchedulingService:
             if name == "apple":
                 return await self.apple_setup(user)
             if name == "outlook":
-                return await self.outlook_setup(user)
+                return await self.outlook_step(user)
             if name in ("apple2", "apple2mac"):
                 return self.apple_step("mac" if name == "apple2mac" else "ios")
             if name == "appleskip":
@@ -2410,6 +2411,15 @@ class SchedulingService:
             if not steps or parts[2] not in [str(n) for n in range(1, len(steps[1]) + 1)]:
                 return [Reply("That button isn't valid. Use /calendar.")]
             return self.google_sync.steps(parts[1] == "phone", int(parts[2]))
+        if action == "o":
+            valid = {
+                f"o:{part}:{n}"
+                for part, steps in onboarding.OUTLOOK_STEPS.items()
+                for n in range(1, len(steps) + 1)
+            }
+            if data not in valid:
+                return [Reply("That button isn't valid. Use /calendar.")]
+            return await self.outlook_step(user, int(parts[1]), int(parts[2]))
         if action == "a2":
             steps = onboarding.APPLE_STEPS.get(parts[1] if len(parts) == 3 else "")
             if not steps or parts[2] not in [str(n) for n in range(1, len(steps) + 1)]:

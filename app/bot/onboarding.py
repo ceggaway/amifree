@@ -154,45 +154,9 @@ GUIDES = {
         "🔒 Keep the link private — anyone with it can see your calendar. If it leaks, "
         "click <b>Reset</b> in Google and send me the new link." + PASTE_NEXT
     ),
-    # Outlook part 1 (plans into Outlook) needs the feed link, so the service builds it.
-    "outlook2": (
-        "📧 <b>Outlook · Part 2 of 2</b>\n"
-        "<b>Let me check when you're busy</b> · about 2 minutes\n"
-        "Do this on a computer.\n\n"
-        "1. Open <b>outlook.office.com</b> (school or work email) or <b>outlook.live.com</b> "
-        "(personal) and sign in.\n"
-        "2. Click <b>Settings ⚙️</b> → <b>Calendar</b> → <b>Shared calendars</b>.\n"
-        "3. Under <b>Publish a calendar</b>, pick your calendar and choose "
-        "<b>Can view when I'm busy</b>, then <b>Publish</b>.\n"
-        "4. Copy the <b>ICS</b> link, not the HTML one.\n\n"
-        "✅ You'll know it's right: it ends in <code>.ics</code>.\n\n"
-        "🔒 <b>Can view when I'm busy</b> shares only when you're busy, never titles or "
-        "places, and that's all I need.\n\n"
-        "⚠️ No Publish a calendar section? Your school or company has turned it off, so I "
-        "can't read that calendar yet.\n\n"
-        "🗂 Several calendars (Class, CCA)? Publish each one and send each link." + PASTE_NEXT
-    ),
 }
 
-OUTLOOK_PART1 = (
-    "📧 <b>Outlook · Part 1 of 2</b>\n"
-    "<b>Add your plans to Outlook automatically</b>\n\n"
-    "Every plan you save with me shows up in an <b>AmIFree</b> calendar in Outlook, and "
-    "updates if it changes.\n\n"
-    "Do this on a computer (the Outlook phone app can't add it):\n"
-    "<b>1.</b> Copy your AmIFree link (tap it to copy):\n"
-    "<code>{url}</code>\n"
-    "<b>2.</b> Open <b>outlook.office.com</b> (school or work email) or "
-    "<b>outlook.live.com</b> (personal) and go to <b>Calendar</b>.\n"
-    "<b>3.</b> Click <b>Add calendar</b> → <b>Subscribe from web</b>.\n"
-    "<b>4.</b> Paste the link, name it <b>AmIFree</b>, then click <b>Import</b>.\n\n"
-    "⏳ Outlook checks for changes every few hours, so a new plan can take a while to show "
-    "up there. Your reminders here are on time either way.\n\n"
-    "🔒 Keep the link private: anyone with it can see your plans.\n\n"
-    "Done? Tap <b>Next</b> for part 2."
-)
 OUTLOOK_NO_FEED = (
-    "📧 <b>Outlook</b>\n\n"
     "Adding plans to Outlook by themselves isn't available yet, so tap 📅 on a plan to add "
     "it. This part lets me check when you're busy."
 )
@@ -500,13 +464,69 @@ def calendar_setup_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def outlook_part1_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [_button("Next: check when I'm busy ›", "outlook2")],
-            [_button("« Other calendars", "calendar")],
-        ]
+OUTLOOK_PARTS = {
+    1: "📧 <b>Outlook · Part 1 of 2</b>\n<b>Add your plans to Outlook automatically</b>\n\n",
+    2: "📧 <b>Outlook · Part 2 of 2</b>\n<b>Let me check when you're busy</b>\n\n",
+}
+# Outlook has no picture guide, so each screen is one short step. {url} is the feed link.
+OUTLOOK_STEPS = {
+    1: (
+        "Every plan you save with me will show up in an <b>AmIFree</b> calendar in Outlook, "
+        "and update if it changes.\n\n"
+        "💻 Do this on a <b>computer</b>: the Outlook phone app can't. Open this chat there "
+        "too (Telegram Desktop or <b>web.telegram.org</b>), so you can copy your link.",
+        "Open <b>outlook.office.com</b> (school or work email) or <b>outlook.live.com</b> "
+        "(personal email) and sign in.",
+        "Click the <b>calendar icon</b> on the far left to open your calendar.\n\n"
+        "Click <b>Add calendar</b> (under the small month view), then "
+        "<b>Subscribe from web</b>.",
+        "Copy your AmIFree link (click it to copy):\n<code>{url}</code>\n\n"
+        "Paste it into Outlook, name it <b>AmIFree</b>, then click <b>Import</b>.\n\n"
+        "⏳ Outlook checks for new plans every few hours, so they can take a while to show "
+        "up there. Your reminders here are on time either way.\n\n"
+        "🔒 Keep the link private: anyone with it can see your plans.",
+    ),
+    2: (
+        "In Outlook on the web, click <b>Settings ⚙️</b> at the top right.\n\n"
+        "Then go to <b>Calendar</b> → <b>Shared calendars</b>.",
+        "Under <b>Publish a calendar</b>, pick your calendar.\n\n"
+        "Next to it, choose <b>Can view when I'm busy</b>. That shares only when you're busy, "
+        "never titles or places, and it's all I need.\n\n"
+        "⚠️ No <b>Publish a calendar</b> section? Your school or company has turned it off, so "
+        "I can't read that calendar yet.",
+        "Click <b>Publish</b>. Two links appear: <b>HTML</b> and <b>ICS</b>.\n\n"
+        "Click the <b>ICS</b> link, then <b>Copy link</b>.",
+        "👇 <b>Paste the link into this chat.</b>\n\n"
+        "✅ You'll know it's right: it ends in <code>.ics</code>.\n\n"
+        "🗂 Several calendars (Class, CCA)? Repeat steps 2 to 4 for each one and send each "
+        "link.\n\n"
+        "Stuck? Setup is optional — forward me a plan any time.",
+    ),
+}
+
+
+def outlook_step(
+    part: int, n: int = 1, url: str = "", lead: str = "", part1: bool = True
+) -> tuple[str, InlineKeyboardMarkup]:
+    """One step of Outlook setup. part1=False when there's no feed link, so no part 1."""
+    steps = OUTLOOK_STEPS[part]
+    body = steps[n - 1].replace("{url}", html.escape(url))
+    title = (
+        OUTLOOK_PARTS[part]
+        if part1
+        else "📧 <b>Outlook</b>\n<b>Let me check when you're busy</b>\n\n"
     )
+    text = (lead + "\n\n" if lead else "") + title + f"<b>Step {n} of {len(steps)}</b>\n" + body
+    nav = []
+    if n > 1:
+        nav.append(InlineKeyboardButton("‹ Back", callback_data=f"o:{part}:{n - 1}"))
+    elif part == 2 and part1:
+        nav.append(InlineKeyboardButton("‹ Part 1", callback_data="o:1:4"))
+    if n < len(steps):
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"o:{part}:{n + 1}"))
+    elif part == 1:
+        nav.append(InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"))
+    return text, InlineKeyboardMarkup([nav, [_button("« Other calendars", "calendar")]])
 
 
 def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:
@@ -807,10 +827,6 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         )
     if screen == "export":
         return InlineKeyboardMarkup([[_button("« NUSMods link", "nusmods")]])
-    if screen == "outlook2":
-        return InlineKeyboardMarkup(
-            [[_button("‹ Part 1", "outlook")], [_button("« Other calendars", "calendar")]]
-        )
     if screen == "ios":
         return InlineKeyboardMarkup(
             [
@@ -839,7 +855,6 @@ HTML_SCREENS = frozenset(
         "mac",
         "google",
         "googlelink",
-        "outlook2",
         "classes",
         "skip",
         "sendplan",

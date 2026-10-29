@@ -31,7 +31,8 @@ import httpx
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from app.schemas.event import SG, Event
+from app.schemas.event import SG, Deadline, Event
+from app.services.calendar_export import DEADLINE_LENGTH, deadline_description
 
 log = logging.getLogger("amifree.google")
 
@@ -105,6 +106,44 @@ def event_body(event: Event) -> dict:
     if event.location:
         body["location"] = event.location
     return body
+
+
+def google_deadline_id(deadline: Deadline) -> str:
+    """Like google_event_id, with "dl" in front so a deadline's id is never a plan's."""
+    return "dl" + deadline.id.replace("-", "").lower()
+
+
+def deadline_body(deadline: Deadline) -> dict:
+    """A deadline as a short free "Due:" event. Reminders aren't set: through the API they'd
+    belong to AmIFree's account, so the student's own Google notification setting applies."""
+    start = deadline.due_at.astimezone(SG)
+    return {
+        "id": google_deadline_id(deadline),
+        "status": "confirmed",
+        "summary": f"Due: {deadline.title}",
+        "description": deadline_description(deadline)[:2000],
+        "start": {"dateTime": start.isoformat(), "timeZone": "Asia/Singapore"},
+        "end": {
+            "dateTime": (start + DEADLINE_LENGTH).isoformat(),
+            "timeZone": "Asia/Singapore",
+        },
+        "transparency": "transparent",
+        "extendedProperties": {"private": {"amifree": "1", "amifreeDeadline": "1"}},
+    }
+
+
+def same_deadline(remote: dict, body: dict) -> bool:
+    """Whether the copy in Google already says what the deadline says now."""
+    try:
+        when = datetime.fromisoformat(remote["start"]["dateTime"])
+        wanted = datetime.fromisoformat(body["start"]["dateTime"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (
+        when == wanted
+        and remote.get("summary") == body["summary"]
+        and (remote.get("description") or "") == body["description"]
+    )
 
 
 def merge(found: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
@@ -331,6 +370,56 @@ class GoogleCalendar:
         if response.status_code not in (200, 201):
             self._write_failed(response)
         return response.json()["id"]
+
+    # ---- deadlines ----
+
+    async def deadline_events(self, calendar_email: str) -> dict[str, dict]:
+        """The deadlines AmIFree added, by id, including ones the student deleted (their
+        status is then "cancelled", and AmIFree leaves them deleted)."""
+        cal = quote(calendar_email, safe="")
+        found, token = {}, None
+        for _ in range(MAX_PAGES):
+            params = {
+                "privateExtendedProperty": "amifreeDeadline=1",
+                "showDeleted": "true",
+                "maxResults": "250",
+                "fields": "nextPageToken,items(id,status,summary,description,start)",
+            }
+            if token:
+                params["pageToken"] = token
+            response = await self._call("GET", f"/calendars/{cal}/events", params=params)
+            if response.status_code in (403, 404):
+                raise GoogleAccessLost("AmIFree can't see that Google calendar any more.")
+            if response.status_code != 200:
+                raise self._unexpected(response)
+            data = response.json()
+            found |= {item["id"]: item for item in data.get("items", []) if item.get("id")}
+            token = data.get("nextPageToken")
+            if not token:
+                break
+        return found
+
+    async def put_deadline(self, calendar_email: str, body: dict, existing: bool) -> bool:
+        cal = quote(calendar_email, safe="")
+        if not existing:
+            response = await self._call(
+                "POST", f"/calendars/{cal}/events", params={"sendUpdates": "none"}, json=body
+            )
+            if response.status_code in (200, 201):
+                return True
+            if response.status_code != 409:
+                return self._write_failed(response)
+        response = await self._call(
+            "PUT",
+            f"/calendars/{cal}/events/{body['id']}",
+            params={"sendUpdates": "none"},
+            json=body,
+        )
+        if response.status_code == 200:
+            return True
+        if response.status_code in (404, 410):
+            return False
+        return self._write_failed(response)
 
     async def delete_event(self, calendar_email: str, event: Event | str):
         event_id = event if isinstance(event, str) else google_event_id(event)

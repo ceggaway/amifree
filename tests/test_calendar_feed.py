@@ -192,3 +192,32 @@ async def test_the_feed_settings_appear_once_there_is_a_feed(online):
     assert "Add Subscribed Calendar" in feed.text
     back = (await service.callback(1, tap(feed, "« Back to my calendars")))[0]
     assert back.edit and "Your calendars" in back.text
+
+
+# ---- deadlines ----
+
+
+async def test_open_deadlines_are_free_due_events_in_the_feed(online, reference):
+    from app.schemas.event import DeadlineDraft
+    from app.services.personal_calendar import busy_intervals
+
+    service, repo = online()
+    reply = (await service.callback(1, "cal:feed"))[0]
+    token = link_in(reply)[1]
+    user_id = repo.users[1].id
+    due = reference + timedelta(days=3)
+    essay = await repo.create_deadline(
+        user_id, None, DeadlineDraft(title="CS2103 essay", due_at=due, notes="Upload on Canvas")
+    )
+    done = await repo.create_deadline(
+        user_id, None, DeadlineDraft(title="Old quiz", due_at=due + timedelta(days=1))
+    )
+    await repo.finish_deadline(user_id, done.id)
+    feed = (await service.calendar_feed(token, "iOS/18.0")).decode()
+    unfolded = feed.replace("\r\n ", "")
+    assert f"UID:deadline-{essay.id}@amifree" in unfolded
+    assert "SUMMARY:Due: CS2103 essay" in unfolded and "Old quiz" not in unfolded
+    assert "TRANSP:TRANSPARENT" in unfolded and "TRIGGER:-PT1H" in unfolded
+    assert "Upload on Canvas" in unfolded and "remind you in Telegram" in unfolded
+    # Read back as someone's calendar (it's subscribed there too), it's never busy time.
+    assert busy_intervals(feed.encode(), due - timedelta(hours=1), due + timedelta(hours=1)) == []

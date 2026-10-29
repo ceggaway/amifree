@@ -8,14 +8,17 @@ in Apple Calendar instead of adding a second copy.
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from html import escape
 from urllib.parse import urlencode
 
-from app.schemas.event import Event
+from app.schemas.event import Deadline, Event
 
 GOOGLE_TEMPLATE = "https://calendar.google.com/calendar/render"
 FOOTER = "Added from AmIFree"
+# A deadline is a moment, not time spent: shown as a short event at the due time.
+DEADLINE_LENGTH = timedelta(minutes=15)
+DEADLINE_FOOTER = "Deadline from AmIFree. I'll remind you in Telegram too."
 
 
 def _utc(value: datetime) -> str:
@@ -76,6 +79,33 @@ def _vevent(event: Event, stamp: str, cancelled: bool = False) -> list[str]:
     return lines + ["END:VEVENT"]
 
 
+def deadline_description(deadline: Deadline) -> str:
+    notes = (deadline.notes or "").strip()
+    return f"{notes}\n\n{DEADLINE_FOOTER}" if notes else DEADLINE_FOOTER
+
+
+def _deadline_vevent(deadline: Deadline, stamp: str) -> list[str]:
+    return [
+        "BEGIN:VEVENT",
+        # Ends in @amifree like plans, so reading this calendar back never counts it as busy.
+        f"UID:deadline-{deadline.id}@amifree",
+        f"DTSTAMP:{stamp}",
+        f"DTSTART:{_utc(deadline.due_at)}",
+        f"DTEND:{_utc(deadline.due_at + DEADLINE_LENGTH)}",
+        f"SUMMARY:{_escape('Due: ' + deadline.title)}",
+        f"DESCRIPTION:{_escape(deadline_description(deadline))}",
+        # Free, not busy: a deadline doesn't take up the time it's due at.
+        "TRANSP:TRANSPARENT",
+        # Some apps drop alerts from subscribed calendars; Telegram's reminder still comes.
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        f"DESCRIPTION:{_escape('Due: ' + deadline.title)}",
+        "TRIGGER:-PT1H",
+        "END:VALARM",
+        "END:VEVENT",
+    ]
+
+
 def _calendar(lines: list[str]) -> bytes:
     return ("\r\n".join(_fold(line) for line in lines) + "\r\n").encode()
 
@@ -96,9 +126,12 @@ def build_ics(event: Event, *, now: datetime | None = None, cancelled: bool = Fa
     )
 
 
-def build_feed(events: list[Event], *, now: datetime | None = None) -> bytes:
-    """The subscribed calendar: every current plan. A plan that is dropped or cancelled is
-    simply absent, and the subscribing calendar app removes it on its next refresh."""
+def build_feed(
+    events: list[Event], *, deadlines: list[Deadline] = (), now: datetime | None = None
+) -> bytes:
+    """The subscribed calendar: every current plan, and every open deadline as a free "Due:"
+    event. Anything dropped, cancelled or done is simply absent, and the subscribing calendar
+    app removes it on its next refresh."""
     stamp = _utc(now or datetime.now(UTC))
     lines = [
         "BEGIN:VCALENDAR",
@@ -115,6 +148,8 @@ def build_feed(events: list[Event], *, now: datetime | None = None) -> bytes:
     ]
     for event in sorted(events, key=lambda e: e.start_at):
         lines += _vevent(event, stamp)
+    for deadline in sorted(deadlines, key=lambda d: d.due_at):
+        lines += _deadline_vevent(deadline, stamp)
     return _calendar(lines + ["END:VCALENDAR"])
 
 

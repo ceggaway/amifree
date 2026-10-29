@@ -298,6 +298,8 @@ def asked_field(question: str) -> str | None:
         return "date"
     if "What's the due date?" in question:
         return "date"
+    if question.startswith("Is that AM or PM?"):
+        return "meridiem"
     return None
 
 
@@ -306,9 +308,12 @@ _ANSWER_LEAD = re.compile(
 )
 
 
-def infer_meridiem(previous: Extraction, asked: str | None, reply: str) -> str:
-    """A bare "8" after a 7pm start means 8pm: add the am/pm that puts the end after the start."""
+def infer_meridiem(previous: Extraction, asked: str | None, reply: str, source: str = "") -> str:
+    """A bare "8" after a 7pm start means 8pm: add the am/pm that puts the end after the start.
+    After "Is that AM or PM?", "pm" alone is written out as the times it means."""
     answer = _ANSWER_LEAD.sub("", reply.strip().strip(".!")).strip()
+    if asked == "meridiem":
+        return _meridiem_reply(previous, answer, source) or reply
     if asked != "end" or not re.fullmatch(r"\d{1,2}(?:\.\d{2})?", answer):
         return reply
     try:
@@ -324,6 +329,52 @@ def infer_meridiem(previous: Extraction, asked: str | None, reply: str) -> str:
     return reply
 
 
+_BARE_TIME = re.compile(r"\d{1,2}(?:[:.]?\d{2})?")
+_MERIDIEM_WORDS = {
+    "am": "am",
+    "a.m.": "am",
+    "a.m": "am",
+    "morning": "am",
+    "in the morning": "am",
+    "pm": "pm",
+    "p.m.": "pm",
+    "p.m": "pm",
+    "afternoon": "pm",
+    "evening": "pm",
+    "night": "pm",
+    "in the afternoon": "pm",
+    "in the evening": "pm",
+    "at night": "pm",
+    "tonight": "pm",
+}
+
+
+def _meridiem_reply(previous: Extraction, answer: str, source: str = "") -> str | None:
+    """The reply to "Is that AM or PM?" written out as the times it means, or None.
+
+    "pm" after "6-8" is "6pm-8pm"; "6pm" after "6-8" is "6pm-8pm". Written out, so the times
+    are in the message itself and pass the check that every time came from the sender."""
+    # The model sometimes drops a written am/pm ("7pm" -> "7"); the message still has it.
+    start = (restore_meridiem(previous.start_time_text, source) or "").strip()
+    end = (restore_meridiem(previous.end_time_text, source) or "").strip()
+    word = _MERIDIEM_WORDS.get(answer.casefold())
+    if word:
+        times = [f"{t}{word}" if _BARE_TIME.fullmatch(t) else t for t in (start, end) if t]
+        return "-".join(times) if times != [start, end][: len(times)] else None
+    if re.search(_SEP, answer) or not end or not _BARE_TIME.fullmatch(end):
+        return None
+    try:
+        resolve_time(answer)
+    except Clarification:
+        return None
+    if start and not _BARE_TIME.fullmatch(start):
+        return f"{start}-{answer}"  # only the end was unclear ("7pm" to "5"): this is the end
+    # A single time like "6pm" is the start; the bare end follows it ("6pm" + "8" is 8pm).
+    filled = previous.model_copy(update={"start_time_text": answer})
+    end_text = infer_meridiem(filled, "end", end)
+    return f"{answer}-{end_text}" if end_text != end else None
+
+
 def fill_answer(previous: Extraction, asked: str, reply: str, reference: datetime):
     """Fill the asked-for detail from a short reply ("8PM", "2000", "7-9pm", "15 oct").
 
@@ -333,6 +384,8 @@ def fill_answer(previous: Extraction, asked: str, reply: str, reference: datetim
     answer = _ANSWER_LEAD.sub("", reply.strip().strip(".!")).strip()
     if not answer or len(answer) > 40:
         return None
+    if asked == "meridiem":
+        asked = "start"  # already written out as times by infer_meridiem
     if asked in ("start", "end"):
         both = re.fullmatch(rf"(.+?){_SEP}(.+)", answer)
         try:

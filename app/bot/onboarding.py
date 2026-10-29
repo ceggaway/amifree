@@ -44,7 +44,6 @@ PICK_CALENDAR = (
     "📅 Where do you usually add your events?\n\n"
     "I'll put your plans there by themselves, warn you about clashes, and help your groups "
     "find a time you're free.\n\n"
-    "📧 Outlook is coming soon.\n\n"
     "🎓 At NTU? Export your timetable from ntumods.com as a calendar file (.ics) and import "
     "it into the calendar you connect here, so I can check your classes too.\n\n"
     "I only see when you're busy, never what your events are called, where they are "
@@ -58,7 +57,8 @@ NOT_SURE = (
     "🍎 iPhone: open the Calendar app and tap Calendars at the bottom.\n"
     "• Calendars under iCloud → Apple\n"
     "• Calendars under Gmail → Google\n\n"
-    "💻 Computer: if you check your calendar at calendar.google.com, it's Google."
+    "💻 Computer: if you check your calendar at calendar.google.com, it's Google.\n\n"
+    "📧 Calendars under Exchange or Outlook (often a school or work email) → Outlook."
 )
 
 # Asked after the first plan is kept, at 3 plans and at 6 (CALENDAR_ASK_AT in scheduling),
@@ -154,16 +154,52 @@ GUIDES = {
         "🔒 Keep the link private — anyone with it can see your calendar. If it leaks, "
         "click <b>Reset</b> in Google and send me the new link." + PASTE_NEXT
     ),
-    "outlook": (
-        "📧 <b>Outlook — coming soon</b>\n"
-        "We're still setting up Outlook calendars, so this one isn't ready yet.\n\n"
-        "For now you can:\n"
-        "🍎 Use your iPhone / iCloud calendar\n"
-        "📅 Use your Google calendar\n"
-        "📚 Or add your NUSMods timetable\n\n"
-        "You can still forward me a plan any time — setup is optional."
+    # Outlook part 1 (plans into Outlook) needs the feed link, so the service builds it.
+    "outlook2": (
+        "📧 <b>Outlook · Part 2 of 2</b>\n"
+        "<b>Let me check when you're busy</b> · about 2 minutes\n"
+        "Do this on a computer.\n\n"
+        "1. Open <b>outlook.office.com</b> (school or work email) or <b>outlook.live.com</b> "
+        "(personal) and sign in.\n"
+        "2. Click <b>Settings ⚙️</b> → <b>Calendar</b> → <b>Shared calendars</b>.\n"
+        "3. Under <b>Publish a calendar</b>, pick your calendar and choose "
+        "<b>Can view when I'm busy</b>, then <b>Publish</b>.\n"
+        "4. Copy the <b>ICS</b> link, not the HTML one.\n\n"
+        "✅ You'll know it's right: it ends in <code>.ics</code>.\n\n"
+        "🔒 <b>Can view when I'm busy</b> shares only when you're busy, never titles or "
+        "places, and that's all I need.\n\n"
+        "⚠️ No Publish a calendar section? Your school or company has turned it off, so I "
+        "can't read that calendar yet.\n\n"
+        "🗂 Several calendars (Class, CCA)? Publish each one and send each link." + PASTE_NEXT
     ),
 }
+
+OUTLOOK_PART1 = (
+    "📧 <b>Outlook · Part 1 of 2</b>\n"
+    "<b>Add your plans to Outlook automatically</b>\n\n"
+    "Every plan you save with me shows up in an <b>AmIFree</b> calendar in Outlook, and "
+    "updates if it changes.\n\n"
+    "Do this on a computer (the Outlook phone app can't add it):\n"
+    "<b>1.</b> Copy your AmIFree link (tap it to copy):\n"
+    "<code>{url}</code>\n"
+    "<b>2.</b> Open <b>outlook.office.com</b> (school or work email) or "
+    "<b>outlook.live.com</b> (personal) and go to <b>Calendar</b>.\n"
+    "<b>3.</b> Click <b>Add calendar</b> → <b>Subscribe from web</b>.\n"
+    "<b>4.</b> Paste the link, name it <b>AmIFree</b>, then click <b>Import</b>.\n\n"
+    "⏳ Outlook checks for changes every few hours, so a new plan can take a while to show "
+    "up there. Your reminders here are on time either way.\n\n"
+    "🔒 Keep the link private: anyone with it can see your plans.\n\n"
+    "Done? Tap <b>Next</b> for part 2."
+)
+OUTLOOK_NO_FEED = (
+    "📧 <b>Outlook</b>\n\n"
+    "Adding plans to Outlook by themselves isn't available yet, so tap 📅 on a plan to add "
+    "it. This part lets me check when you're busy."
+)
+OUTLOOK_PART1_DONE = (
+    "✅ <b>Part 1 done</b>: Outlook has subscribed, so your plans will appear in your AmIFree "
+    "calendar there."
+)
 
 APPLE_PART1 = (
     "🍎 <b>Apple Calendar · Part 1 of 2</b>\n"
@@ -432,7 +468,7 @@ def pick_calendar_keyboard() -> InlineKeyboardMarkup:
             [_button("📅 Google Calendar", "google"), _button("🍎 Apple / iCloud", "apple")],
             [_button("🤔 I'm not sure", "notsure")],
             [_button("📚 NUSMods timetable", "nusmodspick")],
-            [_button("📧 Outlook (soon)", "outlook"), _button("« Back", "home")],
+            [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
         ]
     )
 
@@ -441,7 +477,7 @@ def not_sure_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [_button("📅 Google Calendar", "google"), _button("🍎 Apple / iCloud", "apple")],
-            [_button("« Back", "calendar")],
+            [_button("📧 Outlook", "outlook"), _button("« Back", "calendar")],
         ]
     )
 
@@ -461,6 +497,15 @@ def calendar_setup_keyboard() -> InlineKeyboardMarkup:
     """Under plans that go nowhere else yet: the same Apple and Google setup as /calendar."""
     return InlineKeyboardMarkup(
         [[_button("🍎 Apple Calendar", "apple"), _button("📅 Google Calendar", "google")]]
+    )
+
+
+def outlook_part1_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [_button("Next: check when I'm busy ›", "outlook2")],
+            [_button("« Other calendars", "calendar")],
+        ]
     )
 
 
@@ -666,6 +711,7 @@ def unlink_guide(
     shared_email: str | None = None,
     google_link: bool = False,
     icloud: bool = False,
+    outlook: bool = False,
     feed: bool = False,
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     """What the user still has to undo in their own calendar apps once AmIFree lets go, one
@@ -704,13 +750,20 @@ def unlink_guide(
             "off <b>Public Calendar</b>. (Mac: click the person icon next to it and untick "
             "Public Calendar.)"
         )
+    if outlook:
+        sections.append(
+            "📧 <b>Outlook calendar you published</b>\n"
+            "To stop sharing it: Outlook on the web → <b>Settings ⚙️</b> → <b>Calendar</b> → "
+            "<b>Shared calendars</b> → under Publish a calendar, <b>Unpublish</b>."
+        )
     if feed:
         sections.append(
             "🍎 <b>AmIFree calendar</b>\n"
             "It stops updating. To remove it:\n"
             "• iPhone: Settings → Apps → Calendar → Calendar Accounts → <b>AmIFree</b> → "
             "Delete Account\n"
-            "• Mac: in Calendar, right-click <b>AmIFree</b> → Unsubscribe"
+            "• Mac: in Calendar, right-click <b>AmIFree</b> → Unsubscribe\n"
+            "• Outlook: right-click <b>AmIFree</b> in the calendar list → Remove"
         )
     if not sections:
         return "", None
@@ -754,12 +807,9 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         )
     if screen == "export":
         return InlineKeyboardMarkup([[_button("« NUSMods link", "nusmods")]])
-    if screen == "outlook":
+    if screen == "outlook2":
         return InlineKeyboardMarkup(
-            [
-                [_button("📅 Use Google", "google"), _button("🍎 Use Apple", "apple")],
-                [_button("« Other calendars", "calendar")],
-            ]
+            [[_button("‹ Part 1", "outlook")], [_button("« Other calendars", "calendar")]]
         )
     if screen == "ios":
         return InlineKeyboardMarkup(
@@ -789,7 +839,7 @@ HTML_SCREENS = frozenset(
         "mac",
         "google",
         "googlelink",
-        "outlook",
+        "outlook2",
         "classes",
         "skip",
         "sendplan",

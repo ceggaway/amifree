@@ -34,14 +34,15 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
         "🍎 Apple / iCloud",
         "🤔 I'm not sure",
         "📚 NUSMods timetable",
-        "📧 Outlook (soon)",
+        "📧 Outlook",
         "« Back",
     ]
     expected = {
         # No public address in tests, so Apple goes straight to its busy-times part.
         "🍎 Apple / iCloud": ["Part 2 of 2", "Step 1 of 4", "calendar icon"],
         "📅 Google Calendar": ["calendar.google.com", "Secret address in iCal format"],
-        "📧 Outlook (soon)": ["coming soon"],
+        # No public address in tests either, so Outlook goes straight to publishing.
+        "📧 Outlook": ["Part 2 of 2", "Publish a calendar", "Can view when I'm busy"],
         "📚 NUSMods timetable": ["Connect your NUSMods timetable", "Share/Sync"],
     }
     for button, phrases in expected.items():
@@ -62,12 +63,13 @@ async def test_picker_asks_where_events_live_and_helps_the_unsure(service_factor
     welcome = (await service.command(1, "start"))[0]
     picker = (await service.callback(1, tap(welcome, "📅 Connect personal calendar")))[0]
     assert "Where do you usually add your events?" in picker.text
-    assert "Outlook is coming soon" in picker.text
+    assert "coming soon" not in picker.text
     unsure = (await service.callback(1, tap(picker, "🤔 I'm not sure")))[0]
     assert unsure.edit and unsure.text == onboarding.NOT_SURE
     # Not only iPhone users decide here.
     assert "Android" in unsure.text and "iPhone" in unsure.text and "Computer" in unsure.text
-    assert labels(unsure) == ["📅 Google Calendar", "🍎 Apple / iCloud", "« Back"]
+    assert "Exchange or Outlook" in unsure.text
+    assert labels(unsure) == ["📅 Google Calendar", "🍎 Apple / iCloud", "📧 Outlook", "« Back"]
     back = (await service.callback(1, tap(unsure, "« Back")))[0]
     assert back.text == onboarding.PICK_CALENDAR
 
@@ -87,8 +89,8 @@ async def test_guides_warn_about_the_common_wrong_turns(service_factory):
     assert "only works for iCloud calendars" in ios and "Google or Outlook" in ios
     google = (await service.callback(1, "setup:google"))[0].text
     assert "Not the Public address" in google and "school or work account" in google
-    outlook = (await service.callback(1, "setup:outlook"))[0].text
-    assert "coming soon" in outlook.lower()
+    outlook = (await service.callback(1, "setup:outlook2"))[0].text
+    assert "ICS</b> link, not the HTML one" in outlook and "turned it off" in outlook
 
 
 async def test_guides_say_where_to_do_it_and_how_to_spot_the_right_link(service_factory):

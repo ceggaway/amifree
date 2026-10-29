@@ -1,5 +1,7 @@
 """Regression tests for the tester feedback list (six items, plus the block follow-up)."""
 
+import pytest
+
 from app.schemas.event import Status
 from tests.conftest import extraction, onboard, tap
 
@@ -139,6 +141,36 @@ async def test_am_pm_answers_work_too_and_an_unclear_one_is_asked_again(service_
     card = (await service.message(1, 4, "9PM", reference))[0]
     assert "No clashes found" in card.text
     assert next(iter(repo.events.values())).end_at.hour == 21
+
+
+@pytest.mark.parametrize(
+    ("answer", "hours"),
+    [
+        ("pm", (18, 20)),
+        ("PM", (18, 20)),
+        ("p.m.", (18, 20)),
+        ("evening", (18, 20)),
+        ("am", (6, 8)),
+        ("6pm", (18, 20)),
+        ("6-8pm", (18, 20)),
+    ],
+)
+async def test_a_bare_am_or_pm_answers_the_am_pm_question(
+    service_factory, reference, answer, hours
+):
+    # "today 6-8 cca practice": the model can only copy the bare 6 and 8 again, so a reply
+    # of just "pm" used to be sent back to it and the same question came back for ever.
+    service, repo = service_factory(
+        extraction(title="CCA practice", date_text="today", start_time_text="6", end_time_text="8")
+    )
+    await onboard(service, reference)
+    asked = (await service.message(1, 2, "today 6-8 cca practice", reference))[0]
+    assert "AM or PM" in asked.text
+    card = (await service.message(1, 3, answer, reference))[0]
+    assert "AM or PM" not in card.text
+    event = next(iter(repo.events.values()))
+    assert (event.start_at.hour, event.end_at.hour) == hours
+    assert len(service.extractor.calls) == 1  # the answer never reached the LLM
 
 
 # 4. /free output -----------------------------------------------------------------------

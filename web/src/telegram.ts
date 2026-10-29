@@ -28,6 +28,15 @@ export function startParam(): string {
   return new URLSearchParams(initData()).get("start_param") ?? "";
 }
 
+/** Telegram opens the app with its launch data in the address's #part (#tgWebAppData=…).
+ * The page is chosen from that #part too, so it read as an unknown page and showed nothing
+ * below the header. Telegram's script has already read it by now: swap it for the home page. */
+export function clearLaunchHash() {
+  if (window.location.hash && !window.location.hash.startsWith("#/")) {
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#/`);
+  }
+}
+
 export function ready() {
   window.Telegram?.WebApp?.ready();
   window.Telegram?.WebApp?.expand();

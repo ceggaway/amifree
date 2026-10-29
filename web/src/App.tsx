@@ -1,7 +1,7 @@
 import { BackButton } from "./components/BackButton";
 import { Icon } from "./components/Icon";
 import { useEffect, useRef } from "react";
-import { HashRouter, Link, Route, Routes, useNavigate } from "react-router-dom";
+import { HashRouter, Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { mockMode } from "./api";
 import { Blocks } from "./pages/Blocks";
 import { Calendar } from "./pages/Calendar";
@@ -69,6 +69,8 @@ export function App() {
           <Route path="/g/:code/find" element={<FindTime />} />
           <Route path="/g/:code/stats" element={<GroupStats />} />
           <Route path="/e/:id" element={<GroupEvent />} />
+          {/* An address no page matches: home, never a blank page under the header. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </HashRouter>

@@ -42,6 +42,8 @@ PICK_CALENDAR = (
     "I'll put your plans there by themselves, warn you about clashes, and help your groups "
     "find a time you're free.\n\n"
     "📧 Outlook is coming soon.\n\n"
+    "🎓 At NTU? Export your timetable from ntumods.com as a calendar file (.ics) and import "
+    "it into the calendar you connect here, so I can check your classes too.\n\n"
     "I only see when you're busy, never what your events are called, where they are "
     "or who's going."
 )
@@ -309,7 +311,9 @@ SEND_PLAN = (
 CLASSES_QUESTION = (
     "<b>Are your classes included in this calendar?</b>\n\n"
     "Tap <b>Add NUSMods</b> if your classes are missing. Tap <b>Continue</b> if they’re "
-    "already included or you don’t have classes to add."
+    "already included or you don’t have classes to add.\n\n"
+    "🎓 At NTU? Export your timetable from ntumods.com as a calendar file (.ics), import it "
+    "into this calendar, then tap <b>Continue</b>."
 )
 
 SCHEDULE_READY = (

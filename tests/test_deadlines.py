@@ -67,6 +67,27 @@ def test_tmr_is_understood_however_the_model_writes_it(reference, date_text, tim
     assert draft.due_at == at(5, 23, 59)
 
 
+@pytest.mark.parametrize("date_text", ["next wed", "Wednesday", "7 Oct"])
+@pytest.mark.parametrize("time_text", ["2359", "23:59", "11:59pm", "11:59 PM", "2359hrs"])
+def test_2359_is_understood_however_the_model_writes_it(reference, date_text, time_text):
+    # From feedback: "ec2102 due next monday 2359" was only caught as 23:59.
+    draft = validate_deadline(
+        due(title="EC2102", date_text=date_text, start_time_text=time_text),
+        "ec2102 due next wed 2359",
+        reference,
+    )
+    assert draft.due_at == at(7, 23, 59)
+
+
+def test_a_rewritten_day_is_kept_only_when_the_message_names_one_day(reference):
+    with pytest.raises(Clarification):  # two days written: never guess which one
+        validate_deadline(
+            due(date_text="7 Oct", start_time_text="11:59pm"),
+            "ec2102 due wed 2359, quiz fri",
+            reference,
+        )
+
+
 def test_a_time_the_message_did_give_is_never_overridden(reference):
     # Only a time the message never had is dropped; one that disagrees with it is still asked.
     with pytest.raises(Clarification):

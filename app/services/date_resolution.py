@@ -549,22 +549,28 @@ def _with_day_part(raw: str | None, source: str) -> str | None:
 _AM_OR_PM = re.compile(r"\bam\b.*\bpm\b|\bpm\b.*\bam\b|am/pm|a\.m\.", re.IGNORECASE)
 
 
-_RELATIVE_WORD = re.compile(
-    r"\b(?:" + "|".join(re.escape(w) for w in sorted(RELATIVE, key=len, reverse=True)) + r")\b",
-    re.IGNORECASE,
+_RELATIVE = "|".join(re.escape(w) for w in sorted(RELATIVE, key=len, reverse=True))
+_WEEKDAY = "|".join(sorted(_WEEKDAY_ABBR, key=len, reverse=True))
+_RELATIVE_WORD = re.compile(rf"\b(?:{_RELATIVE})\b", re.IGNORECASE)
+# Relative words plus weekdays ("next mon", "this fri"), for a due date.
+_RELATIVE_OR_WEEKDAY = re.compile(
+    rf"\b(?:(?:(?:next|this|coming)\s+)?(?:{_WEEKDAY})|{_RELATIVE})\b", re.IGNORECASE
 )
 
 
-def written_relative(extraction: Extraction, source: str, reference: datetime) -> Extraction:
+def written_relative(
+    extraction: Extraction, source: str, reference: datetime, *, weekdays: bool = False
+) -> Extraction:
     """The model converted "tmr" to "13 Oct": use the word the sender wrote, if it is the same day.
 
     Only when the converted date isn't in the message and every relative word in it ("tmr",
-    "tonight") means that one day, so a real date is never swapped for a guess.
+    "tonight") means that one day, so a real date is never swapped for a guess. weekdays: also
+    "next mon" for "2 Nov" (deadlines; an event's date must still be one the message gave).
     """
     value = extraction.date_text
     if not value or in_source(value, source):
         return extraction
-    written = _RELATIVE_WORD.findall(source)
+    written = (_RELATIVE_OR_WEEKDAY if weekdays else _RELATIVE_WORD).findall(source)
     try:
         day = resolve_date(value, reference)
         if not written or {resolve_date(w, reference) for w in written} != {day}:

@@ -1250,7 +1250,10 @@ class SchedulingService:
             message_id = pending["message_id"]
             if previous:
                 text = infer_meridiem(
-                    Extraction.model_validate(previous), pending.get("asked"), text
+                    Extraction.model_validate(previous),
+                    pending.get("asked"),
+                    text,
+                    pending.get("source", ""),
                 )
             source = (pending.get("source", "") + "\n" + text).strip()
             if len(source) > 8000:

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AmIFree Library Poster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+  /* Layout: one A4 sheet. Headline, a timetable strip with the clash marked, a chat mock, two columns of features, tear-off tabs at the foot. */
+  :root {
+    --paper: #fbfaf6;
+    --ink: #13213a;
+    --muted: #5a6478;
+    --line: #d9dbe2;
+    --free: #ffd84d;   /* highlighter */
+    --clash: #e2483d;
+    --tg: #2a9fd8;
+    --display: "Bricolage Grotesque", "Arial Black", system-ui, sans-serif;
+    --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #e6e7ea; }
+  body { font-family: var(--body); color: var(--ink); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .toolbar { max-width: 210mm; margin: 16px auto 0; padding: 0 16px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 14px; }
+  .toolbar input { font: inherit; padding: 6px 8px; border: 1px solid #aab; border-radius: 4px; width: 220px; }
+  .toolbar span { color: #556; }
+
+  .sheet {
+    width: 210mm; height: 297mm; margin: 16px auto 32px; background: var(--paper);
+    box-shadow: 0 4px 24px rgba(0,0,0,.15); position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .main { flex: 1; min-height: 0; padding: 13mm 15mm 0; display: flex; flex-direction: column; gap: 5mm; }
+
+  .eyebrow { font-family: var(--mono); font-size: 10pt; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; }
+  h1 { font-family: var(--display); font-weight: 800; font-size: 50pt; line-height: .92; letter-spacing: -.02em; margin: 0; text-wrap: balance; }
+  h1 mark { background: linear-gradient(transparent 52%, var(--free) 52%, var(--free) 92%, transparent 92%); color: inherit; padding: 0 .04em; }
+  .lede { font-size: 13pt; line-height: 1.4; max-width: 150mm; margin: 0; }
+  .lede b { font-weight: 600; }
+
+  /* Friday timetable strip */
+  .day { border: 1.5px solid var(--ink); border-radius: 3mm; padding: 4mm 5mm 5mm; }
+  .day-head { font-family: var(--mono); font-size: 9pt; display: flex; justify-content: space-between; margin-bottom: 3mm; color: var(--muted); }
+  .day-head b { color: var(--ink); }
+  .track { position: relative; height: 22mm; }
+  .hours { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); position: absolute; inset: 0; }
+  .hours div { border-left: 1px dashed var(--line); font-family: var(--mono); font-size: 7.5pt; color: var(--muted); padding-left: 1mm; }
+  .blk { position: absolute; top: 5mm; height: 7mm; border-radius: 1.5mm; font-family: var(--mono); font-size: 7.5pt; padding: 1.4mm 2mm; white-space: nowrap; overflow: hidden; }
+  .blk.cls { background: var(--ink); color: var(--paper); }
+  .blk.new { top: 13.5mm; background: transparent; border: 1.5px dashed var(--clash); color: var(--clash); font-weight: 600; }
+  .blk.ok { top: 13.5mm; background: var(--free); color: var(--ink); font-weight: 600; }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8mm; align-items: start; }
+
+  /* chat mock */
+  .chat { background: #dfe9f2; border-radius: 3mm; padding: 4mm; display: flex; flex-direction: column; gap: 2.5mm; font-size: 9.5pt; }
+  .bubble { background: #fff; border-radius: 2.5mm; padding: 2.5mm 3mm; max-width: 92%; line-height: 1.35; }
+  .bubble.me { align-self: flex-end; background: #e3f7d4; }
+  .fwd { font-size: 7.5pt; color: var(--tg); font-weight: 600; display: block; margin-bottom: .8mm; }
+  .verdict { font-weight: 600; color: var(--clash); }
+  .btns { display: flex; gap: 1.5mm; margin-top: 2mm; }
+  .btns span { flex: 1; text-align: center; font-size: 8pt; font-weight: 600; color: var(--tg); background: #eef6fb; border-radius: 1.5mm; padding: 1.2mm 0; }
+
+  .feats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2.4mm; }
+  .feats li { display: grid; grid-template-columns: 9mm 1fr; gap: 2mm; font-size: 10.5pt; line-height: 1.35; }
+  .feats .k { font-family: var(--mono); font-weight: 600; font-size: 9pt; padding-top: .5mm; color: var(--muted); }
+  .feats b { font-weight: 600; }
+  h2 { font-family: var(--display); font-weight: 800; font-size: 17pt; margin: 0 0 2.5mm; letter-spacing: -.01em; }
+  code { font-family: var(--mono); font-size: 9pt; background: #eceef3; padding: .2mm 1mm; border-radius: 1mm; }
+
+  .cta { display: grid; grid-template-columns: 1fr 34mm; gap: 6mm; align-items: center; border-top: 1.5px solid var(--ink); padding-top: 4mm; margin-top: auto; padding-bottom: 4mm; }
+  .cta .big { font-family: var(--display); font-weight: 800; font-size: 23pt; line-height: 1; }
+  .cta .handle { color: var(--tg); }
+  .cta p { margin: 2mm 0 0; font-size: 10pt; color: var(--muted); }
+  #qr svg, #qr img { width: 34mm; height: 34mm; display: block; }
+
+  /* tear-off tabs */
+  .tabs { height: 30mm; display: grid; grid-template-columns: repeat(10, 1fr); border-top: 1.5px dashed var(--muted); }
+  .tab { border-left: 1.5px dashed var(--muted); display: flex; align-items: center; justify-content: center; }
+  .tab:first-child { border-left: 0; }
+  .tab span { writing-mode: vertical-rl; transform: rotate(180deg); font-family: var(--mono); font-size: 8pt; font-weight: 600; line-height: 1.2; text-align: center; }
+  .tab small { display: block; font-weight: 400; color: var(--muted); }
+  .scissors { position: absolute; left: 3mm; bottom: 27.6mm; font-size: 10pt; color: var(--muted); background: var(--paper); padding: 0 1mm; }
+
+  @media print {
+    html, body { background: none; }
+    .toolbar { display: none; }
+    .sheet { margin: 0; box-shadow: none; }
+  }
+  @media screen and (max-width: 820px) {
+    .sheet { transform-origin: top left; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <label for="handle">Bot username</label>
+  <input id="handle" value="YOUR_BOT" spellcheck="false" autocomplete="off">
+  <span>Type it without the @. The QR code and tabs update. Then print with ⌘P (A4, margins: none, background graphics on).</span>
+</div>
+
+<div class="sheet">
+  <div class="main">
+    <div class="eyebrow"><span>A Telegram bot for your schedule</span><span>Free · no sign-up</span></div>
+
+    <h1>“Are you free <mark>Fri 7pm?</mark>”</h1>
+
+    <p class="lede">Stop scrolling through old chats to remember what you said yes to. <b>Forward the plan to AmIFree, or just type it</b>, and it tells you in seconds if it clashes with your other plans, then adds it to <b>Google or Apple Calendar</b> in one tap.</p>
+
+    <div class="day" aria-label="Example Friday">
+      <div class="day-head"><span><b>FRI</b></span><span>your plans in AmIFree</span></div>
+      <div class="track">
+        <div class="hours"><div>10</div><div>11</div><div>12</div><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div></div>
+        <div class="blk cls" style="left:0%;width:16.66%">Lecture</div>
+        <div class="blk cls" style="left:33.33%;width:16.66%">Cafe shift</div>
+        <div class="blk cls" style="left:66.66%;width:24.99%">Hall play rehearsal</div>
+        <div class="blk new" style="left:74.99%;width:16.66%">✕ Dinner @ Vivo</div>
+        <div class="blk ok" style="left:49.99%;width:16.66%">✓ Proj meeting</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="chat" aria-label="Example chat with the bot">
+        <div class="bubble me"><span class="fwd">Forwarded from CCA Comm 25/26</span>Comm dinner Fri 7–9pm @ Vivo! Pls reply by Wed 🙏</div>
+        <div class="bubble">
+          <b>Comm dinner</b><br>Fri 7:00–9:00pm · VivoCity<br>
+          <span class="verdict">⚠️ Clashes with Hall play rehearsal (6–9pm)</span>
+          <div class="btns"><span>Save</span><span>Going anyway</span><span>Edit</span></div>
+        </div>
+      </div>
+
+      <div>
+        <h2>Send it any way you like</h2>
+        <ul class="feats">
+          <li><span class="k">TXT</span><span><b>Just type it</b>: “dinner with Mei fri 7pm”</span></li>
+          <li><span class="k">FWD</span><span><b>Forward</b> a message from any chat</span></li>
+          <li><span class="k">IMG</span><span><b>Send a photo</b> of a poster, like this one</span></li>
+          <li><span class="k">MIC</span><span><b>Send a voice note</b>: “badminton sat 2 to 4”</span></li>
+          <li><span class="k">EVE</span><span><b>Reminder the night before</b>, and an alert if the time or place changes</span></li>
+          <li><span class="k">CAL</span><span><b>Add to Google or Apple Calendar</b> in one tap</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div>
+      <h2>Running a CCA or project group?</h2>
+      <ul class="feats">
+        <li><span class="k">/1</span><span>Add the bot to your group. <code>/event Training Tue 7-9pm</code> posts an RSVP card with a live headcount.</span></li>
+        <li><span class="k">/2</span><span><code>/whosfree meeting 2h next week</code> fills itself from everyone's saved plans and suggests the best slots.</span></li>
+      </ul>
+    </div>
+
+    <div class="cta">
+      <div>
+        <div class="big">Scan, then send<br>your next plan to <span class="handle" data-handle>@YOUR_BOT</span></div>
+        <p>No calendar login. Your schedule stays private: groups only see your RSVP.</p>
+      </div>
+      <div id="qr" aria-label="QR code to open the bot in Telegram"></div>
+    </div>
+  </div>
+
+  <span class="scissors">✂</span>
+  <div class="tabs" id="tabs"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+  const input = document.getElementById('handle');
+  const tabs = document.getElementById('tabs');
+  for (let i = 0; i < 10; i++) {
+    const t = document.createElement('div');
+    t.className = 'tab';
+    t.innerHTML = '<span><b data-handle></b><small>Am I free?</small></span>';
+    tabs.appendChild(t);
+  }
+  function render() {
+    const name = (input.value || 'YOUR_BOT').trim().replace(/^@/, '');
+    document.querySelectorAll('[data-handle]').forEach(el => el.textContent = '@' + name);
+    const qr = qrcode(0, 'M');
+    qr.addData('https://t.me/' + name);
+    qr.make();
+    document.getElementById('qr').innerHTML = qr.createSvgTag({ margin: 0, scalable: true });
+    try { localStorage.setItem('amifree-handle', name); } catch (e) {}
+  }
+  try { const saved = localStorage.getItem('amifree-handle'); if (saved) input.value = saved; } catch (e) {}
+  const q = new URLSearchParams(location.search).get('bot');
+  if (q) input.value = q;
+  input.addEventListener('input', render);
+  render();
+</script>
+</body>
+</html>

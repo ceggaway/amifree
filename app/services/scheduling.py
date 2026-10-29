@@ -1438,10 +1438,28 @@ class SchedulingService:
         await self.safe_action(user.id, "deadline")
         return [
             Reply(
-                card_text(deadline, self.clock(), user.reminders_enabled),
+                card_text(
+                    deadline,
+                    self.clock(),
+                    user.reminders_enabled,
+                    await self.deadline_calendar_line(user, deadline),
+                ),
                 deadline_keyboard(deadline.id),
             )
         ]
+
+    async def deadline_calendar_line(self, user: User, deadline) -> str:
+        """Where the new deadline went in the student's own calendars, only as far as it's true:
+        Google is written now and checked; the feed is read whenever their app refreshes."""
+        lines = []
+        added = await self.google_sync.add_deadline(user, deadline)
+        if added:
+            lines.append("📅 Added to your Google Calendar.")
+        elif added is False:
+            lines.append("📅 I couldn't add it to your Google Calendar just now. I'll try again.")
+        if user.calendar_feed_token and user.calendar_feed_seen_at:
+            lines.append("📅 It'll show up in your AmIFree calendar at its next refresh.")
+        return "\n".join(lines)
 
     async def list_deadlines(self, user: User, page: int = 0) -> list[Reply]:
         """One numbered message: overdue first, then upcoming, with a button per deadline."""

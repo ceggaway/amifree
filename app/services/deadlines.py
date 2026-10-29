@@ -60,10 +60,13 @@ def when(due: datetime, now: datetime) -> str:
     return f"{due:%a %-d %b}, {clock(due)} ({relative})"
 
 
-def card_text(deadline: Deadline, now: datetime, reminders: bool) -> str:
+def card_text(deadline: Deadline, now: datetime, reminders: bool, calendar: str = "") -> str:
+    """calendar: what happened in the student's calendar, said only once it's true."""
     text = f"📌 {deadline.title}\nDue {when(deadline.due_at, now)}"
     if deadline.notes:
         text += "\n" + deadline.notes[:300]
+    if calendar:
+        text += "\n\n" + calendar
     if reminders:
         text += "\n\nI'll remind you the day before and on the morning it's due."
         text += " /settings to change reminders."

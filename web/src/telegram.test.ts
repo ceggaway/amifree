@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirm } from "./telegram";
+import { clearLaunchHash, confirm } from "./telegram";
 
 afterEach(() => {
   delete window.Telegram;
@@ -23,5 +23,21 @@ describe("confirm", () => {
     window.Telegram = { WebApp: { initData: "", ready() {}, expand() {}, showConfirm, isVersionAtLeast: () => false } };
     expect(await confirm("Cancel?")).toBe(false);
     expect(showConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("clearLaunchHash", () => {
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  it("swaps Telegram's launch data for the home page", () => {
+    window.history.replaceState(null, "", "/app/?x=1#tgWebAppData=abc&tgWebAppVersion=7.10");
+    clearLaunchHash();
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe("/app/?x=1#/");
+  });
+
+  it("leaves a page address alone", () => {
+    window.history.replaceState(null, "", "/app/#/g/n1");
+    clearLaunchHash();
+    expect(window.location.hash).toBe("#/g/n1");
   });
 });

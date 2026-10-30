@@ -172,6 +172,8 @@ def test_model_rewriting_noon_as_12_still_verifies():
         "Standup Friday 8-9pm Tokyo time",
         "AMA Friday 8-9pm ET",
         "Q&A Friday 8-9pm Sydney time",
+        "Guest talk Friday 8-9pm California time",
+        "Panel Friday 8-9pm Germany time",
     ],
 )
 def test_other_timezone_asks_instead_of_saving(source):
@@ -188,6 +190,7 @@ def test_other_timezone_asks_instead_of_saving(source):
     [
         "Dinner Friday 8-9pm ok la time to eat",
         "Talk Friday 8-9pm Hong Kong time",
+        "Call with the Bali villa Friday 8-9pm Bali time",
         "Poster printing Friday 8-9pm, 12pt font",
         "Anytime Fitness class Friday 8-9pm",
     ],

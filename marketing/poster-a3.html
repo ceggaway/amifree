@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Am I Free A3 Poster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@500;700;900&display=swap">
+<style>
+  /* Layout: one A3 sheet on the friend's yellow. Headline, name, chat mock with a CLASH stamp beside the how-to,
+     group strip, tagline + big QR. Group-chat quotes sit around the edges. */
+  :root {
+    --yellow: #ffe600;
+    --ink: #111111;
+    --red: #e3242b;
+    --white: #ffffff;
+    --chat: #dbe7f0;
+    --tg: #2a9fd8;
+    --mine: #e2f7cb;
+    --display: "Anton", "Impact", "Arial Narrow", sans-serif;
+    --body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  }
+  @page { size: A3; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #d8d8d8; }
+  body { font-family: var(--body); color: var(--ink); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .sheet {
+    width: 297mm; height: 420mm; margin: 16px auto; background: var(--yellow);
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 6px 30px rgba(0,0,0,.2);
+  }
+  .main { flex: 1; min-height: 0; padding: 14mm 20mm 0; display: flex; flex-direction: column; gap: 6mm; position: relative; z-index: 1; }
+
+  h1 { font-family: var(--display); font-weight: 400; text-transform: uppercase; font-size: 122pt; line-height: .86; margin: 0; text-align: center; letter-spacing: -.005em; }
+  .sub { font-family: var(--body); font-weight: 900; font-size: 25pt; text-transform: uppercase; text-align: center; margin: -2mm 0 0; letter-spacing: -.01em; text-wrap: balance; }
+
+  .brand { display: flex; flex-direction: column; align-items: center; gap: 1mm; }
+  .name { position: relative; font-family: var(--body); font-weight: 900; font-size: 76pt; line-height: 1; letter-spacing: -.035em; }
+  .name .q { color: var(--red); }
+  .badge { position: absolute; right: -30mm; top: -4mm; background: var(--red); color: var(--white); font-weight: 900; font-size: 26pt; padding: 1.5mm 4mm; border-radius: 3mm; transform: rotate(-8deg); letter-spacing: .02em; }
+  .tag { font-weight: 700; font-size: 19pt; }
+
+  .row { display: grid; grid-template-columns: 1.05fr 1fr; gap: 10mm; align-items: center; }
+
+  /* chat mock */
+  .phone { position: relative; background: var(--chat); border: 2.5mm solid var(--ink); border-radius: 9mm; padding: 6mm 5mm 7mm; display: flex; flex-direction: column; gap: 3mm; font-size: 13.5pt; transform: rotate(-1.5deg); }
+  .phone .top { font-weight: 700; font-size: 13pt; text-align: center; padding-bottom: 2mm; border-bottom: 1px solid rgba(0,0,0,.12); }
+  .bubble { background: var(--white); border-radius: 4mm; padding: 3.5mm 4.5mm; max-width: 88%; line-height: 1.3; }
+  .bubble.me { align-self: flex-end; background: var(--mine); }
+  .fwd { display: block; color: var(--tg); font-size: 11pt; font-weight: 700; margin-bottom: 1mm; }
+  .warn { color: var(--red); font-weight: 900; }
+  .btns { display: flex; gap: 2mm; margin-top: 3mm; }
+  .btns span { flex: 1; text-align: center; font-size: 11pt; font-weight: 700; color: var(--tg); background: #eef6fb; border-radius: 2mm; padding: 1.8mm 0; }
+  .stamp {
+    position: absolute; right: -6mm; bottom: -3mm; transform: rotate(-10deg);
+    font-family: var(--display); font-size: 46pt; line-height: 1; color: var(--red);
+    border: 2.2mm solid var(--red); border-radius: 3mm; padding: 1mm 5mm 2mm;
+    background: rgba(255,255,255,.55); letter-spacing: .03em;
+  }
+
+  .how h2, .group h2 { font-family: var(--display); font-weight: 400; text-transform: uppercase; font-size: 34pt; line-height: 1; margin: 0 0 3mm; }
+  .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2.6mm; font-size: 15pt; line-height: 1.25; }
+  .steps li { display: grid; grid-template-columns: 12mm 1fr; align-items: start; }
+  .steps .e { font-size: 20pt; line-height: 1.1; }
+  .steps b { font-weight: 900; }
+
+  .group { background: var(--ink); color: var(--yellow); border-radius: 6mm; padding: 6mm 8mm; display: grid; grid-template-columns: auto 1fr 1fr; gap: 8mm; align-items: center; }
+  .group h2 { margin: 0; font-size: 36pt; line-height: .95; }
+  .group p { margin: 0; font-size: 15pt; line-height: 1.3; color: var(--white); }
+  .group p b { color: var(--yellow); font-weight: 900; display: block; font-size: 17pt; }
+
+  .bottom { display: grid; grid-template-columns: 1fr auto; gap: 10mm; align-items: center; margin-top: auto; padding-bottom: 16mm; }
+  .tagline { font-family: var(--display); text-transform: uppercase; font-size: 60pt; line-height: .95; white-space: nowrap; }
+  .left { display: flex; flex-direction: column; align-items: flex-start; gap: 6mm; }
+  .cta { background: var(--red); color: var(--white); font-weight: 900; font-size: 24pt; padding: 3mm 7mm; border-radius: 4mm; transform: rotate(-2deg); }
+  .cta .arrow { display: inline-block; margin-left: 2mm; }
+  .made { font-weight: 700; font-size: 16pt; }
+  .qrbox { display: flex; flex-direction: column; align-items: center; gap: 2mm; }
+  #qr { background: var(--white); padding: 4mm; border: 1.5mm solid var(--ink); border-radius: 3mm; }
+  #qr svg { width: 62mm; height: 62mm; display: block; }
+  .qrbox .scan { font-weight: 900; font-size: 20pt; }
+  .qrbox .h { font-weight: 700; font-size: 16pt; }
+
+  /* group-chat quotes around the edges */
+  .quote { position: absolute; z-index: 0; background: var(--white); border: 1mm solid var(--ink); border-radius: 5mm; padding: 2mm 4mm; font-weight: 700; font-size: 14pt; white-space: nowrap; }
+  /* tail: a white square turned 45°, outlined on two sides, half tucked under the bubble so it covers the bubble's border there */
+  .quote::after { content: ""; position: absolute; bottom: -3mm; left: 7mm; width: 4mm; height: 4mm; background: var(--white); border-right: 1mm solid var(--ink); border-bottom: 1mm solid var(--ink); transform: rotate(45deg); }
+
+
+  @media print {
+    html, body { background: none; }
+    .sheet { margin: 0; box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="quote" style="left:8mm; top:118mm; transform:rotate(-7deg)">when free? 🥲</div>
+  <div class="quote" style="right:9mm; top:135mm; transform:rotate(6deg)">scroll up where ah 😵‍💫</div>
+  <div class="quote" style="right:14mm; top:291mm; transform:rotate(-5deg)">wait what time ah</div>
+  <div class="quote" style="left:16mm; top:293mm; transform:rotate(4deg)">ddl when ah?</div>
+
+  <div class="main">
+    <h1>Double-booked<br>again?</h1>
+    <p class="sub">Plans and deadlines buried in 5 group chats? This bot keeps them in one place.</p>
+
+    <div class="brand">
+      <div class="name">Am I Free<span class="q">?</span><span class="badge">FREE</span></div>
+      <div class="tag">The Telegram bot that checks your plans for you</div>
+    </div>
+
+    <div class="row">
+      <div class="phone" aria-label="Example chat with the bot">
+        <div class="top">Am I Free? · bot</div>
+        <div class="bubble me"><span class="fwd">Forwarded from CCA Comm</span>Comm dinner Fri 7pm @ Vivo!! 🍜</div>
+        <div class="bubble">
+          <b>Comm dinner</b> · Fri 7:00–9:00pm<br>
+          <span class="warn">⚠️ Clashes with Hall rehearsal (6–9pm)</span>
+          <div class="btns"><span>Add to plans</span><span>Skip</span></div>
+        </div>
+        <div class="stamp">CLASH!</div>
+      </div>
+
+      <div class="how">
+        <h2>How it works</h2>
+        <ul class="steps">
+          <li><span class="e">📩</span><span><b>Forward any plan or deadline</b> from a group chat</span></li>
+          <li><span class="e">🎙️</span><span>…or <b>type it</b>, or <b>send a voice note</b></span></li>
+          <li><span class="e">⚠️</span><span>It tells you <b>instantly</b> if you’re free</span></li>
+          <li><span class="e">⏰</span><span><b>Reminder</b> the night before</span></li>
+          <li><span class="e">📅</span><span>Syncs to <b>Google or Apple Calendar</b></span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>For your<br>group</h2>
+      <p><b>Time set?</b>Post an event. Everyone RSVPs with one tap.</p>
+      <p><b>Can’t agree on a time?</b>It finds one that works for everyone.</p>
+    </div>
+
+    <div class="bottom">
+      <div class="left">
+        <div class="tagline">Less “when free?”<br>More “see you there.”</div>
+        <div class="cta">Scan &amp; send your first plan <span class="arrow">→</span></div>
+        <div class="made">Made by NUS students · Free to try</div>
+      </div>
+      <div class="qrbox">
+        <div id="qr" aria-label="QR code that opens the bot in Telegram"></div>
+        <div class="scan">Scan to try ↑</div>
+        <div class="h" data-handle>@amifree_devv_bot</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+  const HANDLE = 'amifree_devv_bot';
+  const qr = qrcode(0, 'M');
+  qr.addData('https://t.me/' + HANDLE);
+  qr.make();
+  document.getElementById('qr').innerHTML = qr.createSvgTag({ margin: 0, scalable: true });
+</script>
+</body>
+</html>

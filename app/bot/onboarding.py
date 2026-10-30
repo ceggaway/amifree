@@ -6,6 +6,7 @@ Every screen edits the same message, so setup never floods the chat (ux-flows.md
 import base64
 import html
 from pathlib import Path
+from urllib.parse import quote
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -467,22 +468,23 @@ OUTLOOK_PARTS = {
     1: "📧 <b>Outlook · Part 1 of 2</b>\n<b>Add your plans to Outlook automatically</b>\n\n",
     2: "📧 <b>Outlook · Part 2 of 2</b>\n<b>Let me check when you're busy</b>\n\n",
 }
-# Outlook has no picture guide, so each screen is one short step. {url} is the feed link.
+# One short step per screen, most with a marked-up picture. {url} is the feed link.
 OUTLOOK_STEPS = {
     1: (
         "Every plan you save with me will show up in an <b>AmIFree</b> calendar in Outlook, "
         "and update if it changes.\n\n"
-        "💻 Do this on a <b>computer</b>: the Outlook phone app can't. Open this chat there "
-        "too (Telegram Desktop or <b>web.telegram.org</b>), so you can copy your link.",
-        "Open <b>outlook.office.com</b> (school or work email) or <b>outlook.live.com</b> "
-        "(personal email) and sign in.",
-        "Click the <b>calendar icon</b> on the far left to open your calendar.\n\n"
-        "Click <b>Add calendar</b> (under the small month view), then "
-        "<b>Subscribe from web</b>.",
-        "Copy your AmIFree link (click it to copy):\n<code>{url}</code>\n\n"
-        "Paste it into Outlook, name it <b>AmIFree</b>, then click <b>Import</b>.\n\n"
+        "💻 Best on a <b>computer</b> (Telegram Desktop or <b>web.telegram.org</b>): the "
+        "Outlook phone app can't add it.\n\n"
+        "👇 <b>Tap your Outlook below.</b> It opens with your AmIFree calendar filled in. "
+        "Sign in if asked, then click <b>Import</b>.\n\n"
         "⏳ Outlook checks for new plans every few hours, so they can take a while to show "
-        "up there. Your reminders here are on time either way.\n\n"
+        "up there. Your reminders here are on time either way.",
+        "Button didn't work? Add it by hand:\n\n"
+        "Open <b>outlook.office.com</b> (school or work email) or <b>outlook.live.com</b> "
+        "(personal email). Click the <b>calendar icon</b>, then <b>Add calendar</b> → "
+        "<b>Subscribe from web</b>.\n\n"
+        "Paste your AmIFree link (click it to copy):\n<code>{url}</code>\n\n"
+        "Name it <b>AmIFree</b>, then click <b>Import</b>.\n\n"
         "🔒 Keep the link private: anyone with it can see your plans.",
     ),
     2: (
@@ -504,11 +506,33 @@ OUTLOOK_STEPS = {
 }
 
 
+# (part, step) -> its picture in assets/outlook. Pasting the link into this chat has none.
+OUTLOOK_PICTURES = {
+    (1, 1): "subscribe_import.png",
+    (1, 2): "add_by_hand.png",
+    (2, 1): "shared_calendars.png",
+    (2, 2): "publish_busy.png",
+    (2, 3): "publish_ics.png",
+}
+
+
 def outlook_step(
     part: int, n: int = 1, url: str = "", lead: str = "", part1: bool = True
-) -> tuple[str, InlineKeyboardMarkup]:
-    """One step of Outlook setup. part1=False when there's no feed link, so no part 1."""
+) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
+    """One step of Outlook setup: text, picture (None if none or unreadable), buttons.
+    part1=False when there's no feed link, so no part 1."""
     steps = OUTLOOK_STEPS[part]
+    photo = None
+    if (part, n) in OUTLOOK_PICTURES:
+        try:
+            photo = (
+                Path(__file__).resolve().parent.parent
+                / "assets"
+                / "outlook"
+                / OUTLOOK_PICTURES[part, n]
+            ).read_bytes()
+        except OSError:
+            photo = None
     body = steps[n - 1].replace("{url}", html.escape(url))
     title = (
         OUTLOOK_PARTS[part]
@@ -520,12 +544,45 @@ def outlook_step(
     if n > 1:
         nav.append(InlineKeyboardButton("‹ Back", callback_data=f"o:{part}:{n - 1}"))
     elif part == 2 and part1:
-        nav.append(InlineKeyboardButton("‹ Part 1", callback_data="o:1:4"))
-    if n < len(steps):
-        nav.append(InlineKeyboardButton("Next ›", callback_data=f"o:{part}:{n + 1}"))
-    elif part == 1:
-        nav.append(InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"))
-    return text, InlineKeyboardMarkup([nav, [_button("« Other calendars", "calendar")]])
+        nav.append(InlineKeyboardButton("‹ Part 1", callback_data="o:1:1"))
+    if part == 1 and n == 1:
+        rows = outlook_subscribe_rows(url)
+        rows.append(
+            [
+                InlineKeyboardButton("Button didn't work?", callback_data="o:1:2"),
+                InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"),
+            ]
+        )
+    else:
+        if n < len(steps):
+            nav.append(InlineKeyboardButton("Next ›", callback_data=f"o:{part}:{n + 1}"))
+        elif part == 1:
+            nav.append(InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"))
+        rows = [nav]
+    return text, photo, InlineKeyboardMarkup([*rows, [_button("« Other calendars", "calendar")]])
+
+
+# Outlook on the web's own "Subscribe from web" screen, with the link and name filled in.
+# (The older owa/?path=...&rru=addsubscription link fails with an error for NUS accounts.)
+OUTLOOK_SUBSCRIBE = "https://outlook.{host}.com/calendar/0/addfromweb?url={url}&name=AmIFree"
+
+
+def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
+    """One-tap subscribe: school or work email is office.com, a personal one is live.com."""
+    webcal = quote("webcal://" + feed_url.split("://", 1)[-1], safe="")
+    return [
+        [
+            InlineKeyboardButton(
+                "🏫 School / work Outlook",
+                url=OUTLOOK_SUBSCRIBE.format(host="office", url=webcal),
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📧 Personal Outlook", url=OUTLOOK_SUBSCRIBE.format(host="live", url=webcal)
+            )
+        ],
+    ]
 
 
 def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:

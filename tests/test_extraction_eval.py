@@ -6,6 +6,7 @@ import pytest
 
 from app.schemas.event import OtherTime
 from evals.extraction.run import (
+    HELDOUT,
     Prediction,
     load_cases,
     local,
@@ -21,9 +22,10 @@ CASES = load_cases()
 OUTCOMES = {"event", "multi", "recurring", "clarify", "update", "cancel", "not_event"}
 
 
-def test_dataset_is_well_formed():
-    assert len(CASES) >= 50
-    for case in CASES:
+@pytest.mark.parametrize("cases,size", [(CASES, 50), (load_cases(HELDOUT), 30)])
+def test_dataset_is_well_formed(cases, size):
+    assert len(cases) >= size
+    for case in cases:
         exp = case["expected"]
         assert exp["outcome"] in OUTCOMES, case["id"]
         if exp["outcome"] == "event":

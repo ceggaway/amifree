@@ -37,6 +37,16 @@ All are resolved against Monday 12 Oct 2026, 10am SGT. To add a case, append one
 `pytest tests/test_extraction_eval.py` checks the file. Add real invitations from the pilot
 (with permission, names removed) — those are the most valuable cases.
 
+`extraction/heldout.jsonl`: 42 cases written on 30 Oct with new wording, venues and dates.
+The prompt and guards were never tuned on them. Use them only for scoring:
+
+```bash
+python -m evals.extraction.run --cases evals/extraction/heldout.jsonl --repeats 3
+```
+
+When a fix targets a held-out failure, move that case into `cases.jsonl` and write a new
+held-out case to replace it. Otherwise the held-out score turns into a second tuning score.
+
 ## Prompt versions
 
 `prompts/v1.txt` is the prompt used for the 11 Oct baseline and `prompts/v2.txt` the second
@@ -61,6 +71,9 @@ python -m evals.extraction.run --repeats 2 --system-prompt evals/prompts/v2.txt 
 | 11 Oct 13:40 | v3 | guards round 2 | **98%** | 2% | Live run. All categories 100% except: model wrote `6.30` as `6:30` (read as 6:30am); kept "Friday or Saturday" after the user answered "Saturday" |
 | 11 Oct | v3 | + guards round 3 | 100% single messages (re-scored offline) | 0% | Same v3 answers. Multi-turn fix needs a live run |
 | 11 Oct 13:51 | v3 | guards round 3 | **100%** | **0%** | Live run, 66 cases × 2, 100% consistency. Development set: tuned on these cases, so confirm on a held-out set |
+| 28 Oct 16:30 | live | current | **100%** | **0%** | Development set, 90 cases × 3 |
+| 30 Oct 20:17 | live | current | **86%** | **2%** | **Held-out set**, 42 cases × 3. Misses: "New York time" saved as Singapore time (critical); quick block rejects `6.30-8.30pm`; message with no date or time ("Supper at the Deck") treated as not an event; `12.30-1.30` lunch asks AM/PM |
+| 30 Oct 20:36 | live | + timezone cities, dotted quick blocks | **100%** | **0%** | Development set, 92 cases × 3 (the two fixed held-out cases moved in, two new held-out cases written to replace them) |
 
 Guards round 1: accept harmless rewording, restore a dropped am/pm from the message, keep
 clarification answers part of the new event, ask about unclear invitations, whole-word matching.

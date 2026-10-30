@@ -26,6 +26,9 @@ def test_weekly_block_defaults_to_a_ninety_day_horizon(reference):
     assert rule.until_date == date(2026, 10, 7) + timedelta(days=90)
     explicit = parse_block("tuition every Weds 18:00-20:00 until 30 Nov", reference)
     assert explicit.until_date == date(2026, 11, 30) and explicit.title == "Tuition"
+    dotted = parse_block("Choir practice every Wednesday 6.30-8.30pm at UCC", reference)
+    assert (dotted.title, dotted.weekday) == ("Choir practice", 2)
+    assert (dotted.start_time, dotted.end_time) == (time(18, 30), time(20, 30))
 
 
 def test_ordinary_invitations_are_not_claimed(reference):

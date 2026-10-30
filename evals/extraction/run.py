@@ -8,6 +8,7 @@ is compared with a hand-labelled expected outcome.
     python -m evals.extraction.run --repeats 3          # also measures consistency
     python -m evals.extraction.run --only time-01,real-05
     python -m evals.extraction.run --system-prompt my_prompt.txt   # A/B a new prompt
+    python -m evals.extraction.run --cases evals/extraction/heldout.jsonl   # held-out set
 
 Needs OPENAI_API_KEY in .env (Supabase and Telegram are not used). Writes a JSON file with
 every raw extraction and a Markdown report to evals/extraction/results/.
@@ -43,6 +44,8 @@ from app.services.quick_blocks import parse_block
 
 HERE = Path(__file__).parent
 CASES = HERE / "cases.jsonl"
+# Never tuned on: score with it, and move a case into cases.jsonl once a fix targets it.
+HELDOUT = HERE / "heldout.jsonl"
 DEFAULT_REFERENCE = "2026-10-12T10:00:00+08:00"  # Monday, 10am Singapore time
 CRITICAL = {"wrong_time", "false_save"}
 # The bot's default_event_duration_minutes: a picker estimates a missing end time.
@@ -356,7 +359,8 @@ def report(summary: dict, rows: list[dict], cases: list[dict], meta: dict) -> st
         f"# Extraction eval: {meta['model']}",
         "",
         f"Run {meta['started']} · {summary['cases']} cases × {meta['repeats']} · reference {DEFAULT_REFERENCE} (Mon)"
-        + (f" · prompt `{meta['system_prompt']}`" if meta.get("system_prompt") else ""),
+        + (f" · prompt `{meta['system_prompt']}`" if meta.get("system_prompt") else "")
+        + (f" · cases `{meta['cases']}`" if meta.get("cases") else ""),
         "",
         *(
             [
@@ -538,6 +542,7 @@ async def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--category", help="run one category only")
     ap.add_argument("--concurrency", type=int, default=5)
     ap.add_argument("--system-prompt", help="file with a replacement system prompt to A/B test")
+    ap.add_argument("--cases", help="case file to run instead of cases.jsonl, e.g. heldout.jsonl")
     ap.add_argument("--out", default=str(HERE / "results"))
     args = ap.parse_args(argv)
 
@@ -554,7 +559,7 @@ async def main(argv: list[str] | None = None) -> int:
     if args.system_prompt:
         event_extractor.SYSTEM = Path(args.system_prompt).read_text()
 
-    cases = load_cases()
+    cases = load_cases(Path(args.cases)) if args.cases else load_cases()
     if args.only:
         wanted = set(args.only.split(","))
         cases = [c for c in cases if c["id"] in wanted]
@@ -579,10 +584,13 @@ async def main(argv: list[str] | None = None) -> int:
         "repeats": args.repeats,
         "started": started.strftime("%Y-%m-%d %H:%M"),
         "system_prompt": args.system_prompt,
+        "cases": args.cases,
     }
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     stem = f"{started:%Y%m%d-%H%M}-{model.replace('/', '_')}"
+    if args.cases:
+        stem += "-" + Path(args.cases).stem
     (out / f"{stem}.json").write_text(
         json.dumps({"meta": meta, "summary": summary, "rows": rows}, indent=2, ensure_ascii=False)
     )

@@ -19,7 +19,7 @@ from app.services.date_resolution import (
 
 HORIZON_DAYS = 90
 MAX_RULES = 100
-TIME = r"\d{1,2}(?::\d{2})?\s*(?:am|pm)?"
+TIME = r"\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?"  # 6:30 or 6.30
 RANGE = re.compile(rf"({TIME})\s*(?:-|–|—|to)\s*({TIME})", re.IGNORECASE)
 EVERY = re.compile(r"\bevery\s+([a-z]+)", re.IGNORECASE)
 UNTIL = re.compile(r"\b(?:until|till)\s+(.+)$", re.IGNORECASE)

@@ -517,10 +517,16 @@ def day_part_meridiem(source: str, hour: int | None = None) -> str | None:
     return None
 
 
+# Places on Singapore's own UTC+8 (Hong Kong, China, Perth, KL) need no question. "LA" is
+# left out: "ok la time to go" is Singlish. ET/PT/CT/MT only count right after am/pm, so
+# "12pt font" and "Pt 2" stay events.
 _OTHER_TIMEZONE = re.compile(
-    r"\b(?:uk|us|usa|eastern|pacific|central|london|european|japan|korea|india|australia|"
-    r"est|edt|pst|pdt|cst|cet|cest|bst|gmt|utc|jst|kst|aest)\s+time\b"
-    r"|\b(?:gmt|utc|est|edt|pst|pdt|cet|cest|bst)\b",
+    r"\b(?:uk|us|usa|eastern|pacific|central|mountain|london|european|japan|korea|india|"
+    r"australia|new york|nyc|ny|sf|san francisco|los angeles|seattle|chicago|toronto|"
+    r"vancouver|paris|berlin|amsterdam|tokyo|seoul|sydney|melbourne|dubai|mumbai|delhi|"
+    r"jakarta|bangkok|est|edt|pst|pdt|cst|cet|cest|bst|gmt|utc|jst|kst|aest)\s+time\b"
+    r"|\b(?:gmt|utc|est|edt|pst|pdt|cet|cest|bst|jst|kst|aest|aedt)\b"
+    r"|\d\s*(?:am|pm)\s*(?:et|pt|ct|mt|ist)\b",
     re.IGNORECASE,
 )
 

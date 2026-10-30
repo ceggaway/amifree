@@ -163,7 +163,17 @@ def test_model_rewriting_noon_as_12_still_verifies():
     assert draft.end_at == datetime(2026, 10, 15, 13, 30, tzinfo=SG)
 
 
-@pytest.mark.parametrize("source", ["Call with mentor Friday 8-9pm UK time", "Webinar Fri 9pm EST"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Call with mentor Friday 8-9pm UK time",
+        "Webinar Fri 9pm EST",
+        "Webinar Friday 8-9pm New York time",
+        "Standup Friday 8-9pm Tokyo time",
+        "AMA Friday 8-9pm ET",
+        "Q&A Friday 8-9pm Sydney time",
+    ],
+)
 def test_other_timezone_asks_instead_of_saving(source):
     with pytest.raises(Clarification):
         validate_extraction(
@@ -171,3 +181,21 @@ def test_other_timezone_asks_instead_of_saving(source):
             source,
             MONDAY,
         )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Dinner Friday 8-9pm ok la time to eat",
+        "Talk Friday 8-9pm Hong Kong time",
+        "Poster printing Friday 8-9pm, 12pt font",
+        "Anytime Fitness class Friday 8-9pm",
+    ],
+)
+def test_singapore_times_are_not_mistaken_for_another_timezone(source):
+    draft = validate_extraction(
+        extraction(date_text="Friday", start_time_text="8", end_time_text="9pm"),
+        source,
+        MONDAY,
+    )
+    assert draft.start_at == datetime(2026, 10, 16, 20, tzinfo=SG)

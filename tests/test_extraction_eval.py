@@ -22,7 +22,10 @@ CASES = load_cases()
 OUTCOMES = {"event", "multi", "recurring", "clarify", "update", "cancel", "not_event"}
 
 
-@pytest.mark.parametrize("cases,size", [(CASES, 50), (load_cases(HELDOUT), 30)])
+@pytest.mark.parametrize(
+    "cases,size",
+    [(CASES, 50), (load_cases(HELDOUT), 30), (load_cases(HELDOUT.with_name("heldout2.jsonl")), 30)],
+)
 def test_dataset_is_well_formed(cases, size):
     assert len(cases) >= size
     for case in cases:

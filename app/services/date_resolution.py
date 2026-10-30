@@ -517,14 +517,30 @@ def day_part_meridiem(source: str, hour: int | None = None) -> str | None:
     return None
 
 
-# Places on Singapore's own UTC+8 (Hong Kong, China, Perth, KL) need no question. "LA" is
-# left out: "ok la time to go" is Singlish. ET/PT/CT/MT only count right after am/pm, so
-# "12pt font" and "Pt 2" stay events.
+# Places on Singapore's own UTC+8 (Hong Kong, China, Taiwan, Perth, KL, Bali) need no
+# question. "LA" is left out: "ok la time to go" is Singlish. ET/PT/CT/MT only count right
+# after am/pm, so "12pt font" and "Pt 2" stay events.
+_OTHER_PLACES = (
+    # regions and countries
+    "uk|us|usa|america|american|eastern|pacific|central|mountain|european|europe|canada|"
+    "mexico|brazil|germany|france|spain|italy|netherlands|switzerland|sweden|ireland|"
+    "scotland|japan|korea|india|australia|new zealand|nz|thailand|vietnam|indonesia|"
+    "myanmar|pakistan|bangladesh|sri lanka|nepal|uae|israel|turkey|russia|egypt|kenya|"
+    "nigeria|south africa|"
+    # us states
+    "california|texas|florida|hawaii|alaska|arizona|colorado|washington|"
+    # cities
+    "london|new york|nyc|ny|sf|san francisco|los angeles|seattle|chicago|boston|miami|"
+    "denver|atlanta|dallas|houston|honolulu|toronto|vancouver|mexico city|sao paulo|"
+    "buenos aires|paris|berlin|munich|amsterdam|zurich|madrid|rome|milan|dublin|edinburgh|"
+    "lisbon|stockholm|copenhagen|oslo|helsinki|vienna|prague|warsaw|brussels|athens|"
+    "istanbul|moscow|cairo|lagos|nairobi|johannesburg|cape town|dubai|abu dhabi|doha|"
+    "riyadh|karachi|lahore|mumbai|delhi|bangalore|chennai|hyderabad|kolkata|colombo|"
+    "kathmandu|dhaka|yangon|bangkok|hanoi|ho chi minh|jakarta|tokyo|osaka|seoul|busan|"
+    "sydney|melbourne|brisbane|adelaide|canberra|auckland|wellington"
+)
 _OTHER_TIMEZONE = re.compile(
-    r"\b(?:uk|us|usa|eastern|pacific|central|mountain|london|european|japan|korea|india|"
-    r"australia|new york|nyc|ny|sf|san francisco|los angeles|seattle|chicago|toronto|"
-    r"vancouver|paris|berlin|amsterdam|tokyo|seoul|sydney|melbourne|dubai|mumbai|delhi|"
-    r"jakarta|bangkok|est|edt|pst|pdt|cst|cet|cest|bst|gmt|utc|jst|kst|aest)\s+time\b"
+    rf"\b(?:{_OTHER_PLACES}|est|edt|pst|pdt|cst|cet|cest|bst|gmt|utc|jst|kst|aest)\s+time\b"
     r"|\b(?:gmt|utc|est|edt|pst|pdt|cet|cest|bst|jst|kst|aest|aedt)\b"
     r"|\d\s*(?:am|pm)\s*(?:et|pt|ct|mt|ist)\b",
     re.IGNORECASE,

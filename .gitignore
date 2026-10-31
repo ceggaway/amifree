@@ -11,3 +11,6 @@ htmlcov/
 *.log
 .DS_Store
 node_modules/
+
+# Worktrees made by Claude Code: each is its own checkout, never part of this repo.
+.claude/worktrees/

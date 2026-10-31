@@ -46,7 +46,7 @@ You can now send me a message with more than one time 👇
 
 Everything you add goes to /plans. Connect Google or Apple Calendar in /calendar to see your plans there too 📅
 
-Try it: forward any plan with a few times 👀"""
+Try it: write or forward any plan with a few times 👀"""
 
 # For people who started the bot but never added their timetable.
 SETUP_TIP = """

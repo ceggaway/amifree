@@ -134,6 +134,32 @@ def test_whole_messages(text, fields, start, end):
     assert f"{draft.start_at:%H:%M}" == start and f"{draft.end_at:%H:%M}" == end
 
 
+@pytest.mark.parametrize(
+    "text,start_text,end_text,start,end",
+    [
+        ("Lunch at Fine Food on Wed, 12 to 1:30?", "12", "1:30", "12:00", "13:30"),
+        ("lunch wed 1-2", "1", "2", "13:00", "14:00"),
+        ("Team lunch Wednesday 11.30 to 1", "11.30", "1", "11:30", "13:00"),
+        # The model asked "am or pm?" itself: lunch still answers it.
+        ("Lunch Wed 12.30", "12.30", None, "12:30", "13:30"),
+    ],
+)
+def test_lunch_hours_are_read_as_midday(text, start_text, end_text, start, end):
+    fields = dict(date_text="Wed", start_time_text=start_text, end_time_text=end_text)
+    if end_text is None:
+        fields["ambiguity"] = "12.30 could be am or pm"
+    draft = validate_extraction(extraction(**fields), text, MONDAY, default_minutes=60)
+    assert f"{draft.start_at:%H:%M}" == start and f"{draft.end_at:%H:%M}" == end
+
+
+@pytest.mark.parametrize("text,start_text", [("lunch wed 7", "7"), ("Wed 12 to 1:30", "12")])
+def test_lunch_only_settles_lunch_hours(text, start_text):
+    """ "Lunch at 7" is odd enough to ask about, and without "lunch" nothing changes."""
+    fields = dict(date_text="Wed", start_time_text=start_text, end_time_text=None)
+    with pytest.raises(Clarification, match="AM or PM"):
+        validate_extraction(extraction(**fields), text, MONDAY, default_minutes=60)
+
+
 def test_ending_at_midnight_rolls_to_the_next_day():
     draft = validate_extraction(
         extraction(date_text="Fri", start_time_text="10pm", end_time_text="12am"),

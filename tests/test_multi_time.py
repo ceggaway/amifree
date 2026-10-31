@@ -6,6 +6,7 @@ from app.services.multi_time import (
     is_multi,
     item_message_id,
     read_times,
+    settle_times,
     split_times,
 )
 from tests.conftest import extraction, tap
@@ -97,6 +98,54 @@ def test_a_new_time_without_a_date_keeps_the_date(reference):
     assert [d.title for d in times.drafts] == ["Workshop", "Lunch"]
     assert times.drafts[1].start_at.date() == times.drafts[0].start_at.date()
     assert f"{times.drafts[1].start_at:%H:%M}" == "12:00"
+
+
+def test_first_day_borrows_the_shared_month(reference):
+    dinner = extraction(
+        title="Hall dinner",
+        date_text="24 Oct",
+        start_time_text="7pm",
+        end_time_text="10pm",
+        end_date_text="25 Oct",
+        relation="alternatives",
+        other_times=[other(date_text="25 Oct", start_time_text="7pm", end_time_text="10pm")],
+    )
+    times = read_times(dinner, "Hall dinner 24 or 25 Oct, 7pm–10pm", reference)
+    assert [f"{d.start_at:%d %H:%M}" for d in times.drafts] == ["24 19:00", "25 19:00"]
+    assert not times.unread
+
+
+def test_a_range_start_never_takes_another_lines_am_pm(reference):
+    weekly = extraction(
+        title="Training",
+        date_text="Wed",
+        start_time_text="7",
+        end_time_text="9pm",
+        relation="separate",
+        other_times=[other(date_text="Sat", start_time_text="9", end_time_text="11am")],
+    )
+    text = "This week's trainings:\nMon - no training\nWed 7-9pm @ MPSH 5\nSat 9-11am @ field"
+    times = read_times(weekly, text, reference)
+    assert [f"{d.start_at:%a %H:%M}-{d.end_at:%H:%M}" for d in times.drafts] == [
+        "Wed 19:00-21:00",
+        "Sat 09:00-11:00",
+    ]
+
+
+def test_choose_your_slot_is_a_choice():
+    slots = extraction(
+        title="Photoshoot",
+        date_text="20 Oct",
+        start_time_text="2",
+        end_time_text="3pm",
+        relation="one",
+        other_times=[other(date_text="21 Oct", start_time_text="2", end_time_text="3pm")],
+    )
+    text = "Choose ur slot for the photoshoot: Tue 20 Oct 2-3pm / Wed 21 Oct 2-3pm"
+    assert settle_times(slots, text).relation == "alternatives"
+    assert settle_times(slots, "Photoshoot Tue 20 Oct 2-3pm, Wed 21 Oct 2-3pm").relation == (
+        "separate"
+    )
 
 
 def test_at_most_five_times():

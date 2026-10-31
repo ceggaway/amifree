@@ -19,6 +19,7 @@ async def test_new_user_gets_the_welcome(service_factory):
     assert "<b>Try it:</b>" in reply.text
     # Privacy stays on the screen that asks for a calendar.
     assert "only see when you’re busy" in reply.text and "never read your group chats" in reply.text
+    assert reply.text.endswith("/help")
     assert labels(reply) == ["▶️ Try an example", "📅 Connect calendar"]
     assert [len(row) for row in reply.keyboard.inline_keyboard] == [2]
 
@@ -31,7 +32,12 @@ async def test_the_example_shows_a_clash_and_saves_nothing(service_factory):
     assert onboarding.DEMO_MESSAGE in demo.text
     assert "⚠️ Overlaps with CS1231S Lecture · 10AM–12:30PM SGT" in demo.text
     assert "(Wednesday)" in demo.text and "nothing was saved" in demo.text
-    assert labels(demo) == ["📅 Connect calendar", "📩 Try my own message", "« Back"]
+    assert labels(demo) == [
+        "📌 Next: a deadline",
+        "📅 Connect calendar",
+        "📩 Try my own message",
+        "« Back",
+    ]
     assert service.extractor.calls == []  # canned, no LLM call
     assert (await service.command(1, "plans"))[0].text.startswith("Nothing coming up")
     own = (await service.callback(1, tap(demo, "📩 Try my own message")))[0]
@@ -39,6 +45,51 @@ async def test_the_example_shows_a_clash_and_saves_nothing(service_factory):
     picker = (await service.callback(1, tap(demo, "📅 Connect calendar")))[0]
     assert picker.text == onboarding.PICK_CALENDAR
     assert (await service.callback(1, tap(demo, "« Back")))[0].text == onboarding.WELCOME
+
+
+async def test_sending_the_example_gets_a_card_not_a_question(service_factory, reference):
+    """People copy the example and send it: it must not need "AM or PM?", even when the
+    model drops the pm (the message itself has to say it)."""
+    found = extraction(
+        title="Lunch",
+        date_text="Wed",
+        start_time_text="12",
+        end_time_text="1:30",
+        location="Fine Food",
+    )
+    service, _ = service_factory(found)
+    card = (await service.message(1, 1, onboarding.DEMO_MESSAGE, reference))[0]
+    assert card.text.startswith("✅ No clashes found")
+    assert "12PM–1:30PM SGT" in card.text and "Fine Food" in card.text
+
+
+async def test_the_deadline_example_follows_and_saves_nothing(service_factory, reference):
+    service, repo = service_factory()
+    demo = (await service.callback(1, "setup:demo"))[0]
+    second = (await service.callback(1, tap(demo, "📌 Next: a deadline")))[0]
+    assert second.edit and second.parse_mode == "HTML"
+    assert onboarding.DEADLINE_DEMO_MESSAGE in second.text
+    assert "Due Fri" in second.text and "11:59pm" in second.text
+    assert "9am the day before" in second.text and "(Google or Apple)" in second.text
+    assert labels(second) == ["📅 Connect calendar", "📩 Try my own message", "« Back"]
+    assert (await service.callback(1, tap(second, "« Back")))[0].text == demo.text
+    assert service.extractor.calls == [] and not repo.deadlines
+
+
+async def test_sending_the_deadline_example_saves_that_deadline(service_factory, reference):
+    found = extraction(
+        kind="deadline",
+        title="CS3244 report",
+        date_text="Fri",
+        start_time_text="11:59pm",
+        end_time_text=None,
+        location=None,
+    )
+    service, repo = service_factory(found)
+    card = (await service.message(1, 1, onboarding.DEADLINE_DEMO_MESSAGE, reference))[0]
+    assert card.text.startswith("📌 CS3244 report\nDue Fri")
+    assert "the day before and on the morning it's due" in card.text  # what the example says
+    assert len(repo.deadlines) == 1
 
 
 def test_the_example_is_always_a_coming_wednesday():

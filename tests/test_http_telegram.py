@@ -41,7 +41,7 @@ async def test_webhook_to_telegram_complete_flow(service_factory, reference):
         assert (await client.get("/healthz")).status_code == 200
         assert (await client.get("/readyz")).status_code == 200
         await client.post("/telegram/webhook", json=message_payload("/start"))
-        assert "NUSMods" in transport.sent[-1]["text"]
+        assert "Try an example" in transport.sent[-1]["text"]
         await client.post(
             "/telegram/webhook",
             json=message_payload("https://nusmods.com/timetable/sem-1/share?CS3216=LEC:1", 2),

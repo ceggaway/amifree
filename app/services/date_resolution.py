@@ -244,11 +244,26 @@ def in_source(value: str, source: str) -> bool:
         return True
     if _contains(_canonical(source), _canonical(value)):
         return True
-    return _shared_suffix_start(value, source)
+    return _shared_suffix_start(value, source) or _shared_month(value, source)
 
 
 _NUM = r"(?:\d{3,4}|\d{1,2}(?:[:.]\d{2})?)"
 _SEP = r"\s*(?:-|–|—|to|till|until)\s*"
+
+
+def _shared_month(value: str, source: str) -> bool:
+    """'24 Oct' for a message that says '24 or 25 Oct': the first day borrows the month."""
+    m = re.fullmatch(r"(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,})\.?", value.strip().casefold())
+    if not m:
+        return False
+    day, month = m[1], m[2][:3]
+    joined = r"\s*(?:,|&|/|\+|-|–|—|or|and|n|to)\s*"
+    return bool(
+        re.search(
+            rf"(?<![\d:.]){day}(?:st|nd|rd|th)?{joined}\d{{1,2}}(?:st|nd|rd|th)?\s+{month}",
+            source.casefold(),
+        )
+    )
 
 
 def _shared_suffix_start(value: str, source: str) -> bool:
@@ -478,10 +493,19 @@ def as_written(raw: str | None, source: str) -> str | None:
     return raw
 
 
-def restore_meridiem(raw: str | None, source: str) -> str | None:
+def restore_meridiem(raw: str | None, source: str, start: bool = False) -> str | None:
+    """Put back an am/pm the model dropped, from where the message writes this time.
+
+    A start that the message writes as a range start ("9" in "Sat 9-11am") is left bare to
+    borrow its own range's am/pm, never another line's ("7-9pm" in "Wed 7-9pm").
+    """
     if not raw or re.search(r"[ap]\.?m|noon|midnight|hrs?$", raw, re.I):
         return raw
     wanted = _canonical(raw)
+    if start and re.search(
+        rf"(?<![\d:.]){re.escape(raw.strip().casefold())}{_SEP}{_NUM}", source.casefold()
+    ):
+        return raw
     match = re.search(rf"(?<![\d:.]){re.escape(wanted)}\s*([ap])\.?m\b", _canonical(source))
     return f"{raw.strip()}{match[1]}m" if match else raw
 
@@ -504,6 +528,9 @@ _DAY_PARTS = (
         "pm",
         range(5, 12),
     ),
+    # "Lunch 12 to 1:30": nobody means midnight. Only lunch-like hours; "lunch at 7" is asked.
+    (re.compile(r"\blunch\b", re.I), "am", (10, 11)),
+    (re.compile(r"\blunch\b", re.I), "pm", (12, 1, 2, 3)),
 )
 
 
@@ -654,7 +681,7 @@ def validate_extraction(
         )
     extraction = extraction.model_copy(
         update={
-            "start_time_text": restore_meridiem(extraction.start_time_text, source),
+            "start_time_text": restore_meridiem(extraction.start_time_text, source, start=True),
             "end_time_text": restore_meridiem(extraction.end_time_text, source),
         }
     )

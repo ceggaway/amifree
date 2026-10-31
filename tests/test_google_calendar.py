@@ -384,11 +384,52 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     [app] = [b for row in first.keyboard.inline_keyboard for b in row if b.url]
     assert app.text == "📅 Open Google Calendar app ↗" and app.url == "https://calendar.google.com"
     computer = (await service.callback(1, tap(first, "💻 On a computer instead?")))[0]
-    assert "calendar.google.com" in computer.text and "📱 On my phone instead?" in labels(computer)
-    [link] = [b for row in computer.keyboard.inline_keyboard for b in row if b.url]
-    assert link.text == "Open calendar.google.com ↗" and link.url == "https://calendar.google.com"
+    assert "What's your Google email?" in computer.text and computer.edit
+    assert "📱 On my phone instead?" in labels(computer)
     for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone"):
         assert "isn't valid" in (await service.callback(1, bad))[0].text
+
+
+async def test_on_a_computer_the_email_comes_first_and_opens_its_settings(with_google, reference):
+    service, repo, google = with_google(extraction(kind="unknown"))
+    await onboard(service, reference)
+    ask = (await service.callback(1, "gcal:computer"))[0]
+    assert "Step 1 of 3" in ask.text and "What's your Google email?" in ask.text
+    # The email isn't checked yet: nothing is shared at this point.
+    share = (await service.message(1, 2, "Me@Gmail.com", reference))[0]
+    assert google.calls == [] and "Step 2 of 3" in share.text
+    assert f"<code>{BOT}</code>" in share.text and "Make changes" in share.text
+    assert share.parse_mode == "HTML" and share.photo and len(share.text) <= 1024
+    [link] = [b for row in share.keyboard.inline_keyboard for b in row if b.url]
+    calendar = base64.b64encode(b"me@gmail.com").decode().rstrip("=")
+    assert link.text == "📅 Open sharing settings ↗" and link.url == (
+        f"https://calendar.google.com/calendar/r/settings/calendar/{calendar}?authuser=me@gmail.com"
+    )
+    # An ordinary message in between doesn't break it; Done then checks and sends the code.
+    await service.message(1, 3, "hello", reference)
+    code = (await service.callback(1, tap(share, "✅ Done, I've shared it")))[0]
+    assert "Step 3 of 3" in code.text and google.calls == [("code", "me@gmail.com")]
+    assert repo.users[1].pending["stage"] == "gcal_code"
+    # Different email starts over.
+    again = (await service.callback(1, tap(share, "✏️ Different email")))[0]
+    assert "What's your Google email?" in again.text
+
+
+async def test_done_without_an_email_asks_for_it(with_google, reference):
+    service, _, google = with_google()
+    await onboard(service, reference)
+    reply = (await service.callback(1, "gcal:shared"))[0]
+    assert "Type your Google email" in reply.text and google.calls == []
+
+
+async def test_not_shared_yet_on_a_computer_lets_done_be_tapped_again(with_google, reference):
+    service, repo, _ = with_google(access=Access.NONE)
+    await onboard(service, reference)
+    await service.callback(1, "gcal:computer")
+    await service.message(1, 2, "me@gmail.com", reference)
+    reply = (await service.callback(1, "gcal:shared"))[0]
+    assert "can't see that calendar yet" in reply.text
+    assert repo.users[1].pending == {"stage": "gcal_shared", "email": "me@gmail.com"}
 
 
 async def test_the_steps_show_the_bots_google_email(with_google, reference):

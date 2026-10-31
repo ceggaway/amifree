@@ -220,13 +220,22 @@ async def test_outlook_is_one_step_per_screen(service_factory, reference):
     assert (await service.callback(1, tap(manual, "‹ Back")))[0].text == first
     # Part 2 follows part 1 from either step, and its Back returns to the buttons.
     step = (await service.callback(1, tap(manual, "Done: part 2 ›")))[0]
-    assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text
+    assert "Part 2 of 2" in step.text and "Step 1 of 3" in step.text
+    # One tap to Shared calendars in Outlook's settings, instead of finding it by hand.
+    shared = {b.text: b.url for row in step.keyboard.inline_keyboard for b in row if b.url}
+    assert shared == {
+        "🏫 School / work Outlook ↗": (
+            "https://outlook.office.com/calendar/options/calendar/SharedCalendars"
+        ),
+        "📧 Personal Outlook ↗": "https://outlook.live.com/calendar/options/calendar/SharedCalendars",
+    }
+    assert "Publish a calendar" in step.text and "Settings ⚙️" in step.text  # and by hand
     assert (await service.callback(1, tap(step, "‹ Part 1")))[0].text == first
-    for _ in range(3):
+    for _ in range(2):
         step = (await service.callback(1, tap(step, "Next ›")))[0]
     assert "Paste the link into this chat" in step.text and "Next ›" not in labels(step)
     back = (await service.callback(1, tap(step, "‹ Back")))[0]
-    assert "Step 3 of 4" in back.text
+    assert "Step 2 of 3" in back.text
     assert "« Other calendars" in labels(step)
     # The same link every time: subscribing twice never makes a second feed.
     await service.callback(1, "setup:outlook")
@@ -250,7 +259,7 @@ async def test_outlook_without_a_public_address_is_only_publishing(service_facto
     service, _ = service_factory()
     await onboard(service, reference)
     step = (await service.callback(1, "setup:outlook"))[0]
-    assert "isn't available yet" in step.text and "Step 1 of 4" in step.text
+    assert "isn't available yet" in step.text and "Step 1 of 3" in step.text
     assert "Part 1" not in step.text and "‹ Part 1" not in labels(step)
 
 
@@ -262,7 +271,7 @@ async def test_first_fetch_from_outlook_moves_on_to_publishing(service_factory, 
     await service.calendar_feed(repo.users[1].calendar_feed_token, "Microsoft Office/16.0")
     [(_, step)] = sent.messages
     assert step.text.startswith(onboarding.OUTLOOK_PART1_DONE)
-    assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text and step.photo
+    assert "Part 2 of 2" in step.text and "Step 1 of 3" in step.text and step.photo
 
 
 async def test_a_published_outlook_calendar_counts_and_unpublishing_is_explained(

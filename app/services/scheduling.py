@@ -1160,6 +1160,13 @@ class SchedulingService:
             return [Reply(str(exc), onboarding.link_help_keyboard())]
         if calendar_link:
             return await self.connect_calendar(user, calendar_link)
+        first = user.pending if (user.pending or {}).get("stage") == "gcal_email" else None
+        if first and first.get("first") and GOOGLE_EMAIL.fullmatch(text.strip()):
+            # Computer setup asked for the email first: open its settings, don't check yet.
+            email = text.strip().lower()
+            await self.repo.set_pending(user.id, {"stage": "gcal_shared", "email": email})
+            share, photo, keyboard = onboarding.google_share_screen(self.google.email, email)
+            return [Reply(share, keyboard, parse_mode="HTML", photo=photo)]
         if self.google_sync.enabled and GOOGLE_EMAIL.fullmatch(text.strip()):
             if not self.calendar_limit.allow(user.id):
                 return [Reply(SLOW_DOWN)]
@@ -1197,6 +1204,8 @@ class SchedulingService:
                 return await self.google_sync.verify(user, pending, text)
             # Anything else is an ordinary message; the code stays valid until it expires.
             pending = None
+        if pending and pending["stage"] == "gcal_shared":
+            pending = None  # an ordinary message; Done still works
         if pending and pending["stage"] in ("times", "recurring"):
             # A new message closes the "I found 2 events" picker or the "every week?"
             # question; their buttons then expire.
@@ -2474,7 +2483,26 @@ class SchedulingService:
         if data == "gcal:computer":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            return self.google_sync.steps(phone=False)
+            await self.google_sync.discard(user.pending)  # a code from an earlier try
+            await self.repo.set_pending(user.id, {"stage": "gcal_email", "first": True})
+            return [
+                Reply(
+                    onboarding.GOOGLE_EMAIL_FIRST,
+                    onboarding.google_email_first_keyboard(),
+                    edit=True,
+                    parse_mode="HTML",
+                    clear_album_group="setup",
+                )
+            ]
+        if data == "gcal:shared":
+            if not self.google_sync.enabled:
+                return [Reply("Google sharing isn't available right now.")]
+            pending = user.pending or {}
+            if pending.get("stage") != "gcal_shared":
+                return [Reply("Type your Google email to start again, like you@gmail.com.")]
+            if not self.calendar_limit.allow(user.id):
+                return [Reply(SLOW_DOWN)]
+            return await self.google_sync.connect(user, pending["email"])
         if data == "gcal:done":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]

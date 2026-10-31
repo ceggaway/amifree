@@ -12,6 +12,27 @@ from urllib.parse import quote
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 NUSMODS_URL = "https://nusmods.com/timetable"
+# academic-calendar.json's semester keys -> NUSMods' timetable pages.
+NUSMODS_PAGES = {"1": "sem-1", "2": "sem-2", "3": "st-i", "4": "st-ii"}
+
+
+def nusmods_url(today: date | None = None) -> str:
+    """The timetable page of the semester running now (or starting within two weeks), so
+    nobody has to pick it; the plain timetable page when the calendar doesn't know."""
+    from app.schemas.event import SG
+    from app.services.nusmods import CALENDAR
+
+    today = today or datetime.now(SG).date()
+    best = None
+    for year in CALENDAR.values():
+        for key, sem in year.items():
+            start = date(*sem["start"])
+            if start - timedelta(days=14) <= today and (best is None or start > best[0]):
+                best = (start, key)
+    if best is None or best[1] not in NUSMODS_PAGES:
+        return NUSMODS_URL
+    return f"{NUSMODS_URL}/{NUSMODS_PAGES[best[1]]}"
+
 
 EVERYDAY_HELP = (
     "📋 <b>My plans</b> · /plans — see upcoming events and deadlines you’ve saved with me.\n\n"
@@ -110,13 +131,14 @@ GUIDES = {
         "📚 <b>Connect your NUSMods timetable</b>\n"
         "I’ll check for clashes with your classes and exams.\n\n"
         "<b>1. Open your timetable</b>\n"
-        "Tap <b>Open NUSMods</b> below and select the correct semester.\n\n"
-        "<b>2. Check your classes</b>\n"
-        "Make sure you’ve selected all your lectures, tutorials and labs.\n\n"
-        "<b>3. Copy the link</b>\n"
+        "Tap <b>Open NUSMods</b> below. It opens this semester. Check that all your "
+        "lectures, tutorials and labs are there.\n\n"
+        "<b>2. Copy the link</b>\n"
         "Tap <b>Share/Sync</b>, then <b>Copy link</b>.\n\n"
-        "<b>4. Send it here</b>\n"
+        "<b>3. Send it here</b>\n"
         "Paste the link into this chat and send it.\n\n"
+        "📱 Timetable looks empty? NUSMods keeps it in the browser you made it in. Open "
+        "nusmods.com there instead (often Safari or Chrome).\n\n"
         "Timetable changed? Send me the updated link."
     ),
     "ios": (
@@ -553,18 +575,20 @@ OUTLOOK_STEPS = {
         "🔒 Keep the link private: anyone with it can see your plans.",
     ),
     2: (
-        "In Outlook on the web, click <b>Settings ⚙️</b> at the top right.\n\n"
-        "Then go to <b>Calendar</b> → <b>Shared calendars</b>.",
-        "Under <b>Publish a calendar</b>, pick your calendar.\n\n"
-        "Next to it, choose <b>Can view when I'm busy</b>. That shares only when you're busy, "
-        "never titles or places, and it's all I need.\n\n"
+        "👇 <b>Tap your Outlook below.</b> It opens <b>Shared calendars</b> in Outlook's "
+        "settings. Sign in if asked.\n\n"
+        "Under <b>Publish a calendar</b>, pick your calendar. Next to it, choose <b>Can view "
+        "when I'm busy</b>. That shares only when you're busy, never titles or places, and "
+        "it's all I need.\n\n"
+        "Button didn't open it? In Outlook on the web: <b>Settings ⚙️</b> → <b>Calendar</b> → "
+        "<b>Shared calendars</b>.\n\n"
         "⚠️ No <b>Publish a calendar</b> section? Your school or company has turned it off, so "
         "I can't read that calendar yet.",
         "Click <b>Publish</b>. Two links appear: <b>HTML</b> and <b>ICS</b>.\n\n"
         "Click the <b>ICS</b> link, then <b>Copy link</b>.",
         "👇 <b>Paste the link into this chat.</b>\n\n"
         "✅ You'll know it's right: it ends in <code>.ics</code>.\n\n"
-        "🗂 Several calendars (Class, CCA)? Repeat steps 2 to 4 for each one and send each "
+        "🗂 Several calendars (Class, CCA)? Repeat steps 1 to 3 for each one and send each "
         "link.\n\n"
         "Stuck? Setup is optional — forward me a plan any time.",
     ),
@@ -575,9 +599,8 @@ OUTLOOK_STEPS = {
 OUTLOOK_PICTURES = {
     (1, 1): "subscribe_import.png",
     (1, 2): "add_by_hand.png",
-    (2, 1): "shared_calendars.png",
-    (2, 2): "publish_busy.png",
-    (2, 3): "publish_ics.png",
+    (2, 1): "publish_busy.png",
+    (2, 2): "publish_ics.png",
 }
 
 
@@ -623,13 +646,29 @@ def outlook_step(
             nav.append(InlineKeyboardButton("Next ›", callback_data=f"o:{part}:{n + 1}"))
         elif part == 1:
             nav.append(InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"))
-        rows = [nav]
+        # Part 2 starts with one tap to Shared calendars, like part 1's subscribe buttons.
+        rows = [*outlook_shared_rows(), nav] if (part, n) == (2, 1) else [nav]
     return text, photo, InlineKeyboardMarkup([*rows, [_button("« Other calendars", "calendar")]])
 
 
 # Outlook on the web's own "Subscribe from web" screen, with the link and name filled in.
 # (The older owa/?path=...&rru=addsubscription link fails with an error for NUS accounts.)
 OUTLOOK_SUBSCRIBE = "https://outlook.{host}.com/calendar/0/addfromweb?url={url}&name=AmIFree"
+
+
+# Outlook on the web's Settings → Calendar → Shared calendars, where Publish a calendar is.
+OUTLOOK_SHARED = "https://outlook.{host}.com/calendar/options/calendar/SharedCalendars"
+
+
+def outlook_shared_rows() -> list[list[InlineKeyboardButton]]:
+    return [
+        [
+            InlineKeyboardButton(
+                "🏫 School / work Outlook ↗", url=OUTLOOK_SHARED.format(host="office")
+            )
+        ],
+        [InlineKeyboardButton("📧 Personal Outlook ↗", url=OUTLOOK_SHARED.format(host="live"))],
+    ]
 
 
 def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
@@ -818,13 +857,62 @@ GOOGLE_EMAIL_ASK = (
     "<code>you@gmail.com</code>.\n\n/cancel to stop."
 )
 GOOGLE_EMAIL_AGAIN = (
-    "That doesn't look like an email. Type the Google email of the calendar you shared, like "
+    "That doesn't look like an email. Type the Google email your calendar is on, like "
     "you@gmail.com. /cancel to stop."
+)
+# On a computer the email comes first, so the next step can open that calendar's own
+# settings page: no gear, no Settings, no picking the calendar.
+GOOGLE_EMAIL_FIRST = (
+    "📅 <b>Google Calendar · Step 1 of 3</b>\n<b>What's your Google email?</b>\n\n"
+    "The account your calendar is on. Just type it here, like <code>you@gmail.com</code>, "
+    "and I'll open that calendar's sharing settings for you.\n\n/cancel to stop."
 )
 GOOGLE_SHARING_BLOCKED = (
     "\n\nSome school and work accounts block sharing with outside accounts. If that's yours, "
     "use a link instead: I'll check when you're busy, but I can't add your plans."
 )
+
+
+def google_email_first_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📱 On my phone instead?", callback_data="gcal:start")],
+            [_button("« Other calendars", "calendar")],
+        ]
+    )
+
+
+def google_share_screen(
+    bot_email: str, email: str
+) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
+    """Computer step 2 of 3: one screen, with a button straight to that calendar's settings."""
+    text = (
+        "📅 <b>Google Calendar · Step 2 of 3</b>\n<b>Share your calendar with me</b>\n\n"
+        "<b>1.</b> Tap <b>Open sharing settings</b> below. It opens the calendar for "
+        f"{html.escape(email)}.\n"
+        "<b>2.</b> Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.\n"
+        "<b>3.</b> Paste this email (tap it to copy):\n"
+        f"<code>{html.escape(bot_email)}</code>\n"
+        "<b>4.</b> Permission: <b>Make changes (see private events as free/busy)</b>, then "
+        "click <b>Send</b>.\n\n"
+        "Then tap <b>Done</b> below.\n\n"
+        "🔒 I only read your busy times, and only change events I add."
+    )
+    try:
+        photo = (
+            Path(__file__).resolve().parent.parent / "assets" / "google" / "step5_dialog.png"
+        ).read_bytes()
+    except OSError:
+        photo = None
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📅 Open sharing settings ↗", url=google_share_link(email))],
+            [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:shared")],
+            [InlineKeyboardButton("✏️ Different email", callback_data="gcal:computer")],
+            [_button("« Other calendars", "calendar")],
+        ]
+    )
+    return text, photo, keyboard
 
 
 def google_code_ask(email: str) -> str:
@@ -844,6 +932,11 @@ def google_calendar_settings(email: str) -> str:
     its owner's email, and Google puts the id in the address base64-encoded."""
     calendar = base64.b64encode(email.encode()).decode().rstrip("=")
     return f"{GOOGLE_SETTINGS}/calendar/{calendar}"
+
+
+def google_share_link(email: str) -> str:
+    """That calendar's settings, opened in the right account when the browser has several."""
+    return f"{google_calendar_settings(email)}?authuser={quote(email, safe='@')}"
 
 
 def unlink_guide(
@@ -935,14 +1028,14 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     if screen == "nusmods":
         return InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("Open NUSMods ↗", url=NUSMODS_URL)],
+                [InlineKeyboardButton("Open NUSMods ↗", url=nusmods_url())],
                 [_button("‹ Back", "classes")],
             ]
         )
     if screen == "nusmodspick":
         return InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("Open NUSMods ↗", url=NUSMODS_URL)],
+                [InlineKeyboardButton("Open NUSMods ↗", url=nusmods_url())],
                 [_button("« Other calendars", "calendar")],
             ]
         )

@@ -119,7 +119,7 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
         "🍎 Apple / iCloud": ["Part 2 of 2", "Step 1 of 4", "calendar icon"],
         "📅 Google Calendar": ["calendar.google.com", "Secret address in iCal format"],
         # No public address in tests either, so Outlook goes straight to publishing.
-        "📧 Outlook": ["Let me check when you're busy", "Step 1 of 4", "Shared calendars"],
+        "📧 Outlook": ["Let me check when you're busy", "Step 1 of 3", "Shared calendars"],
         "📚 NUSMods timetable": ["Connect your NUSMods timetable", "Share/Sync"],
     }
     for button, phrases in expected.items():
@@ -166,9 +166,9 @@ async def test_guides_warn_about_the_common_wrong_turns(service_factory):
     assert "only works for iCloud calendars" in ios and "Google or Outlook" in ios
     google = (await service.callback(1, "setup:google"))[0].text
     assert "Not the Public address" in google and "school or work account" in google
-    publish = (await service.callback(1, "o:2:2"))[0].text
+    publish = (await service.callback(1, "o:2:1"))[0].text
     assert "Can view when I'm busy" in publish and "turned it off" in publish
-    assert "<b>ICS</b> link" in (await service.callback(1, "o:2:3"))[0].text
+    assert "<b>ICS</b> link" in (await service.callback(1, "o:2:2"))[0].text
 
 
 async def test_guides_say_where_to_do_it_and_how_to_spot_the_right_link(service_factory):
@@ -232,7 +232,28 @@ async def test_nusmods_guide_links_to_nusmods(service_factory):
     guide = (await service.callback(1, tap(question, "📚 Add NUSMods")))[0]
     assert "Share/Sync" in guide.text and "lectures, tutorials and labs" in guide.text
     open_button = guide.keyboard.inline_keyboard[0][0]
-    assert open_button.url == onboarding.NUSMODS_URL
+    assert open_button.url == onboarding.nusmods_url()
+
+
+@pytest.mark.parametrize(
+    "today,page",
+    [
+        ("2026-10-31", "sem-1"),  # in semester 1
+        ("2026-12-20", "sem-1"),  # the holidays after it: still the last one that ran
+        ("2027-01-02", "sem-2"),  # two weeks before semester 2: already the next one
+        ("2027-05-20", "st-i"),  # special term I
+    ],
+)
+def test_nusmods_opens_the_semester_that_is_on(today, page):
+    from datetime import date
+
+    assert onboarding.nusmods_url(date.fromisoformat(today)).endswith("/timetable/" + page)
+
+
+def test_nusmods_falls_back_to_the_plain_page_without_a_calendar():
+    from datetime import date
+
+    assert onboarding.nusmods_url(date(2001, 1, 1)) == onboarding.NUSMODS_URL
 
 
 async def test_old_skip_buttons_still_work(service_factory):
@@ -258,7 +279,8 @@ async def test_nusmods_guide_returns_to_classes_question(service_factory):
     question = (await service.callback(1, "setup:classes"))[0]
     guide = (await service.callback(1, tap(question, "📚 Add NUSMods")))[0]
     assert labels(guide) == ["Open NUSMods ↗", "‹ Back"]
-    assert "select the correct semester" in guide.text
+    assert "It opens this semester" in guide.text and "<b>3. Send it here</b>" in guide.text
+    assert "looks empty" in guide.text  # NUSMods keeps it in the browser it was made in
     assert "Paste the link into this chat and send it" in guide.text
     assert "classes and exams" in guide.text
     back = (await service.callback(1, tap(guide, "‹ Back")))[0]
@@ -357,7 +379,7 @@ async def test_calendar_offers_nusmods_setup_and_updates_after_onboarding(
     guide = (await service.callback(1, tap(status, "📚 Add or update NUSMods")))[0]
     assert guide.edit and guide.parse_mode == "HTML"
     assert "Share/Sync" in guide.text and "Paste the link into this chat" in guide.text
-    assert guide.keyboard.inline_keyboard[0][0].url == onboarding.NUSMODS_URL
+    assert guide.keyboard.inline_keyboard[0][0].url == onboarding.nusmods_url()
     added = (
         await service.message(
             1, 2, "https://nusmods.com/timetable/sem-1/share?CS3216=LEC:1", reference

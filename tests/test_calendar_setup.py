@@ -86,15 +86,16 @@ async def test_google_is_three_steps(service_factory, reference):
     service.google = FakeGoogle()
     await onboard(service, reference)
     step1 = (await service.callback(1, "setup:google"))[0]
-    assert "Step 1 of 3" in step1.text and "Next ›" in labels(step1)
+    assert "1 of 5 · " in step1.text and "of 3" not in step1.text  # one counter, not two
+    assert "Next ›" in labels(step1)
     last = (await service.callback(1, "gs:phone:5"))[0]
     step2 = (await service.callback(1, tap(last, "✅ Done, I've shared it")))[0]
-    assert "Step 2 of 3" in step2.text and not step2.edit  # the steps stay readable above
+    assert "Almost done" in step2.text and not step2.edit  # the steps stay readable above
     assert repo.users[1].pending == {"stage": "gcal_email"}
     again = (await service.message(1, 5, "me@gmail", reference))[0]
     assert again.text == onboarding.GOOGLE_EMAIL_AGAIN
     step3 = (await service.message(1, 6, "me@gmail.com", reference))[0]
-    assert "Step 3 of 3" in step3.text and "6-digit" in step3.text
+    assert "Last step" in step3.text and "6-digit" in step3.text
     done = (await service.message(1, 7, service.google.code, reference))[0]
     assert "Google Calendar connected" in done.text and repo.users[1].google_connected
 

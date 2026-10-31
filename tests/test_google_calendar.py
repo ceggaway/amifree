@@ -355,7 +355,7 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     service.google = FakeGoogle()
     # With it, Google goes straight to sharing: read and write in one setup.
     share = (await service.callback(1, "setup:google"))[0]
-    assert "Step 1 of 3" in share.text and share.photo and "Next ›" in labels(share)
+    assert "1 of 5 · " in share.text and share.photo and "Next ›" in labels(share)
     assert "googlelink" not in str(share.keyboard)
     link = (await service.callback(1, "setup:googlelink"))[0]
     assert "Secret address" in link.text or "link" in link.text.lower()
@@ -368,7 +368,8 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     part = (await service.callback(1, "gcal:start"))[0]
     pictures = set()
     for n in range(1, 6):
-        assert "Step 1 of 3" in part.text and f"<b>{n} of 5 · " in part.text
+        assert "Share your calendar" in part.text and f"<b>{n} of 5 · " in part.text
+        assert "of 3" not in part.text  # one counter, not two
         assert "</b>\n\n<b>" in part.text  # a blank line between the title and the part
         assert part.edit and part.parse_mode == "HTML" and part.photo.startswith(b"\x89PNG")
         assert len(part.text) <= 1024  # Telegram's caption limit
@@ -386,7 +387,7 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     computer = (await service.callback(1, tap(first, "💻 On a computer instead?")))[0]
     assert "What's your Google email?" in computer.text and computer.edit
     assert "📱 On my phone instead?" in labels(computer)
-    for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone"):
+    for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone", "gs:phone:1:2"):
         assert "isn't valid" in (await service.callback(1, bad))[0].text
 
 
@@ -394,10 +395,10 @@ async def test_on_a_computer_the_email_comes_first_and_opens_its_settings(with_g
     service, repo, google = with_google(extraction(kind="unknown"))
     await onboard(service, reference)
     ask = (await service.callback(1, "gcal:computer"))[0]
-    assert "Step 1 of 3" in ask.text and "What's your Google email?" in ask.text
+    assert "What's your Google email?" in ask.text and "of 3" not in ask.text
     # The email isn't checked yet: nothing is shared at this point.
     share = (await service.message(1, 2, "Me@Gmail.com", reference))[0]
-    assert google.calls == [] and "Step 2 of 3" in share.text
+    assert google.calls == [] and "Share your calendar with me" in share.text
     assert f"<code>{BOT}</code>" in share.text and "Make changes" in share.text
     assert share.parse_mode == "HTML" and share.photo and len(share.text) <= 1024
     [link] = [b for row in share.keyboard.inline_keyboard for b in row if b.url]
@@ -408,7 +409,7 @@ async def test_on_a_computer_the_email_comes_first_and_opens_its_settings(with_g
     # An ordinary message in between doesn't break it; Done then checks and sends the code.
     await service.message(1, 3, "hello", reference)
     code = (await service.callback(1, tap(share, "✅ Done, I've shared it")))[0]
-    assert "Step 3 of 3" in code.text and google.calls == [("code", "me@gmail.com")]
+    assert "Last step" in code.text and google.calls == [("code", "me@gmail.com")]
     assert repo.users[1].pending["stage"] == "gcal_code"
     # Different email starts over.
     again = (await service.callback(1, tap(share, "✏️ Different email")))[0]
@@ -435,9 +436,19 @@ async def test_not_shared_yet_on_a_computer_lets_done_be_tapped_again(with_googl
 async def test_the_steps_show_the_bots_google_email(with_google, reference):
     service, _, _ = with_google()
     await onboard(service, reference)
-    for data in ("gs:phone:4", "gs:computer:5"):  # the part where it is pasted
-        part = (await service.callback(1, data))[0]
-        assert f"<code>{BOT}</code>" in part.text and part.parse_mode == "HTML" and part.edit
+    part = (await service.callback(1, "gs:phone:4"))[0]  # the part where it is pasted
+    assert f"<code>{BOT}</code>" in part.text and part.parse_mode == "HTML" and part.edit
+
+
+async def test_old_computer_step_buttons_open_the_new_computer_setup(with_google, reference):
+    """The five computer pictures were replaced by email first; buttons in old messages
+    still lead somewhere useful."""
+    service, repo, _ = with_google()
+    await onboard(service, reference)
+    for data in ("gs:computer:1", "gs:computer:5"):
+        reply = (await service.callback(1, data))[0]
+        assert "What's your Google email?" in reply.text
+        assert repo.users[1].pending == {"stage": "gcal_email", "first": True}
 
 
 async def test_connecting_adds_current_plans_and_counts_busy_time(with_google, reference):

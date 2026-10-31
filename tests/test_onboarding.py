@@ -41,6 +41,22 @@ async def test_the_example_shows_a_clash_and_saves_nothing(service_factory):
     assert (await service.callback(1, tap(demo, "« Back")))[0].text == onboarding.WELCOME
 
 
+async def test_sending_the_example_gets_a_card_not_a_question(service_factory, reference):
+    """People copy the example and send it: it must not need "AM or PM?", even when the
+    model drops the pm (the message itself has to say it)."""
+    found = extraction(
+        title="Lunch",
+        date_text="Wed",
+        start_time_text="12",
+        end_time_text="1:30",
+        location="Fine Food",
+    )
+    service, _ = service_factory(found)
+    card = (await service.message(1, 1, onboarding.DEMO_MESSAGE, reference))[0]
+    assert card.text.startswith("✅ No clashes found")
+    assert "12PM–1:30PM SGT" in card.text and "Fine Food" in card.text
+
+
 def test_the_example_is_always_a_coming_wednesday():
     from datetime import date, timedelta
 

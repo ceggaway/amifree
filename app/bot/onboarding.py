@@ -32,7 +32,8 @@ WELCOME = (
 )
 
 # The example: a friend's message, and the card it would get against a made-up timetable.
-DEMO_MESSAGE = "Lunch at Fine Food on Wed, 12 to 1:30? 🍜"
+# People copy it and send it, so it spells out pm: a bare "12 to 1:30" is asked about.
+DEMO_MESSAGE = "Lunch at Fine Food on Wed, 12pm to 1:30pm? 🍜"
 DEMO_OUTRO = (
     "<i>This example uses a made-up timetable, and nothing was saved.</i>\n\n"
     "👉 Connect your calendar so I can catch your real clashes, or forward me a message of "

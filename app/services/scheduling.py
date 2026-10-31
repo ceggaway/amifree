@@ -2422,7 +2422,7 @@ class SchedulingService:
         if data.startswith("setup:"):
             name = data.removeprefix("setup:")
             if name == "google" and self.google_sync.enabled:
-                return self.google_sync.steps(phone=True)  # sharing; the link is its fallback
+                return self.google_sync.steps()  # sharing; the link is its fallback
             if name == "apple":
                 return await self.apple_setup(user)
             if name == "outlook":
@@ -2441,12 +2441,16 @@ class SchedulingService:
                 return [Reply(text, keyboard, edit=True, parse_mode="HTML")]
             return self.setup_screen(name)
         if action == "gs":
-            steps = onboarding.GOOGLE_STEPS.get(parts[1] if len(parts) == 3 else "")
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            if not steps or parts[2] not in [str(n) for n in range(1, len(steps[1]) + 1)]:
+            if data.startswith("gs:computer:"):
+                # The old computer picture steps, from a message sent before they were
+                # replaced: the computer setup is email first now.
+                return await self._callback(user, telegram_id, "gcal:computer")
+            valid = {f"gs:phone:{n}" for n in range(1, len(onboarding.GOOGLE_STEPS) + 1)}
+            if data not in valid:
                 return [Reply("That button isn't valid. Use /calendar.")]
-            return self.google_sync.steps(parts[1] == "phone", int(parts[2]))
+            return self.google_sync.steps(int(parts[2]))
         if action == "o":
             valid = {
                 f"o:{part}:{n}"
@@ -2479,7 +2483,7 @@ class SchedulingService:
         if data == "gcal:start":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            return self.google_sync.steps(phone=True)
+            return self.google_sync.steps()
         if data == "gcal:computer":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]

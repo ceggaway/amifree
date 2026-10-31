@@ -61,11 +61,9 @@ class GoogleSyncService:
 
     # ---- connecting ----
 
-    def steps(self, phone: bool = False, n: int = 1) -> list[Reply]:
-        """One part of sharing, as a picture with its instructions under it."""
-        text, photo, keyboard = onboarding.google_step(
-            self.client.email, "phone" if phone else "computer", n
-        )
+    def steps(self, n: int = 1) -> list[Reply]:
+        """One part of sharing on a phone, as a picture with its instructions under it."""
+        text, photo, keyboard = onboarding.google_step(self.client.email, n)
         return [
             Reply(
                 text,
@@ -78,7 +76,7 @@ class GoogleSyncService:
         ]
 
     async def connect(self, user, email: str) -> list[Reply]:
-        """Step 2 of 3 (the email): check the calendar is shared, then put a one-time code in it.
+        """The email ("Almost done"): check the calendar is shared, then put a one-time code in it.
 
         Sharing is with AmIFree, not with one person, so anyone who knows the email could
         otherwise claim it. Only someone who can open the calendar can read the code back."""
@@ -115,7 +113,7 @@ class GoogleSyncService:
         return [Reply(onboarding.google_code_ask(email), parse_mode="HTML")]
 
     async def verify(self, user, pending: dict, text: str) -> list[Reply]:
-        """Step 3 of 3: the code sent back. Connects on a match."""
+        """The code sent back ("Last step"). Connects on a match."""
         s, now = self.s, self.s.clock()
         if datetime.fromisoformat(pending["expires"]) <= now:
             await s.repo.set_pending(user.id, None)

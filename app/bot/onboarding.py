@@ -742,109 +742,74 @@ def screen_photos(name: str) -> tuple[bytes, ...]:
 # Google step 1 (sharing), one small part per message, each with the picture of that
 # screen: (picture, short title, what to do). {email} is AmIFree's Google account, in <code>
 # so a tap copies it.
-GOOGLE_STEPS = {
-    "phone": (
-        "google_phone",
-        (
-            (
-                "gphone_step1.png",
-                "Open the menu",
-                "Open the <b>Google Calendar</b> app on your phone and tap <b>☰</b> (top left).",
-            ),
-            ("gphone_step2.png", "Open Settings", "Scroll down and tap <b>Settings</b>."),
-            (
-                "gphone_step3.png",
-                "Choose your calendar",
-                "Tap your calendar (usually <b>My calendar</b>), then tap <b>Shared with</b>.",
-            ),
-            (
-                "gphone_step4.png",
-                "Add AmIFree",
-                "Tap <b>Add people or groups</b> and paste this email (tap it to copy):\n\n"
-                "<code>{email}</code>",
-            ),
-            (
-                "gphone_step5.png",
-                "Let AmIFree add your plans",
-                "Tap the permission under AmIFree and choose\n"
-                "<b>Make changes (see private events as free/busy)</b>\n\n"
-                "Then tap <b>Save</b> (top right).",
-            ),
-        ),
+# Sharing from the Google Calendar phone app, one picture per step (assets/google_phone).
+# On a computer the email comes first instead (google_share_screen).
+GOOGLE_STEPS = (
+    (
+        "gphone_step1.png",
+        "Open the menu",
+        "Open the <b>Google Calendar</b> app on your phone and tap <b>☰</b> (top left).",
     ),
-    "computer": (
-        "google",
-        (
-            (
-                "step1_gear.png",
-                "Open settings",
-                "On a computer, go to <b>calendar.google.com</b> and click the <b>⚙️ gear</b> "
-                "(top right).",
-            ),
-            ("step2_settings.png", "Open Settings", "Click <b>Settings</b>."),
-            (
-                "step3_calendar.png",
-                "Choose your calendar",
-                "Under <b>Settings for my calendars</b> on the left, click your calendar.",
-            ),
-            (
-                "step4_add.png",
-                "Start sharing",
-                "Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.",
-            ),
-            (
-                "step5_dialog.png",
-                "Add AmIFree",
-                "In the box that opens:\n\n"
-                "<b>①</b> Paste this email (tap it to copy):\n<code>{email}</code>\n\n"
-                "<b>②</b> Permission: <b>Make changes (see private events as free/busy)</b>\n\n"
-                "<b>③</b> Click <b>Send</b>.",
-            ),
-        ),
+    ("gphone_step2.png", "Open Settings", "Scroll down and tap <b>Settings</b>."),
+    (
+        "gphone_step3.png",
+        "Choose your calendar",
+        "Tap your calendar (usually <b>My calendar</b>), then tap <b>Shared with</b>.",
     ),
-}
-GOOGLE_STEP1 = "📅 <b>Google Calendar · Step 1 of 3</b>\n<b>Share your calendar with me</b>\n\n"
+    (
+        "gphone_step4.png",
+        "Add AmIFree",
+        "Tap <b>Add people or groups</b> and paste this email (tap it to copy):\n\n"
+        "<code>{email}</code>",
+    ),
+    (
+        "gphone_step5.png",
+        "Let AmIFree add your plans",
+        "Tap the permission under AmIFree and choose\n"
+        "<b>Make changes (see private events as free/busy)</b>\n\n"
+        "Then tap <b>Save</b> (top right).",
+    ),
+)
+# Sharing is the long part, so it alone is counted ("1 of 5"); the email and code that
+# follow say "Almost done" and "Last step" instead of a second count.
+GOOGLE_STEP1 = "📅 <b>Google Calendar · Share your calendar with me</b>\n\n"
 
 
-def google_step(
-    email: str, device: str = "phone", n: int = 1
-) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
-    """One part of Google step 1: its text, its picture (None if it can't be read), buttons."""
-    folder, steps = GOOGLE_STEPS[device]
-    picture, title, body = steps[n - 1]
+def google_step(email: str, n: int = 1) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
+    """One part of sharing on a phone: its text, its picture (None if it can't be read), buttons."""
+    picture, title, body = GOOGLE_STEPS[n - 1]
     text = (
         GOOGLE_STEP1
-        + f"<b>{n} of {len(steps)} · {title}</b>\n"
+        + f"<b>{n} of {len(GOOGLE_STEPS)} · {title}</b>\n"
         + body.format(email=html.escape(email))
     )
-    if n == len(steps):
+    if n == len(GOOGLE_STEPS):
         text += (
             "\n\nThen tap <b>Done</b> below.\n\n"
             "🔒 I only read your busy times, and only change events I add."
         )
     try:
-        photo = (Path(__file__).resolve().parent.parent / "assets" / folder / picture).read_bytes()
+        photo = (
+            Path(__file__).resolve().parent.parent / "assets" / "google_phone" / picture
+        ).read_bytes()
     except OSError:
         photo = None
     nav = []
     if n > 1:
-        nav.append(InlineKeyboardButton("‹ Back", callback_data=f"gs:{device}:{n - 1}"))
-    if n < len(steps):
-        nav.append(InlineKeyboardButton("Next ›", callback_data=f"gs:{device}:{n + 1}"))
+        nav.append(InlineKeyboardButton("‹ Back", callback_data=f"gs:phone:{n - 1}"))
+    if n < len(GOOGLE_STEPS):
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"gs:phone:{n + 1}"))
     rows = [nav] if nav else []
-    if n == len(steps):
+    if n == len(GOOGLE_STEPS):
         rows.insert(0, [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")])
     if n == 1:
-        # Each button opens what its text says. Telegram buttons only take web links, so the
-        # phone one is Google's address, which phones hand to the app when it's installed.
-        label = (
-            "📅 Open Google Calendar app ↗" if device == "phone" else "Open calendar.google.com ↗"
+        # Telegram buttons only take web links, so this is Google's address, which phones
+        # hand to the app when it's installed.
+        rows.append(
+            [InlineKeyboardButton("📅 Open Google Calendar app ↗", url=GOOGLE_CALENDAR_URL)]
         )
-        rows.append([InlineKeyboardButton(label, url=GOOGLE_CALENDAR_URL)])
         rows.append(
             [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
-            if device == "phone"
-            else [InlineKeyboardButton("📱 On my phone instead?", callback_data="gcal:start")]
         )
         rows.append([_button("« Other calendars", "calendar")])
     return text, photo, InlineKeyboardMarkup(rows)
@@ -852,7 +817,7 @@ def google_step(
 
 GOOGLE_CALENDAR_URL = "https://calendar.google.com"
 GOOGLE_EMAIL_ASK = (
-    "📅 <b>Google Calendar · Step 2 of 3</b>\n<b>What's your Google email?</b>\n\n"
+    "📅 <b>Google Calendar · Almost done</b>\n<b>What's your Google email?</b>\n\n"
     "The one that owns the calendar you just shared. Just type it here, like "
     "<code>you@gmail.com</code>.\n\n/cancel to stop."
 )
@@ -863,7 +828,7 @@ GOOGLE_EMAIL_AGAIN = (
 # On a computer the email comes first, so the next step can open that calendar's own
 # settings page: no gear, no Settings, no picking the calendar.
 GOOGLE_EMAIL_FIRST = (
-    "📅 <b>Google Calendar · Step 1 of 3</b>\n<b>What's your Google email?</b>\n\n"
+    "📅 <b>Google Calendar</b>\n<b>What's your Google email?</b>\n\n"
     "The account your calendar is on. Just type it here, like <code>you@gmail.com</code>, "
     "and I'll open that calendar's sharing settings for you.\n\n/cancel to stop."
 )
@@ -887,7 +852,7 @@ def google_share_screen(
 ) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
     """Computer step 2 of 3: one screen, with a button straight to that calendar's settings."""
     text = (
-        "📅 <b>Google Calendar · Step 2 of 3</b>\n<b>Share your calendar with me</b>\n\n"
+        "📅 <b>Google Calendar · Share your calendar with me</b>\n\n"
         "<b>1.</b> Tap <b>Open sharing settings</b> below. It opens the calendar for "
         f"{html.escape(email)}.\n"
         "<b>2.</b> Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.\n"
@@ -917,7 +882,7 @@ def google_share_screen(
 
 def google_code_ask(email: str) -> str:
     return (
-        "📅 <b>Google Calendar · Step 3 of 3</b>\n<b>Show me it's yours</b>\n\n"
+        "📅 <b>Google Calendar · Last step</b>\n<b>Show me it's yours</b>\n\n"
         f'I\'ve put an event called "AmIFree code" in the calendar for {html.escape(email)} '
         "today. Open Google Calendar and send me the 6-digit number in it. I'll delete the "
         "event after.\n\n/cancel to stop."

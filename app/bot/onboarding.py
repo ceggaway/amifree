@@ -28,7 +28,8 @@ WELCOME = (
     "📩 <b>Try it:</b> forward me any message with a plan, send a 📸 photo or 🎙 voice note, "
     "or tap <b>Try an example</b> to see what I do.\n\n"
     "🔒 I only see when you’re busy, never your event names or details. I never read your "
-    "group chats."
+    "group chats.\n\n"
+    "💡 Everything else I can do: /help"
 )
 
 # The example: a friend's message, and the card it would get against a made-up timetable.
@@ -38,6 +39,14 @@ DEMO_OUTRO = (
     "<i>This example uses a made-up timetable, and nothing was saved.</i>\n\n"
     "👉 Connect your calendar so I can catch your real clashes, or forward me a message of "
     "your own."
+)
+# The second example, a deadline. Sent as is, it saves the same deadline (test_onboarding).
+DEADLINE_DEMO_MESSAGE = "CS3244 report due Fri 11:59pm"
+DEADLINE_DEMO_OUTRO = (
+    "⏰ I’ll remind you at 9am the day before, and on the morning it’s due.\n\n"
+    "📅 With your calendar connected (Google or Apple), it shows up there too, as "
+    "“Due: CS3244 report”.\n\n"
+    "<i>This is an example, and nothing was saved.</i>"
 )
 
 PICK_CALENDAR = (
@@ -431,8 +440,31 @@ def demo_screen(today: date) -> tuple[str, InlineKeyboardMarkup]:
     )
     keyboard = InlineKeyboardMarkup(
         [
+            [_button("📌 Next: a deadline", "demo2")],
             [_button("📅 Connect calendar", "calendar")],
             [_button("📩 Try my own message", "skip"), _button("« Back", "home")],
+        ]
+    )
+    return text, keyboard
+
+
+def deadline_demo_screen(now: datetime) -> tuple[str, InlineKeyboardMarkup]:
+    """The second example: a deadline due the coming Friday, as its card would show it."""
+    from app.schemas.event import SG
+    from app.services.deadlines import when
+
+    today = now.astimezone(SG).date()
+    day = today + timedelta(days=(4 - today.weekday()) % 7 or 7)
+    due = datetime.combine(day, time(23, 59), SG)
+    text = (
+        "📌 <b>Example 2: a deadline</b>\n\nSay your prof posts:\n"
+        f"<blockquote>{html.escape(DEADLINE_DEMO_MESSAGE)}</blockquote>\n\n"
+        f"I’d save it:\n\n📌 <b>CS3244 report</b>\nDue {when(due, now)}\n\n" + DEADLINE_DEMO_OUTRO
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [_button("📅 Connect calendar", "calendar")],
+            [_button("📩 Try my own message", "skip"), _button("« Back", "demo")],
         ]
     )
     return text, keyboard

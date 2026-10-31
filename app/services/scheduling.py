@@ -2426,6 +2426,10 @@ class SchedulingService:
                 await self.safe_action(user.id, "demo_tried")
                 text, keyboard = onboarding.demo_screen(self.clock().astimezone(SG).date())
                 return [Reply(text, keyboard, edit=True, parse_mode="HTML")]
+            if name == "demo2":
+                await self.safe_action(user.id, "demo_deadline_tried")
+                text, keyboard = onboarding.deadline_demo_screen(self.clock())
+                return [Reply(text, keyboard, edit=True, parse_mode="HTML")]
             return self.setup_screen(name)
         if action == "gs":
             steps = onboarding.GOOGLE_STEPS.get(parts[1] if len(parts) == 3 else "")

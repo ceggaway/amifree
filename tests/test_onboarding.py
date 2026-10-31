@@ -16,19 +16,45 @@ async def test_new_user_gets_the_welcome(service_factory):
     reply = (await service.command(1, "start"))[0]
     assert reply.text == onboarding.WELCOME
     assert reply.parse_mode == "HTML"
-    assert "<b>1. Connect your schedule</b>" in reply.text
-    assert "<b>2. Send me a plan</b>" in reply.text
-    assert "<b>3. Save with a tap</b>" in reply.text
-    assert "calendar syncing enabled" in reply.text
-    assert "/help" in reply.text
-    assert labels(reply) == ["📅 Connect personal calendar", "Skip calendar setup"]
+    assert "<b>Try it:</b>" in reply.text
+    # Privacy stays on the screen that asks for a calendar.
+    assert "only see when you’re busy" in reply.text and "never read your group chats" in reply.text
+    assert labels(reply) == ["▶️ Try an example", "📅 Connect calendar"]
     assert [len(row) for row in reply.keyboard.inline_keyboard] == [2]
+
+
+async def test_the_example_shows_a_clash_and_saves_nothing(service_factory):
+    service, _ = service_factory()
+    welcome = (await service.command(1, "start"))[0]
+    demo = (await service.callback(1, tap(welcome, "▶️ Try an example")))[0]
+    assert demo.edit and demo.parse_mode == "HTML"
+    assert onboarding.DEMO_MESSAGE in demo.text
+    assert "⚠️ Overlaps with CS1231S Lecture · 10AM–12:30PM SGT" in demo.text
+    assert "(Wednesday)" in demo.text and "nothing was saved" in demo.text
+    assert labels(demo) == ["📅 Connect calendar", "📩 Try my own message", "« Back"]
+    assert service.extractor.calls == []  # canned, no LLM call
+    assert (await service.command(1, "plans"))[0].text.startswith("Nothing coming up")
+    own = (await service.callback(1, tap(demo, "📩 Try my own message")))[0]
+    assert own.text == onboarding.SKIPPED
+    picker = (await service.callback(1, tap(demo, "📅 Connect calendar")))[0]
+    assert picker.text == onboarding.PICK_CALENDAR
+    assert (await service.callback(1, tap(demo, "« Back")))[0].text == onboarding.WELCOME
+
+
+def test_the_example_is_always_a_coming_wednesday():
+    from datetime import date, timedelta
+
+    for offset in range(7):
+        today = date(2026, 11, 2) + timedelta(days=offset)
+        text, _ = onboarding.demo_screen(today)
+        assert "(Wednesday)" in text
+        assert today.strftime("%-d %b %Y") not in text  # never today, always ahead
 
 
 async def test_every_guide_is_reachable_and_comes_back(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]
-    picker = (await service.callback(1, tap(welcome, "📅 Connect personal calendar")))[0]
+    picker = (await service.callback(1, tap(welcome, "📅 Connect calendar")))[0]
     assert picker.edit and labels(picker) == [
         "📅 Google Calendar",
         "🍎 Apple / iCloud",
@@ -61,7 +87,7 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
 async def test_picker_asks_where_events_live_and_helps_the_unsure(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]
-    picker = (await service.callback(1, tap(welcome, "📅 Connect personal calendar")))[0]
+    picker = (await service.callback(1, tap(welcome, "📅 Connect calendar")))[0]
     assert "Where do you usually add your events?" in picker.text
     assert "coming soon" not in picker.text
     unsure = (await service.callback(1, tap(picker, "🤔 I'm not sure")))[0]
@@ -169,7 +195,8 @@ async def test_old_skip_buttons_still_work(service_factory):
 async def test_skip_button_and_existing_menu_callbacks_work(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]
-    skipped = (await service.callback(1, tap(welcome, "Skip calendar setup")))[0]
+    demo = (await service.callback(1, tap(welcome, "▶️ Try an example")))[0]
+    skipped = (await service.callback(1, tap(demo, "📩 Try my own message")))[0]
     assert skipped.text == onboarding.SKIPPED and skipped.edit
     assert (await service.callback(1, "menu:plans"))[0].text.startswith("Nothing coming up")
     assert "Reminders: on" in (await service.callback(1, "menu:settings"))[0].text

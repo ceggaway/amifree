@@ -5,6 +5,7 @@ Every screen edits the same message, so setup never floods the chat (ux-flows.md
 
 import base64
 import html
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -19,28 +20,23 @@ EVERYDAY_HELP = (
     "💬 <b>Feedback</b> · /feedback — If you run into any issues or have suggestions, send us feedback using /feedback. You can send it anonymously or with your @handle"
 )
 
+# Short on purpose: one thing to do (try it), and the privacy promise next to the buttons
+# that ask for a calendar. Everything else is in /help or shows up when it's relevant.
 WELCOME = (
-    "👋 <b>Hi! I’m AmIFree, your Telegram planning assistant.</b> Send me an event to check "
-    "if you’re free, then save it with me to sync it to your connected personal calendar ✨\n\n"
-    "📅 <b>1. Connect your schedule</b>\n"
-    "Connect your <b>personal calendar</b> so I can check for clashes with existing events. "
-    "If your classes aren’t included, I’ll help you connect your NUSMods timetable separately.\n\n"
-    "📩 <b>2. Send me a plan</b>\n"
-    "Forward an event message or 📸 photo, ✍️ type the details, or 🎙 <b>send a voice note</b> "
-    "like “Dinner Friday 7 to 9pm at Vivo”. I’ll show "
-    "<b>whether you’re free</b> ✅ <b>or have any clashes</b> ⚠️\n\n"
-    "📌 Got a deadline? Forward or type it, like “Report due Fri 11:59pm”, and I’ll "
-    "<b>remind you before it’s due</b>. See them all with /deadline.\n\n"
-    "👆 <b>3. Save with a tap</b>\n"
-    "Tap <b>Add to plans</b> to save the event. With calendar syncing enabled, I’ll "
-    "<b>automatically add it to your personal calendar</b> 🗓\n\n"
-    "💡 See /help for all features and instructions.\n\n"
-    "💬 <b>We’d love to hear from you.</b> Hit a problem, or have an idea to make AmIFree "
-    "more convenient for every student? Tell us with /feedback.\n\n"
-    "🔒 <b>Your privacy matters.</b> I only check your calendar’s busy times, not event "
-    "details. I never read your group chats.\n\n"
-    "👇 Choose <b>Connect personal calendar</b> to include your existing schedule, or "
-    "<b>Skip calendar setup</b> to try the bot first."
+    "👋 <b>Hi! I’m AmIFree.</b> I check if you’re free for plans people send you, and save "
+    "them for you.\n\n"
+    "📩 <b>Try it:</b> forward me any message with a plan, send a 📸 photo or 🎙 voice note, "
+    "or tap <b>Try an example</b> to see what I do.\n\n"
+    "🔒 I only see when you’re busy, never your event names or details. I never read your "
+    "group chats."
+)
+
+# The example: a friend's message, and the card it would get against a made-up timetable.
+DEMO_MESSAGE = "Lunch at Fine Food on Wed, 12 to 1:30? 🍜"
+DEMO_OUTRO = (
+    "<i>This example uses a made-up timetable, and nothing was saved.</i>\n\n"
+    "👉 Connect your calendar so I can catch your real clashes, or forward me a message of "
+    "your own."
 )
 
 PICK_CALENDAR = (
@@ -69,6 +65,12 @@ NOT_SURE = (
 CALENDAR_PROMPT = (
     "📅 Want plans like this on your calendar automatically?\n"
     "I'll also warn you about clashes and help your groups find a free time."
+)
+# The same ask when nothing is connected yet, so it says what that plan wasn't checked against.
+CALENDAR_PROMPT_UNCHECKED = (
+    "📅 I could only check this against plans you've saved with me. Connect your calendar "
+    "and I'll catch clashes with your classes and other events too, and add your plans "
+    "there automatically."
 )
 # Added to the third and final ask, so stopping is said, not silent.
 LAST_CALENDAR_ASK = (
@@ -399,13 +401,43 @@ def welcome_keyboard(app_url: str | None = None) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(
         [
-            [
-                _button("📅 Connect personal calendar", "calendar"),
-                _button("Skip calendar setup", "skip"),
-            ],
+            [_button("▶️ Try an example", "demo"), _button("📅 Connect calendar", "calendar")],
             *open_app_row(app_url),
         ]
     )
+
+
+def demo_screen(today: date) -> tuple[str, InlineKeyboardMarkup]:
+    """The example card for the coming Wednesday, clashing with a made-up lecture.
+
+    Built from the real card parts so it looks like what people will get, but it's never
+    stored: no event, no plan, no buttons that act on one."""
+    from app.bot.messages import personal_availability, personal_details
+    from app.models.timetable import BusyBlock
+    from app.schemas.event import SG, EventDraft
+    from app.services.availability import Availability
+
+    day = today + timedelta(days=(2 - today.weekday()) % 7 or 7)
+
+    def at(hour: int, minute: int = 0) -> datetime:
+        return datetime.combine(day, time(hour, minute), SG)
+
+    plan = EventDraft(title="Lunch", start_at=at(12), end_at=at(13, 30), location="Fine Food")
+    lecture = BusyBlock(title="CS1231S Lecture", start_at=at(10), end_at=at(12, 30))
+    card = personal_availability(Availability(conflicts=(lecture,), candidate=plan))
+    card += "\n\n" + personal_details(plan)
+    text = (
+        "▶️ <b>Example</b>\n\nSay a friend sends you this:\n"
+        f"<blockquote>{html.escape(DEMO_MESSAGE)}</blockquote>\n\n"
+        f"I’d reply:\n\n{card}\n\n{DEMO_OUTRO}"
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [_button("📅 Connect calendar", "calendar")],
+            [_button("📩 Try my own message", "skip"), _button("« Back", "home")],
+        ]
+    )
+    return text, keyboard
 
 
 def classes_keyboard() -> InlineKeyboardMarkup:
@@ -917,6 +949,7 @@ HTML_SCREENS = frozenset(
         "classes",
         "skip",
         "sendplan",
+        "demo",
     }
 )
 

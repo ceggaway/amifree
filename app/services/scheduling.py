@@ -1906,7 +1906,8 @@ class SchedulingService:
         ask = await self.calendar_ask(user, "card")
         if ask not in ("ask", "last"):
             return []
-        text = onboarding.CALENDAR_PROMPT
+        checked = user.onboarding_status == "READY" or await self.repo.list_calendars(user.id)
+        text = onboarding.CALENDAR_PROMPT if checked else onboarding.CALENDAR_PROMPT_UNCHECKED
         if ask == "last":
             text += "\n\n" + onboarding.LAST_CALENDAR_ASK
         return [Reply(text, onboarding.calendar_prompt_keyboard())]
@@ -2423,6 +2424,10 @@ class SchedulingService:
                 return self.apple_step("mac" if name == "apple2mac" else "ios")
             if name == "appleskip":
                 return [Reply(onboarding.APPLE_SKIPPED, edit=True, clear_album_group="setup")]
+            if name == "demo":
+                await self.safe_action(user.id, "demo_tried")
+                text, keyboard = onboarding.demo_screen(self.clock().astimezone(SG).date())
+                return [Reply(text, keyboard, edit=True, parse_mode="HTML")]
             return self.setup_screen(name)
         if action == "gs":
             steps = onboarding.GOOGLE_STEPS.get(parts[1] if len(parts) == 3 else "")

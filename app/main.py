@@ -158,7 +158,6 @@ def create_app(
                 [
                     BotCommand("start", "Getting started"),
                     BotCommand("plans", "What's coming up"),
-                    BotCommand("app", "Open AmIFree"),
                     BotCommand("free", "Am I free? e.g. /free fri 7-9pm"),
                     BotCommand("deadline", "Save a deadline, or see your list"),
                     BotCommand("calendar", "Connect a calendar so I check it too"),

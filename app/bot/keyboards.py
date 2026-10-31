@@ -1,4 +1,4 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.schemas.event import Event, GroupEvent, Poll, Status
 
@@ -236,7 +236,7 @@ def agenda_keyboard(
 
 
 def plans_keyboard(
-    items: list[tuple[str, str, str]], page: int, pages: int, app_url: str | None = None
+    items: list[tuple[str, str, str]], page: int, pages: int
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(label, callback_data=f"fp:{page}:{kind}:{item_id}")]
@@ -249,7 +249,7 @@ def plans_keyboard(
         navigation.append(InlineKeyboardButton("Next →", callback_data=f"plans:{page + 1}"))
     if navigation:
         rows.append(navigation)
-    return InlineKeyboardMarkup(rows + open_app_row(app_url))
+    return InlineKeyboardMarkup(rows)
 
 
 def with_plans_navigation(markup: InlineKeyboardMarkup | None, page: int) -> InlineKeyboardMarkup:
@@ -451,20 +451,12 @@ def feedback_choice_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def open_app_row(app_url: str | None) -> list[list[InlineKeyboardButton]]:
-    """The Mini App's way in from a private chat, when it is deployed."""
-    if not app_url:
-        return []
-    return [[InlineKeyboardButton("📱 Open AmIFree", web_app=WebAppInfo(url=app_url))]]
-
-
-def menu_keyboard(app_url: str | None = None) -> InlineKeyboardMarkup:
+def menu_keyboard() -> InlineKeyboardMarkup:
     """The four things a set-up user does most; each tap runs the matching command."""
     return InlineKeyboardMarkup(
         [
             [_menu("📋 My plans", "plans"), _menu("🕒 Am I free?", "free")],
             [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
-            *open_app_row(app_url),
         ]
     )
 

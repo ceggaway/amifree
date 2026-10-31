@@ -396,13 +396,10 @@ def _button(label: str, screen: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(label, callback_data=f"setup:{screen}")
 
 
-def welcome_keyboard(app_url: str | None = None) -> InlineKeyboardMarkup:
-    from app.bot.keyboards import open_app_row
-
+def welcome_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [_button("▶️ Try an example", "demo"), _button("📅 Connect calendar", "calendar")],
-            *open_app_row(app_url),
         ]
     )
 

@@ -26,7 +26,6 @@ from app.bot.keyboards import (
     feedback_choice_keyboard,
     free_keyboard,
     menu_keyboard,
-    open_app_row,
     page_keyboard,
     personal_calendars_keyboard,
     personal_change_confirmation,
@@ -426,14 +425,14 @@ class SchedulingService:
                         + html.escape(" and ".join(connected))
                         + ".\n\n"
                         + onboarding.EVERYDAY_HELP,
-                        menu_keyboard(self.settings.mini_app_url),
+                        menu_keyboard(),
                         parse_mode="HTML",
                     )
                 ]
             return [
                 Reply(
                     onboarding.WELCOME,
-                    onboarding.welcome_keyboard(self.settings.mini_app_url),
+                    onboarding.welcome_keyboard(),
                     parse_mode="HTML",
                 )
             ]
@@ -528,12 +527,11 @@ class SchedulingService:
         if command == "calendar":
             return await self.calendar_setup(user)
         if command == "app":
-            if not self.settings.mini_app_url:
-                return [Reply("The AmIFree app isn't available right now.")]
+            # Everything personal happens here in the chat; the app is only for groups.
             return [
                 Reply(
-                    "Tap below to open AmIFree.",
-                    InlineKeyboardMarkup(open_app_row(self.settings.mini_app_url)),
+                    "The AmIFree app is for groups. Add me to a group, then send /app there to"
+                    " schedule an event or find a time."
                 )
             ]
         if command == "free":
@@ -1027,7 +1025,7 @@ class SchedulingService:
             Reply(
                 "<b>Your plans</b>\nSelect a plan below to view its details.\n\n"
                 f"<i>Page {page + 1} of {pages}</i>",
-                plans_keyboard(buttons, page, pages, self.settings.mini_app_url),
+                plans_keyboard(buttons, page, pages),
                 parse_mode="HTML",
             )
         ]

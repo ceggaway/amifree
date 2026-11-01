@@ -193,14 +193,37 @@ BLOCK_TIME = re.compile(
 )
 
 
-def calendar_block(name: str, *, checks: bool, adds: bool, status: str) -> str:
-    """One calendar on /calendar: what it does for the user, then how it's doing."""
-    return (
-        f"{name}\n"
-        + ("✅ Checks for clashes\n" if checks else "❌ Doesn't check for clashes\n")
-        + ("✅ Adds your plans\n" if adds else "❌ Doesn't add your plans\n")
-        + status
-    )
+# /calendar groups calendars by app, in this order; None is anything else.
+APPS = {
+    "google": "📅 Google Calendar",
+    "apple": "🍎 Apple Calendar",
+    "outlook": "📧 Outlook",
+    None: "🗓 Other calendars",
+}
+
+
+def feed_app(user_agent: str) -> str | None:
+    """The calendar app fetching the AmIFree calendar, from its User-Agent."""
+    agent = user_agent.lower()
+    if any(name in agent for name in OUTLOOK_AGENTS):
+        return "outlook"
+    if "google" in agent:
+        return "google"
+    if any(name in agent for name in ("ios/", "macos/", "dataaccessd", "calendaragent", "darwin")):
+        return "apple"
+    return None
+
+
+def link_app(link: str | None) -> str | None:
+    """Which app a calendar link comes from, by its address."""
+    host = urlparse(link or "").hostname or ""
+    if host.endswith("icloud.com"):
+        return "apple"
+    if host.startswith("outlook.") or host.endswith(("office365.com", "office.com", "live.com")):
+        return "outlook"
+    if host.endswith("google.com"):
+        return "google"
+    return None
 
 
 def synced(user: User) -> str:
@@ -2075,21 +2098,60 @@ class SchedulingService:
             or "amifree-development-only"
         )
 
-    def feed_block(self, user: User) -> str:
-        """The AmIFree calendar as one entry of /calendar, once a calendar app uses it."""
-        if not (user.calendar_feed_token and user.calendar_feed_seen_at):
-            return ""
-        seen = user.calendar_feed_seen_at
-        return calendar_block(
-            "📤 AmIFree calendar (in Apple or Outlook)",
-            checks=False,
-            adds=True,
-            status=f"🔄 Last synced {clock(seen)}, {seen.astimezone(SG):%-d %b}",
-        )
+    def calendar_apps(self, user: User, calendars, google) -> list[str]:
+        """/calendar's entries, one per app: which of its calendars I check for clashes, and
+        whether your plans go into it (straight into Google, or through the AmIFree calendar
+        Apple or Outlook subscribed to)."""
+        feed = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+        groups: dict = {}
+        for c in calendars:
+            ours = bool(google and c.id == google.calendar_id)
+            app = "google" if ours else link_app(unseal(c.sealed_url, self.link_secret))
+            groups.setdefault(app, []).append(c)
+        blocks = []
+        for app, name in APPS.items():
+            checked = groups.get(app, [])
+            via_feed = feed and user.calendar_feed_app == app and app is not None
+            direct = app == "google" and any(google and c.id == google.calendar_id for c in checked)
+            if not checked and not via_feed:
+                continue
+            lines = [name]
+            if checked:
+                # "Google Calendar" under Google Calendar says nothing new.
+                named = [c.label for c in checked if c.label not in name]
+                lines.append("✅ Checks for clashes" + (": " + ", ".join(named) if named else ""))
+            else:
+                lines.append("❌ Doesn't check for clashes")
+            if direct:
+                lines.append("✅ Adds your plans")
+            elif via_feed:
+                lines.append("✅ Adds your plans, through the AmIFree calendar")
+            else:
+                lines.append("❌ Doesn't add your plans")
+            lines += [f"⚠️ {c.label}: {c.error}" for c in checked if c.error]
+            synced = [c.synced_at for c in checked if c.synced_at and not c.error]
+            if synced:
+                last = max(synced)
+                lines.append(f"🔄 Refreshed {clock(last)}, {last.astimezone(SG):%-d %b}")
+            elif via_feed and not checked:
+                seen = user.calendar_feed_seen_at
+                lines.append(f"🔄 Last synced {clock(seen)}, {seen.astimezone(SG):%-d %b}")
+            elif any(not c.error for c in checked):
+                lines.append("🔄 Connecting…")
+            blocks.append("\n".join(lines))
+        if feed and user.calendar_feed_app is None:
+            # Subscribed before the app was recorded: it's named at its next sync.
+            seen = user.calendar_feed_seen_at
+            blocks.append(
+                "📤 Your calendar app\n❌ Doesn't check for clashes\n"
+                "✅ Adds your plans, through the AmIFree calendar\n"
+                f"🔄 Last synced {clock(seen)}, {seen.astimezone(SG):%-d %b}"
+            )
+        return blocks
 
     async def personal_calendar_status(self, user: User, intro: str = "") -> Reply:
-        """/calendar: one entry per calendar, each saying whether it checks for clashes and
-        whether it gets your plans, then NUSMods."""
+        """/calendar: one entry per calendar app, each saying which calendars I check for
+        clashes and whether your plans go into it, then NUSMods."""
         calendars = await self.repo.list_calendars(user.id)
         lead = intro + "\n\n" if intro else ""
         nusmods = (
@@ -2097,38 +2159,26 @@ class SchedulingService:
             if user.onboarding_status == "READY"
             else "📚 NUSMods: not linked"
         )
-        feed = self.feed_block(user)
+        google = (
+            await self.repo.get_google_connection(user.id)
+            if self.google_sync.enabled and user.google_connected
+            else None
+        )
+        blocks = self.calendar_apps(user, calendars, google)
+        feed = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
         if not calendars:
             # Apple part 1 done, part 2 not: one tap back to where they stopped.
-            half_done = bool(feed)
-            keyboard = onboarding.first_calendar_keyboard(finish_apple=half_done, feed=half_done)
+            keyboard = onboarding.first_calendar_keyboard(finish_apple=feed, feed=feed)
             return Reply(
                 lead
                 + "📅 Your calendars\n\n"
-                + (feed + "\n\n" if feed else "No calendar connected yet. ")
+                + ("\n\n".join(blocks) + "\n\n" if blocks else "No calendar connected yet. ")
                 + "Connect the one you use and its busy times count when I check your plans "
                 "and /free. I keep only start and end times, never titles, places or notes.\n\n"
                 f"{nusmods}\n\n"
                 "Where do you usually add your events?",
                 keyboard,
             )
-        google = (
-            await self.repo.get_google_connection(user.id)
-            if self.google_sync.enabled and user.google_connected
-            else None
-        )
-        blocks = []
-        for c in calendars:
-            if c.error:
-                status = f"⚠️ {c.error}"
-            elif c.synced_at:
-                status = f"🔄 Refreshed {clock(c.synced_at)}, {c.synced_at.astimezone(SG):%-d %b}"
-            else:
-                status = "🔄 Connecting…"
-            adds = bool(google and c.id == google.calendar_id)
-            blocks.append(calendar_block(f"📅 {c.label}", checks=True, adds=adds, status=status))
-        if feed:
-            blocks.append(feed)
         room = MAX_CALENDARS - len(calendars)
         more = (
             f"➕ Paste another calendar's link to add it ({room} more allowed)."
@@ -2139,7 +2189,7 @@ class SchedulingService:
             lead + "📅 Your calendars\n\n" + "\n\n".join(blocks) + f"\n\n{nusmods}\n\n{more}\n"
             "🔒 I refresh them every hour and keep only when you're busy, never what your "
             "events are.",
-            personal_calendars_keyboard(calendars, feed=bool(feed)),
+            personal_calendars_keyboard(calendars, feed=feed),
         )
 
     async def connect_calendar(self, user: User, link: str) -> list[Reply]:
@@ -2347,6 +2397,9 @@ class SchedulingService:
         seen = user.calendar_feed_seen_at
         if not preview and (seen is None or now - seen > FEED_SEEN_EVERY):
             await self.repo.mark_feed_seen(user.id, now)
+            app = feed_app(user_agent)
+            if app and app != user.calendar_feed_app:
+                await self.repo.set_feed_app(user.id, app)
             if seen is None:
                 await self.feed_working(user, user_agent)
         return build_feed(events, deadlines=deadlines, now=now)

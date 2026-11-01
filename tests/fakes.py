@@ -383,6 +383,9 @@ class MemoryRepository:
     async def mark_feed_seen(self, user_id, when):
         self.user(user_id).calendar_feed_seen_at = when
 
+    async def set_feed_app(self, user_id, app):
+        self.user(user_id).calendar_feed_app = app
+
     async def set_user_flags(self, user_id, **flags):
         for key, value in flags.items():
             setattr(self.user(user_id), key, value)

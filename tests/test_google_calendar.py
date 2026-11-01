@@ -750,7 +750,7 @@ async def test_removing_the_google_calendar_disconnects_it(with_google, referenc
     await onboard(service, reference)
     await connect(service, 1, "me@gmail.com", reference)
     status = (await service.command(1, "calendar"))[0]
-    assert "📅 Google Calendar\n✅ Checks for clashes\n✅ Adds your plans\n" in status.text
+    assert ("📅 Google Calendar\n✅ Checks for clashes\n✅ Adds your plans\n") in status.text
 
     gone, unshare = await service.callback(1, tap(status, "Remove Google Calendar"))
 

@@ -286,13 +286,15 @@ async def test_calendar_screen_lists_each_calendar_with_remove(with_calendar, re
     await service.message(1, 1, ICLOUD_CCA, reference)
     await service.message(1, 2, ICLOUD_EVENTS, reference)
     status = (await service.command(1, "calendar"))[-1]
-    # One entry per calendar, with a blank line between them.
-    assert "📅 CCA\n✅ Checks for clashes\n❌ Doesn't add your plans\n🔄 Refreshed" in status.text
-    assert "\n\n📅 Events\n✅ Checks for clashes" in status.text
+    # One entry per app, listing its calendars.
+    assert (
+        "🍎 Apple Calendar\n✅ Checks for clashes: CCA, Events\n❌ Doesn't add your plans\n"
+        "🔄 Refreshed"
+    ) in status.text
     assert "3 more allowed" in status.text
     removed = (await service.callback(1, tap(status, "Remove CCA")))[0]
     assert removed.edit and removed.text.startswith("Removed CCA")
-    assert "📅 Events\n" in removed.text and "📅 CCA\n" not in removed.text
+    assert "✅ Checks for clashes: Events\n" in removed.text
     assert [c.label for c in await connected(repo)] == ["Events"]
     assert "already removed" in (await service.callback(1, tap(status, "Remove CCA")))[0].text
 
@@ -345,9 +347,9 @@ async def test_one_broken_calendar_does_not_affect_the_others(with_calendar, ref
     assert repo.calendar_blocks[by_label["Events"].id] == [FRIDAY_DINNER]
     status = (await service.command(1, "calendar"))[-1]
     assert (
-        "📅 CCA\n✅ Checks for clashes\n❌ Doesn't add your plans\n⚠️ That calendar link doesn't work any more."
-        in status.text
-    )
+        "✅ Checks for clashes: CCA, Events\n❌ Doesn't add your plans\n"
+        "⚠️ CCA: That calendar link doesn't work any more.\n🔄 Refreshed"
+    ) in status.text
     # Not retried every minute: the next try is an hour later.
     service.clock = lambda: reference + timedelta(hours=2, minutes=5)
     assert await service.refresh_calendars() == 0
@@ -407,7 +409,50 @@ async def test_calendar_shows_what_is_connected_then_asks_which_to_add(with_cale
     assert "Where do you usually add your events?" in first[0].text
     await service.message(1, 1, ICLOUD_CCA, reference)
     status = (await service.command(1, "calendar"))[0]
-    assert "📅 CCA\n✅ Checks for clashes" in status.text and "🔄 Refreshed" in status.text
+    assert "🍎 Apple Calendar\n✅ Checks for clashes: CCA" in status.text
     # Adding another asks which one; the phone subscription steps are behind their own button.
     pick = (await service.callback(1, tap(status, "➕ Add a calendar")))[0]
     assert "📅 Google" in str(pick.keyboard)
+
+
+def test_calendar_apps_are_told_apart():
+    from app.services.scheduling import feed_app, link_app
+
+    assert feed_app("iOS/18.0 (22A) dataaccessd/1.0") == "apple"
+    assert feed_app("macOS/14.5 (23F79) CalendarAgent/988") == "apple"
+    assert feed_app("Microsoft Office/16.0 (Outlook)") == "outlook"
+    assert feed_app("Google-Calendar-Importer") == "google"
+    assert feed_app("curl/8.0") is None
+    assert link_app(ICLOUD_CCA) == "apple" and link_app(GOOGLE) == "google"
+    assert link_app("https://outlook.office365.com/owa/calendar/a/b/calendar.ics") == "outlook"
+    assert link_app("https://example.com/cal.ics") is None and link_app(None) is None
+
+
+async def test_calendar_lists_each_app_with_what_it_checks_and_adds(service_factory, reference):
+    service, repo = service_factory(app_base_url="https://amifree.example")
+    service.calendar_reader = FakeReader((FRIDAY_DINNER,), None, {ICLOUD_CCA: "CCA"})
+    await service.message(1, 1, ICLOUD_CCA, reference)
+    await service.callback(1, "setup:apple")
+    token = repo.users[1].calendar_feed_token
+    await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
+    status = (await service.command(1, "calendar"))[-1]
+    # The iCloud link and the AmIFree calendar are both Apple: one entry.
+    assert (
+        "🍎 Apple Calendar\n✅ Checks for clashes: CCA\n"
+        "✅ Adds your plans, through the AmIFree calendar\n🔄 Refreshed"
+    ) in status.text
+    assert status.text.count("🍎 Apple Calendar") == 1 and "Outlook" not in status.text
+
+
+async def test_a_subscription_from_before_is_named_at_its_next_sync(service_factory, reference):
+    service, repo = service_factory(app_base_url="https://amifree.example")
+    await service.callback(1, "setup:apple")
+    token = repo.users[1].calendar_feed_token
+    await service.calendar_feed(token, "SomeCalendar/1.0")  # an app I can't name
+    status = (await service.command(1, "calendar"))[-1]
+    assert "📤 Your calendar app\n❌ Doesn't check for clashes" in status.text
+    service.clock = lambda: reference + timedelta(hours=1)
+    await service.calendar_feed(token, "Microsoft Office/16.0 (Outlook)")
+    status = (await service.command(1, "calendar"))[-1]
+    assert "📧 Outlook\n❌ Doesn't check for clashes\n✅ Adds your plans, through" in status.text
+    assert "Your calendar app" not in status.text

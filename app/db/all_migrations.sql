@@ -1104,3 +1104,14 @@ grant all on public.feedback to service_role;
 insert into public.schema_migrations(version,name) values (16,'feedback')
 on conflict (version) do nothing;
 commit;
+
+-- ===== 017_calendar_feed_app.sql =====
+-- Apply once after 016; safe to reapply. Which calendar app subscribed to the AmIFree calendar
+-- (from its fetches), so /calendar can list it under Apple, Outlook or Google.
+begin;
+alter table public.users add column if not exists calendar_feed_app text
+  check (calendar_feed_app is null or calendar_feed_app in ('apple','outlook','google'));
+
+insert into public.schema_migrations(version,name) values (17,'calendar_feed_app')
+on conflict (version) do nothing;
+commit;

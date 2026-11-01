@@ -927,10 +927,18 @@ def google_share_link(email: str, base_url: str = "") -> str:
     return f"{google_calendar_settings(email)}?authuser={quote(email, safe='@')}"
 
 
-def google_share_page() -> str:
-    """The page behind Open sharing settings. A computer goes straight on to Google; a phone
-    or tablet stays here and is pointed to the phone steps, since Google would only open its
-    app. The address is built here from the email, so the page can't send anyone elsewhere."""
+# The /start parameter the share page sends a phone back with: the bot answers with the
+# phone steps.
+GOOGLE_PHONE_START = "gphone"
+
+
+def google_share_page(bot_username: str = "") -> str:
+    """The page behind Open sharing settings. A computer goes straight on to Google. A phone
+    or tablet, where Google would only open its app, goes back to the bot's chat, which then
+    shows the phone steps. The address is built here from the email, so the page can't send
+    anyone elsewhere."""
+    back = f"https://t.me/{quote(bot_username.lstrip('@'))}?start={GOOGLE_PHONE_START}"
+    back = back if bot_username else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -940,19 +948,19 @@ def google_share_page() -> str:
 body{{font:17px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:24px 16px;
 background:#fff;color:#111;max-width:480px;margin:auto}}
 #phone{{display:none}}
+a.back{{display:block;text-align:center;background:#0a7cff;color:#fff;padding:14px;
+border-radius:12px;text-decoration:none;font-weight:600;margin:20px 0}}
 a.anyway{{color:#0a7cff}}
 @media (prefers-color-scheme: dark){{body{{background:#111;color:#eee}}a.anyway{{color:#5aa9ff}}}}
 </style></head><body>
 <p id="wait">Opening Google Calendar…</p>
 <div id="phone">
 <h1>📱 You're on a phone</h1>
-<p>Google opens its sharing settings only on a computer. On a phone, this link opens the
-Google Calendar app instead, which can't go straight to them.</p>
-<p><b>Easiest:</b> close this page and tap <b>📱 Phone steps</b> under my message in Telegram.
-I'll show you where to tap in the app.</p>
-<p><b>Or</b> open Telegram on your computer (the app or web.telegram.org) and tap
-<b>Open sharing settings</b> there.</p>
-<p><a class="anyway" id="anyway" href="#">Open it here anyway</a></p>
+<p>Google opens its sharing settings only on a computer. On a phone, I'll show you where to
+tap in the Google Calendar app instead.</p>
+<a class="back" id="back" href="#">Show me the phone steps</a>
+<p>Nothing happened? Go back to Telegram and tap <b>📱 Phone steps</b> under my message.</p>
+<p><a class="anyway" id="anyway" href="#">Open Google's page here anyway</a></p>
 </div>
 <script>
 var email = decodeURIComponent(location.hash.slice(1));
@@ -960,6 +968,7 @@ var url = {json.dumps(GOOGLE_SETTINGS)};
 if (/^[^@\\s]+@[^@\\s]+$/.test(email)) {{
   url += "/calendar/" + btoa(email).replace(/=+$/, "") + "?authuser=" + encodeURIComponent(email);
 }}
+var back = {json.dumps(back)};
 var ua = navigator.userAgent;
 var phone = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
   (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
@@ -967,6 +976,12 @@ if (phone) {{
   document.getElementById("wait").style.display = "none";
   document.getElementById("phone").style.display = "block";
   document.getElementById("anyway").href = url;
+  if (back) {{
+    document.getElementById("back").href = back;
+    location.replace(back);
+  }} else {{
+    document.getElementById("back").style.display = "none";
+  }}
 }} else {{
   location.replace(url);
 }}

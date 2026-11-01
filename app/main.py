@@ -322,7 +322,7 @@ def create_app(
     async def google_share():
         # The same page for everyone: the email is after the #, read by the page itself.
         return Response(
-            onboarding.google_share_page(),
+            onboarding.google_share_page(settings.bot_username),
             media_type="text/html; charset=utf-8",
             headers={"Cache-Control": "no-store"},
         )

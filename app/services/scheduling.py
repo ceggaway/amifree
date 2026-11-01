@@ -1968,20 +1968,21 @@ class SchedulingService:
         await self.safe_action(user.id, "calendar_feed_created")
         return token
 
-    async def apple_setup(self, user: User) -> list[Reply]:
+    async def apple_setup(self, user: User, again: bool = False) -> list[Reply]:
         """Apple, part 1 of 2: subscribe to the AmIFree feed. Part 2 is the iCloud link guide,
-        sent by itself once the calendar app first fetches the feed (see calendar_feed)."""
+        sent by itself once the calendar app first fetches the feed (see calendar_feed).
+        again: part 1 on another device, since an iPhone's subscription stays on that iPhone."""
         if not self.settings.app_base_url:
             return self.apple_step(lead=onboarding.APPLE_NO_FEED)
-        if user.calendar_feed_token and user.calendar_feed_seen_at:
-            return self.apple_step(lead=onboarding.APPLE_PART1_DONE)
+        if user.calendar_feed_token and user.calendar_feed_seen_at and not again:
+            return self.apple_step(lead=onboarding.APPLE_PART1_DONE, another=True)
         token = await self.ensure_feed_token(user)
-        text, photo = onboarding.apple_part1(google=user.google_connected)
+        text, photo = onboarding.apple_part1(google=user.google_connected, again=again)
         add = f"{self.settings.app_base_url.rstrip('/')}/cal/{token}/add"
         return [
             Reply(
                 text,
-                onboarding.apple_part1_keyboard(add, part2=not user.google_connected),
+                onboarding.apple_part1_keyboard(add, part2=not user.google_connected, again=again),
                 edit=True,
                 parse_mode="HTML",
                 photo=photo,
@@ -2011,9 +2012,11 @@ class SchedulingService:
             )
         ]
 
-    def apple_step(self, device: str = "ios", n: int = 1, lead: str = "") -> list[Reply]:
+    def apple_step(
+        self, device: str = "ios", n: int = 1, lead: str = "", another: bool = False
+    ) -> list[Reply]:
         """One step of Apple part 2, as a picture with its instructions under it."""
-        text, photo, keyboard = onboarding.apple_step(device, n, lead)
+        text, photo, keyboard = onboarding.apple_step(device, n, lead, another)
         return [
             Reply(
                 text,
@@ -2038,21 +2041,27 @@ class SchedulingService:
         if not self.send_private:
             return
         # Part 1 and the manual steps already showed the refresh time, so it isn't repeated.
+        device = onboarding.apple_device(user_agent)
+        note = "\n\n" + onboarding.APPLE_OTHER_DEVICE[device] if device else ""
+        more = onboarding.another_device_keyboard() if device else None
         if user.google_connected:
             # Google already gives busy times: there's no part 2.
             reply = Reply(
                 "✅ <b>All set</b>: your AmIFree calendar is subscribed, so your plans now "
-                "appear in it.",
+                "appear in it." + note,
+                more,
                 parse_mode="HTML",
             )
         elif await self.repo.list_calendars(user.id):
-            reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
+            reply = Reply(onboarding.APPLE_ALL_SET + note, more, parse_mode="HTML")
         elif any(name in user_agent.lower() for name in OUTLOOK_AGENTS):
             # Subscribed from Outlook: its part 2 is publishing, not iCloud.
             text, photo, keyboard = onboarding.outlook_step(2, lead=onboarding.OUTLOOK_PART1_DONE)
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
         else:
-            text, photo, keyboard = onboarding.apple_step(lead=onboarding.APPLE_PART1_DONE)
+            text, photo, keyboard = onboarding.apple_step(
+                lead=onboarding.APPLE_PART1_DONE + note, another=True
+            )
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
         try:
             await self.send_private(user.telegram_user_id, reply)
@@ -2497,6 +2506,8 @@ class SchedulingService:
                 return await self._callback(user, telegram_id, "gcal:computer")
             if name == "apple":
                 return await self.apple_setup(user)
+            if name == "apple1":
+                return await self.apple_setup(user, again=True)
             if name == "outlook":
                 return await self.outlook_step(user)
             if name in ("apple2", "apple2mac"):

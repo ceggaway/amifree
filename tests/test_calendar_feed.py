@@ -180,13 +180,17 @@ async def test_change_alert_says_synced_instead_of_buttons(online, reference):
     assert event.status == Status.GOING and "Syncing" in card.text
 
 
-async def test_the_feed_settings_appear_once_there_is_a_feed(online):
+async def test_the_feed_settings_appear_once_a_calendar_uses_the_feed(online):
     service, _ = online()
     status = (await service.command(1, "calendar"))[0]
     assert "Plans in your phone's calendar: not set up" in status.text
     # Not set up yet: Apple / iCloud is the way in, so there's no second button for it.
     assert "🍎 AmIFree calendar settings" not in str(status.keyboard)
-    await service.callback(1, "setup:apple")
+    await service.callback(1, "cal:feed")
+    status = (await service.command(1, "calendar"))[0]
+    # A link no calendar app has opened yet is nothing to manage.
+    assert "🍎 AmIFree calendar settings" not in str(status.keyboard)
+    await service.calendar_feed(service.repo.users[1].calendar_feed_token, "iOS/18.0")
     status = (await service.command(1, "calendar"))[0]
     feed = (await service.callback(1, tap(status, "🍎 AmIFree calendar settings")))[0]
     assert "Add Subscribed Calendar" in feed.text

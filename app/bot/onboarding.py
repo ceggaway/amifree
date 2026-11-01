@@ -854,12 +854,12 @@ def google_share_screen(
     text = (
         "📅 <b>Google Calendar · Share your calendar with me</b>\n\n"
         "<b>1.</b> Tap <b>Open sharing settings</b> below. It opens the calendar for "
-        f"{html.escape(email)}.\n"
-        "<b>2.</b> Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.\n"
+        f"{html.escape(email)}.\n\n"
+        "<b>2.</b> Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.\n\n"
         "<b>3.</b> Paste this email (tap it to copy):\n"
-        f"<code>{html.escape(bot_email)}</code>\n"
-        "<b>4.</b> Permission: <b>Make changes (see private events as free/busy)</b>, then "
-        "click <b>Send</b>.\n\n"
+        f"<code>{html.escape(bot_email)}</code>\n\n"
+        "<b>4.</b> Permission: <b>Make changes (see private events as free/busy)</b>\n\n"
+        "<b>5.</b> Click <b>Send</b>.\n\n"
         "Then tap <b>Done</b> below.\n\n"
         "🔒 I only read your busy times, and only change events I add."
     )

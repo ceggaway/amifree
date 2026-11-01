@@ -2076,7 +2076,7 @@ class SchedulingService:
             # Apple part 1 done, part 2 not: one tap back to where they stopped.
             half_done = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
             keyboard = onboarding.first_calendar_keyboard(
-                finish_apple=half_done, feed=bool(user.calendar_feed_token)
+                finish_apple=half_done, feed=half_done
             )
             if half_done:
                 status = "🍎 Apple: ✓ adding plans · ✗ not checking busy times yet"
@@ -2122,7 +2122,9 @@ class SchedulingService:
             + f"\n\n{nusmods}"
             + f"\n\n{self.feed_line(user)}\n\n{more} I refresh them every hour and keep only "
             "when you're busy, never what your events are.",
-            personal_calendars_keyboard(calendars, feed=bool(user.calendar_feed_token)),
+            personal_calendars_keyboard(
+                calendars, feed=bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+            ),
         )
 
     async def connect_calendar(self, user: User, link: str) -> list[Reply]:

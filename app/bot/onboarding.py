@@ -787,8 +787,11 @@ GOOGLE_STEPS = (
 GOOGLE_STEP1 = "📅 <b>Google Calendar · Share your calendar with me</b>\n\n"
 
 
-def google_step(email: str, n: int = 1) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
-    """One part of sharing on a phone: its text, its picture (None if it can't be read), buttons."""
+def google_step(
+    email: str, n: int = 1, computer: bool = True
+) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
+    """One part of sharing on a phone: its text, its picture (None if it can't be read), buttons.
+    computer=False drops "On a computer instead?" when they're known to be on a phone."""
     picture, title, body = GOOGLE_STEPS[n - 1]
     text = (
         GOOGLE_STEP1
@@ -820,9 +823,10 @@ def google_step(email: str, n: int = 1) -> tuple[str, bytes | None, InlineKeyboa
         rows.append(
             [InlineKeyboardButton("📅 Open Google Calendar app ↗", url=GOOGLE_CALENDAR_URL)]
         )
-        rows.append(
-            [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
-        )
+        if computer:
+            rows.append(
+                [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
+            )
         rows.append([_button("« Other calendars", "calendar")])
     return text, photo, InlineKeyboardMarkup(rows)
 

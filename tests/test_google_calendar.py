@@ -355,9 +355,10 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     link_only = (await service.callback(1, "setup:google"))[0]
     assert "gcal:start" not in str(link_only.keyboard)
     service.google = FakeGoogle()
-    # With it, Google goes straight to sharing: read and write in one setup.
+    # With it, Google goes straight to sharing, computer first: it asks for the email.
     share = (await service.callback(1, "setup:google"))[0]
-    assert "1 of 5 · " in share.text and share.photo and "Next ›" in labels(share)
+    assert "What's your Google email?" in share.text
+    assert "📱 On my phone instead?" in labels(share)
     assert "googlelink" not in str(share.keyboard)
     link = (await service.callback(1, "setup:googlelink"))[0]
     assert "Secret address" in link.text or "link" in link.text.lower()
@@ -453,6 +454,9 @@ async def test_back_from_the_share_page_on_a_phone_shows_the_phone_steps(with_go
     [step] = await service.command(1, "start", "gphone")
     assert step.text.startswith("📱 You're on your phone") and "1 of 5" in step.text
     assert step.photo and not step.edit and len(step.text) <= 1024
+    # Known to be on a phone: no "On a computer instead?".
+    assert "💻 On a computer instead?" not in labels(step)
+    assert "💻 On a computer instead?" in labels((await service.callback(1, "gcal:start"))[0])
 
 
 async def test_done_without_an_email_asks_for_it(with_google, reference):

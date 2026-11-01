@@ -61,9 +61,9 @@ class GoogleSyncService:
 
     # ---- connecting ----
 
-    def steps(self, n: int = 1) -> list[Reply]:
+    def steps(self, n: int = 1, computer: bool = True) -> list[Reply]:
         """One part of sharing on a phone, as a picture with its instructions under it."""
-        text, photo, keyboard = onboarding.google_step(self.client.email, n)
+        text, photo, keyboard = onboarding.google_step(self.client.email, n, computer)
         return [
             Reply(
                 text,

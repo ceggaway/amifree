@@ -157,7 +157,7 @@ GUIDES = {
         "Calendar switch, is from Google or Outlook — use that guide instead.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
         "it here. I keep just your busy times.\n\n"
-        "🗂 Several iCloud calendars (Classes, CCA, Events)? Add each one's link." + PASTE_NEXT
+        "🗂 More than one calendar (Classes, CCA)? Paste each link one by one, up to 5." + PASTE_NEXT
     ),
     "mac": (
         "💻 <b>Mac · iCloud Calendar</b> · about 1 minute\n"
@@ -175,7 +175,7 @@ GUIDES = {
         "Calendar box, is from Google or Outlook — use that guide instead.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
         "it here. I keep just your busy times.\n\n"
-        "🗂 Several iCloud calendars? Add each one's link." + PASTE_NEXT
+        "🗂 More than one calendar? Paste each link one by one, up to 5." + PASTE_NEXT
     ),
     "google": (
         "📅 <b>Google Calendar · read only</b> · about 1 minute\n"
@@ -280,8 +280,8 @@ APPLE_STEPS = {
         (
             "ios_step4.png",
             "Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
-            "👇 <b>Paste the link here.</b> It starts with <code>webcal://</code>.\n"
-            "Several iCloud calendars (Classes, CCA)? Send each one's link.",
+            "👇 <b>Paste the link here.</b> It starts with <code>webcal://</code>.\n\n"
+            "🗂 More than one calendar (Classes, CCA)? Paste each link one by one, up to 5.",
         ),
     ),
     "mac": (
@@ -298,7 +298,8 @@ APPLE_STEPS = {
             "<b>Done</b>.\n\n"
             "👇 <b>Paste the link here.</b> It starts with <code>webcal://</code>.\n"
             "🔒 Anyone with the link can see that calendar, so only paste it here. I keep just "
-            "your busy times.",
+            "your busy times.\n\n"
+            "🗂 More than one calendar (Classes, CCA)? Paste each link one by one, up to 5.",
         ),
     ),
 }

@@ -204,16 +204,32 @@ OUTLOOK_PART1_DONE = (
 )
 
 
-def apple_part1(google: bool = False) -> tuple[str, bytes | None]:
+def apple_part1(google: bool = False, again: bool = False) -> tuple[str, bytes | None]:
     """Apple part 1: subscribe, then set the refresh time (the picture shows it on a Mac).
-    With Google connected, Google already gives busy times, so there's no part 2."""
+    With Google connected, Google already gives busy times, so there's no part 2. again: part 1
+    once more, on another device (a subscription made on an iPhone stays on that iPhone)."""
+    if again:
+        header = (
+            "🍎 <b>Apple Calendar · Another device</b>\n<b>Your plans on this device too</b>\n\n"
+            "Open this chat on the device you're adding (like your Mac), then:\n\n"
+        )
+    elif google:
+        header = "🍎 <b>Apple Calendar</b>\n<b>Your plans in your calendar, automatically</b>\n\n"
+    else:
+        header = (
+            "🍎 <b>Apple Calendar · Part 1 of 2</b>\n"
+            "<b>Your plans in your calendar, automatically</b>\n\n"
+        )
     text = (
-        ("🍎 <b>Apple Calendar</b>\n" if google else "🍎 <b>Apple Calendar · Part 1 of 2</b>\n")
-        + "<b>Your plans in your calendar, automatically</b>\n\n"
-        "<b>1.</b> Tap <b>Add to Calendar</b> below, then <b>Subscribe</b>.\n\n"
+        header + "<b>1.</b> Tap <b>Add to Calendar</b> below, then <b>Subscribe</b>.\n\n"
         "<b>2.</b> Remember to set <b>Auto-refresh</b> to <b>Every 5 minutes</b>.\n\n"
     )
-    if google:
+    if again:
+        text += (
+            "ℹ️ Subscribed on a Mac with <b>Location: iCloud</b>? It's already on your iPhone "
+            "and iPad, so don't add it there twice."
+        )
+    elif google:
         text += (
             "I'll message you once it's subscribed. That's all: Google already tells me when "
             "you're busy.\n\n"
@@ -307,9 +323,10 @@ GOOGLE_HINT = {("ios", 2), ("mac", 1)}
 
 
 def apple_step(
-    device: str = "ios", n: int = 1, lead: str = ""
+    device: str = "ios", n: int = 1, lead: str = "", another: bool = False
 ) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
-    """One step of Apple part 2: its text, its picture (None if it can't be read), buttons."""
+    """One step of Apple part 2: its text, its picture (None if it can't be read), buttons.
+    another: part 1 is done on some device, so offer it on another one (step 1 only)."""
     steps = APPLE_STEPS[device]
     picture, body = steps[n - 1]
     where = "On a Mac · " if device == "mac" else ""
@@ -337,6 +354,8 @@ def apple_step(
         )
     if (device, n) in GOOGLE_HINT:
         rows.append([_button("📅 Mine's Google", "google")])
+    if another and n == 1:
+        rows.append([_button("➕ Add my plans on another device", "apple1")])
     rows.append([_button("⏭ Skip this part", "appleskip")])
     return text, photo, InlineKeyboardMarkup(rows)
 
@@ -701,14 +720,16 @@ def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
     ]
 
 
-def apple_part1_keyboard(add_url: str, part2: bool = True) -> InlineKeyboardMarkup:
+def apple_part1_keyboard(
+    add_url: str, part2: bool = True, again: bool = False
+) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
         [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
     ]
-    if part2:
+    if part2 and not again:
         rows.append([_button("⏭ Skip to part 2", "apple2")])
-    rows.append([_button("« Other calendars", "calendar")])
+    rows.append([_button("« Back", "apple") if again else _button("« Other calendars", "calendar")])
     return InlineKeyboardMarkup(rows)
 
 

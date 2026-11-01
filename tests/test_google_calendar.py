@@ -355,9 +355,10 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     link_only = (await service.callback(1, "setup:google"))[0]
     assert "gcal:start" not in str(link_only.keyboard)
     service.google = FakeGoogle()
-    # With it, Google goes straight to sharing: read and write in one setup.
+    # With it, Google goes straight to sharing, computer first: it asks for the email.
     share = (await service.callback(1, "setup:google"))[0]
-    assert "1 of 5 · " in share.text and share.photo and "Next ›" in labels(share)
+    assert "What's your Google email?" in share.text
+    assert "📱 On my phone instead?" in labels(share)
     assert "googlelink" not in str(share.keyboard)
     link = (await service.callback(1, "setup:googlelink"))[0]
     assert "Secret address" in link.text or "link" in link.text.lower()

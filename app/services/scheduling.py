@@ -2430,7 +2430,9 @@ class SchedulingService:
         if data.startswith("setup:"):
             name = data.removeprefix("setup:")
             if name == "google" and self.google_sync.enabled:
-                return self.google_sync.steps()  # sharing; the link is its fallback
+                # Sharing, computer first: the email, then one tap to its settings. The
+                # phone steps are a button away, and the link is the fallback.
+                return await self._callback(user, telegram_id, "gcal:computer")
             if name == "apple":
                 return await self.apple_setup(user)
             if name == "outlook":

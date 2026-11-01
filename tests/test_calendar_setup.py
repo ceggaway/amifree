@@ -85,7 +85,10 @@ async def test_google_is_three_steps(service_factory, reference):
     service, repo = service_factory()
     service.google = FakeGoogle()
     await onboard(service, reference)
-    step1 = (await service.callback(1, "setup:google"))[0]
+    # The Google button starts with the computer steps; the phone steps are a tap away.
+    ask = (await service.callback(1, "setup:google"))[0]
+    assert "What's your Google email?" in ask.text
+    step1 = (await service.callback(1, tap(ask, "📱 On my phone instead?")))[0]
     assert "1 of 5 · " in step1.text and "of 3" not in step1.text  # one counter, not two
     assert "Next ›" in labels(step1)
     last = (await service.callback(1, "gs:phone:5"))[0]

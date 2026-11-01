@@ -2075,9 +2075,7 @@ class SchedulingService:
         if not calendars:
             # Apple part 1 done, part 2 not: one tap back to where they stopped.
             half_done = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
-            keyboard = onboarding.first_calendar_keyboard(
-                finish_apple=half_done, feed=half_done
-            )
+            keyboard = onboarding.first_calendar_keyboard(finish_apple=half_done, feed=half_done)
             if half_done:
                 status = "🍎 Apple: ✓ adding plans · ✗ not checking busy times yet"
             else:

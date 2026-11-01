@@ -129,7 +129,7 @@ async def test_apple_part_one_is_one_tap_to_subscribe(service_factory, reference
     part1 = (await service.callback(1, "setup:apple"))[0]
     assert "Part 1 of 2" in part1.text and part1.parse_mode == "HTML" and part1.photo
     # The refresh setting is part of part 1, before moving on.
-    assert "Fetch New Data" in part1.text and "Every 5 minutes" in part1.text
+    assert "Auto-refresh" in part1.text and "Every 5 minutes" in part1.text
     token = repo.users[1].calendar_feed_token
     add = part1.keyboard.inline_keyboard[0][0]
     assert add.text == "➕ Add to Calendar ↗" and add.url == f"{BASE}/cal/{token}/add"

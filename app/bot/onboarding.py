@@ -211,10 +211,7 @@ def apple_part1(google: bool = False) -> tuple[str, bytes | None]:
         ("🍎 <b>Apple Calendar</b>\n" if google else "🍎 <b>Apple Calendar · Part 1 of 2</b>\n")
         + "<b>Your plans in your calendar, automatically</b>\n\n"
         "<b>1.</b> Tap <b>Add to Calendar</b> below, then <b>Subscribe</b>.\n\n"
-        "<b>2.</b> Make changes show up faster:\n"
-        "• Mac: right-click <b>AmIFree</b> → Get Info → Auto-refresh → <b>Every 5 minutes</b>\n"
-        "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → "
-        "<b>Every 15 Minutes</b>\n\n"
+        "<b>2.</b> Remember to set <b>Auto-refresh</b> to <b>Every 5 minutes</b>.\n\n"
     )
     if google:
         text += (

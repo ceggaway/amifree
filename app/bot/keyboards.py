@@ -383,8 +383,9 @@ def personal_calendars_keyboard(calendars, feed: bool = False) -> InlineKeyboard
 
 
 def calendar_home_rows(feed: bool = False):
-    """Connect a calendar, add classes, and once the AmIFree calendar exists, its link and
-    settings (New link, Turn off). Setting it up is part of Apple setup, not a button here."""
+    """Connect a calendar, add classes, and once a calendar app uses the AmIFree calendar, its
+    link and settings (New link, Turn off). Setting it up is part of Apple setup, not a button
+    here."""
     rows = [
         [InlineKeyboardButton("➕ Add a calendar", callback_data="setup:calendar")],
         [InlineKeyboardButton("📚 Add or update NUSMods", callback_data="setup:nusmods")],

@@ -1165,7 +1165,9 @@ class SchedulingService:
             # Computer setup asked for the email first: open its settings, don't check yet.
             email = text.strip().lower()
             await self.repo.set_pending(user.id, {"stage": "gcal_shared", "email": email})
-            share, photo, keyboard = onboarding.google_share_screen(self.google.email, email)
+            share, photo, keyboard = onboarding.google_share_screen(
+                self.google.email, email, self.settings.app_base_url
+            )
             return [Reply(share, keyboard, parse_mode="HTML", photo=photo)]
         if self.google_sync.enabled and GOOGLE_EMAIL.fullmatch(text.strip()):
             if not self.calendar_limit.allow(user.id):
@@ -1935,16 +1937,15 @@ class SchedulingService:
         if user.calendar_feed_token and user.calendar_feed_seen_at:
             return self.apple_step(lead=onboarding.APPLE_PART1_DONE)
         token = await self.ensure_feed_token(user)
-        text = onboarding.APPLE_PART1
-        if user.google_connected:
-            text += onboarding.APPLE_ALREADY_GOOGLE
+        text, photo = onboarding.apple_part1(google=user.google_connected)
         add = f"{self.settings.app_base_url.rstrip('/')}/cal/{token}/add"
         return [
             Reply(
                 text,
-                onboarding.apple_part1_keyboard(add),
+                onboarding.apple_part1_keyboard(add, part2=not user.google_connected),
                 edit=True,
                 parse_mode="HTML",
+                photo=photo,
                 clear_album_group="setup",
             )
         ]
@@ -1997,12 +1998,13 @@ class SchedulingService:
         part 2 of Apple setup if nothing tells me yet when they're busy. Best effort."""
         if not self.send_private:
             return
-        # Part 1 already asked them to set the refresh time; here it's only for anyone who
-        # subscribed some other way.
+        # Part 1 and the manual steps already showed the refresh time, so it isn't repeated.
         if user.google_connected:
+            # Google already gives busy times: there's no part 2.
             reply = Reply(
-                "✅ Your AmIFree calendar is subscribed. Your plans now appear in it.\n\n"
-                + onboarding.FEED_REFRESH_TIP
+                "✅ <b>All set</b>: your AmIFree calendar is subscribed, so your plans now "
+                "appear in it.",
+                parse_mode="HTML",
             )
         elif await self.repo.list_calendars(user.id):
             reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
@@ -2075,9 +2077,7 @@ class SchedulingService:
         if not calendars:
             # Apple part 1 done, part 2 not: one tap back to where they stopped.
             half_done = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
-            keyboard = onboarding.first_calendar_keyboard(
-                finish_apple=half_done, feed=bool(user.calendar_feed_token)
-            )
+            keyboard = onboarding.first_calendar_keyboard(finish_apple=half_done, feed=half_done)
             if half_done:
                 status = "🍎 Apple: ✓ adding plans · ✗ not checking busy times yet"
             else:
@@ -2122,7 +2122,9 @@ class SchedulingService:
             + f"\n\n{nusmods}"
             + f"\n\n{self.feed_line(user)}\n\n{more} I refresh them every hour and keep only "
             "when you're busy, never what your events are.",
-            personal_calendars_keyboard(calendars, feed=bool(user.calendar_feed_token)),
+            personal_calendars_keyboard(
+                calendars, feed=bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+            ),
         )
 
     async def connect_calendar(self, user: User, link: str) -> list[Reply]:

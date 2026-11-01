@@ -5,6 +5,7 @@ Every screen edits the same message, so setup never floods the chat (ux-flows.md
 
 import base64
 import html
+import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -202,24 +203,37 @@ OUTLOOK_PART1_DONE = (
     "calendar there."
 )
 
-APPLE_PART1 = (
-    "🍎 <b>Apple Calendar · Part 1 of 2</b>\n"
-    "<b>Add your plans to your calendar automatically</b>\n\n"
-    "Every event you save with me will show up in your calendar by itself, and update if it "
-    "changes. No more adding them by hand.\n\n"
-    "<b>1.</b> Tap <b>Add to Calendar</b> below, then tap <b>Subscribe</b>. A calendar called "
-    "<b>AmIFree</b> appears.\n\n"
-    "<b>2.</b> Make changes show up faster:\n"
-    "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → "
-    "<b>Every 15 Minutes</b> (the fastest an iPhone allows)\n"
-    "• Mac: in Calendar, right-click AmIFree → Get Info → Auto-refresh → "
-    "<b>Every 5 minutes</b>\n\n"
-    "I'll message you here once your calendar has subscribed, then we'll do part 2."
-)
-APPLE_ALREADY_GOOGLE = (
-    "\n\nℹ️ Your plans already go to your Google Calendar. If that's the calendar on your "
-    "iPhone, you don't need this part: they'd show up twice."
-)
+
+def apple_part1(google: bool = False) -> tuple[str, bytes | None]:
+    """Apple part 1: subscribe, then set the refresh time (the picture shows it on a Mac).
+    With Google connected, Google already gives busy times, so there's no part 2."""
+    text = (
+        ("🍎 <b>Apple Calendar</b>\n" if google else "🍎 <b>Apple Calendar · Part 1 of 2</b>\n")
+        + "<b>Your plans in your calendar, automatically</b>\n\n"
+        "<b>1.</b> Tap <b>Add to Calendar</b> below, then <b>Subscribe</b>.\n\n"
+        "<b>2.</b> Make changes show up faster:\n"
+        "• Mac: right-click <b>AmIFree</b> → Get Info → Auto-refresh → <b>Every 5 minutes</b>\n"
+        "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → "
+        "<b>Every 15 Minutes</b>\n\n"
+    )
+    if google:
+        text += (
+            "I'll message you once it's subscribed. That's all: Google already tells me when "
+            "you're busy.\n\n"
+            "ℹ️ If Google is the calendar on your iPhone, skip this. Your plans are already "
+            "there, and they'd show up twice."
+        )
+    else:
+        text += "I'll message you once it's subscribed, then we'll do part 2."
+    try:
+        photo = (
+            Path(__file__).resolve().parent.parent / "assets" / "ios" / "mac_refresh.png"
+        ).read_bytes()
+    except OSError:
+        photo = None
+    return text, photo
+
+
 APPLE_NO_FEED = (
     "🍎 <b>Apple Calendar</b>\n\n"
     "Adding plans to your calendar by themselves isn't available yet, so tap 🍎 on a plan to "
@@ -689,15 +703,15 @@ def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
     ]
 
 
-def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
-            [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
-            [_button("⏭ Skip to part 2", "apple2")],
-            [_button("« Other calendars", "calendar")],
-        ]
-    )
+def apple_part1_keyboard(add_url: str, part2: bool = True) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
+        [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
+    ]
+    if part2:
+        rows.append([_button("⏭ Skip to part 2", "apple2")])
+    rows.append([_button("« Other calendars", "calendar")])
+    return InlineKeyboardMarkup(rows)
 
 
 def first_calendar_keyboard(finish_apple: bool = False, feed: bool = False) -> InlineKeyboardMarkup:
@@ -848,18 +862,18 @@ def google_email_first_keyboard() -> InlineKeyboardMarkup:
 
 
 def google_share_screen(
-    bot_email: str, email: str
+    bot_email: str, email: str, base_url: str = ""
 ) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
     """Computer step 2 of 3: one screen, with a button straight to that calendar's settings."""
     text = (
         "📅 <b>Google Calendar · Share your calendar with me</b>\n\n"
         "<b>1.</b> Tap <b>Open sharing settings</b> below. It opens the calendar for "
-        f"{html.escape(email)}.\n"
-        "<b>2.</b> Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.\n"
+        f"{html.escape(email)}.\n\n"
+        "<b>2.</b> Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.\n\n"
         "<b>3.</b> Paste this email (tap it to copy):\n"
-        f"<code>{html.escape(bot_email)}</code>\n"
-        "<b>4.</b> Permission: <b>Make changes (see private events as free/busy)</b>, then "
-        "click <b>Send</b>.\n\n"
+        f"<code>{html.escape(bot_email)}</code>\n\n"
+        "<b>4.</b> Permission: <b>Make changes (see private events as free/busy)</b>\n\n"
+        "<b>5.</b> Click <b>Send</b>.\n\n"
         "Then tap <b>Done</b> below.\n\n"
         "🔒 I only read your busy times, and only change events I add."
     )
@@ -871,8 +885,13 @@ def google_share_screen(
         photo = None
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("📅 Open sharing settings ↗", url=google_share_link(email))],
+            [
+                InlineKeyboardButton(
+                    "📅 Open sharing settings ↗", url=google_share_link(email, base_url)
+                )
+            ],
             [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:shared")],
+            [InlineKeyboardButton("📱 Phone steps", callback_data="gcal:start")],
             [InlineKeyboardButton("✏️ Different email", callback_data="gcal:computer")],
             [_button("« Other calendars", "calendar")],
         ]
@@ -899,9 +918,62 @@ def google_calendar_settings(email: str) -> str:
     return f"{GOOGLE_SETTINGS}/calendar/{calendar}"
 
 
-def google_share_link(email: str) -> str:
-    """That calendar's settings, opened in the right account when the browser has several."""
+def google_share_link(email: str, base_url: str = "") -> str:
+    """That calendar's settings, opened in the right account when the browser has several.
+
+    With our own address, the button goes through google_share_page first: phones hand
+    Google's links to the Google Calendar app, which can't open settings. The email goes after
+    the #, which browsers never send, so it stays out of our server's logs."""
+    if base_url:
+        return f"{base_url.rstrip('/')}/google/share#{quote(email, safe='@')}"
     return f"{google_calendar_settings(email)}?authuser={quote(email, safe='@')}"
+
+
+def google_share_page() -> str:
+    """The page behind Open sharing settings. A computer goes straight on to Google; a phone
+    or tablet stays here and is pointed to the phone steps, since Google would only open its
+    app. The address is built here from the email, so the page can't send anyone elsewhere."""
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Google Calendar sharing</title>
+<style>
+body{{font:17px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:24px 16px;
+background:#fff;color:#111;max-width:480px;margin:auto}}
+#phone{{display:none}}
+a.anyway{{color:#0a7cff}}
+@media (prefers-color-scheme: dark){{body{{background:#111;color:#eee}}a.anyway{{color:#5aa9ff}}}}
+</style></head><body>
+<p id="wait">Opening Google Calendar…</p>
+<div id="phone">
+<h1>📱 You're on a phone</h1>
+<p>Google opens its sharing settings only on a computer. On a phone, this link opens the
+Google Calendar app instead, which can't go straight to them.</p>
+<p><b>Easiest:</b> close this page and tap <b>📱 Phone steps</b> under my message in Telegram.
+I'll show you where to tap in the app.</p>
+<p><b>Or</b> open Telegram on your computer (the app or web.telegram.org) and tap
+<b>Open sharing settings</b> there.</p>
+<p><a class="anyway" id="anyway" href="#">Open it here anyway</a></p>
+</div>
+<script>
+var email = decodeURIComponent(location.hash.slice(1));
+var url = {json.dumps(GOOGLE_SETTINGS)};
+if (/^[^@\\s]+@[^@\\s]+$/.test(email)) {{
+  url += "/calendar/" + btoa(email).replace(/=+$/, "") + "?authuser=" + encodeURIComponent(email);
+}}
+var ua = navigator.userAgent;
+var phone = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+  (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+if (phone) {{
+  document.getElementById("wait").style.display = "none";
+  document.getElementById("phone").style.display = "block";
+  document.getElementById("anyway").href = url;
+}} else {{
+  location.replace(url);
+}}
+</script>
+</body></html>"""
 
 
 def unlink_guide(

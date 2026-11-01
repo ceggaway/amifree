@@ -855,12 +855,9 @@ GOOGLE_SHARING_BLOCKED = (
 
 
 def google_email_first_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("📱 On my phone instead?", callback_data="gcal:start")],
-            [_button("« Other calendars", "calendar")],
-        ]
-    )
+    # No phone button here: the email is needed either way, and the next screen offers the
+    # phone steps (and sends a phone there by itself).
+    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
 
 
 def google_share_screen(

@@ -265,6 +265,35 @@ FEED_REFRESH_TIP = (
     "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → Every 15 "
     "Minutes (the fastest an iPhone allows)"
 )
+# After the first sync, by the device that synced: a subscription made on an iPhone stays on
+# that iPhone, and one made on a Mac reaches the iPhone only if it was saved to iCloud.
+APPLE_OTHER_DEVICE = {
+    "iphone": (
+        "📱 It's on this iPhone. Use a Mac too? Add it there once: open this chat on your Mac "
+        "and tap <b>➕ Add my plans on another device</b>."
+    ),
+    "mac": (
+        "💻 It's on your Mac. Saved it to <b>iCloud</b>? It's on your iPhone too. Chose "
+        "<b>On My Mac</b>? Add it on your iPhone too: tap <b>➕ Add my plans on another "
+        "device</b> there."
+    ),
+}
+
+
+def apple_device(user_agent: str) -> str | None:
+    """ "iphone" or "mac": which Apple device fetched the AmIFree calendar."""
+    agent = user_agent.lower()
+    if "ios/" in agent or "iphone" in agent or "ipad" in agent:
+        return "iphone"
+    if "macos/" in agent or "mac os x" in agent or "calendaragent" in agent:
+        return "mac"
+    return None
+
+
+def another_device_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[_button("➕ Add my plans on another device", "apple1")]])
+
+
 APPLE_ALL_SET = (
     "✅ <b>All set</b>\n"
     "• Your plans appear in your AmIFree calendar\n"

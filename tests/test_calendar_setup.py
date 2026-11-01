@@ -5,6 +5,7 @@ from datetime import timedelta
 from urllib.parse import quote
 
 import httpx
+import pytest
 
 from app.bot import onboarding
 from app.config import Settings
@@ -187,7 +188,33 @@ async def test_feed_after_a_link_says_all_set(service_factory, reference):
     await service.message(1, 5, ICLOUD_CCA, reference)
     await service.callback(1, "setup:apple")
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
-    assert sent.messages[0][1].text == onboarding.APPLE_ALL_SET
+    [(_, done)] = sent.messages
+    # Synced from an iPhone: a reminder that a Mac needs it added once too.
+    assert done.text == onboarding.APPLE_ALL_SET + "\n\n" + onboarding.APPLE_OTHER_DEVICE["iphone"]
+    assert labels(done) == ["➕ Add my plans on another device"]
+
+
+@pytest.mark.parametrize(
+    "agent, device",
+    [
+        ("iOS/18.0 (22A) dataaccessd/1.0", "iphone"),
+        ("macOS/14.5 (23F79) CalendarAgent/988", "mac"),
+        ("Microsoft Office/16.0", None),
+    ],
+)
+async def test_first_sync_reminds_about_the_other_device(service_factory, reference, agent, device):
+    service, repo = service_factory(app_base_url=BASE)
+    service.send_private = sent = Sent()
+    await onboard(service, reference)
+    await service.callback(1, "setup:apple")
+    await service.calendar_feed(repo.users[1].calendar_feed_token, agent)
+    [(_, step)] = sent.messages
+    assert len(step.text) <= 1024
+    if device:
+        assert onboarding.APPLE_OTHER_DEVICE[device] in step.text and "Part 2 of 2" in step.text
+        assert "➕ Add my plans on another device" in labels(step)
+    else:
+        assert not any(note in step.text for note in onboarding.APPLE_OTHER_DEVICE.values())
 
 
 async def test_part_one_again_on_another_device(service_factory, reference):

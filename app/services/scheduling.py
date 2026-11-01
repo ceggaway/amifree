@@ -2041,21 +2041,27 @@ class SchedulingService:
         if not self.send_private:
             return
         # Part 1 and the manual steps already showed the refresh time, so it isn't repeated.
+        device = onboarding.apple_device(user_agent)
+        note = "\n\n" + onboarding.APPLE_OTHER_DEVICE[device] if device else ""
+        more = onboarding.another_device_keyboard() if device else None
         if user.google_connected:
             # Google already gives busy times: there's no part 2.
             reply = Reply(
                 "✅ <b>All set</b>: your AmIFree calendar is subscribed, so your plans now "
-                "appear in it.",
+                "appear in it." + note,
+                more,
                 parse_mode="HTML",
             )
         elif await self.repo.list_calendars(user.id):
-            reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
+            reply = Reply(onboarding.APPLE_ALL_SET + note, more, parse_mode="HTML")
         elif any(name in user_agent.lower() for name in OUTLOOK_AGENTS):
             # Subscribed from Outlook: its part 2 is publishing, not iCloud.
             text, photo, keyboard = onboarding.outlook_step(2, lead=onboarding.OUTLOOK_PART1_DONE)
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
         else:
-            text, photo, keyboard = onboarding.apple_step(lead=onboarding.APPLE_PART1_DONE)
+            text, photo, keyboard = onboarding.apple_step(
+                lead=onboarding.APPLE_PART1_DONE + note, another=True
+            )
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
         try:
             await self.send_private(user.telegram_user_id, reply)

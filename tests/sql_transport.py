@@ -122,6 +122,7 @@ COLUMNS = {
     "source_message_id",
     "calendar_feed_token",
     "calendar_feed_seen_at",
+    "calendar_feed_app",
     "personal_calendar_url",
     "personal_calendar_synced_at",
     "personal_calendar_error",

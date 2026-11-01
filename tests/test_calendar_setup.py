@@ -88,7 +88,8 @@ async def test_google_is_three_steps(service_factory, reference):
     # The Google button starts with the computer steps; the phone steps are a tap away.
     ask = (await service.callback(1, "setup:google"))[0]
     assert "What's your Google email?" in ask.text
-    step1 = (await service.callback(1, tap(ask, "📱 On my phone instead?")))[0]
+    share = (await service.message(1, 4, "me@gmail.com", reference))[0]
+    step1 = (await service.callback(1, tap(share, "📱 Phone steps")))[0]
     assert "1 of 5 · " in step1.text and "of 3" not in step1.text  # one counter, not two
     assert "Next ›" in labels(step1)
     last = (await service.callback(1, "gs:phone:5"))[0]
@@ -195,7 +196,10 @@ async def test_half_done_apple_setup_shows_in_calendar(service_factory, referenc
     await service.callback(1, "setup:apple")
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
     status = (await service.command(1, "calendar"))[0]
-    assert "✓ adding plans · ✗ not checking busy times" in status.text
+    assert (
+        "🍎 Apple Calendar\n❌ Doesn't check for clashes\n"
+        "✅ Adds your plans, through the AmIFree calendar\n🔄 Last synced"
+    ) in status.text
     part2 = (await service.callback(1, tap(status, "🍎 Finish Apple setup")))[0]
     assert "Part 2 of 2" in part2.text
     skipped = (await service.callback(1, tap(part2, "⏭ Skip this part")))[0]

@@ -358,7 +358,7 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     # With it, Google goes straight to sharing, computer first: it asks for the email.
     share = (await service.callback(1, "setup:google"))[0]
     assert "What's your Google email?" in share.text
-    assert "📱 On my phone instead?" in labels(share)
+    assert labels(share) == ["« Other calendars"]
     assert "googlelink" not in str(share.keyboard)
     link = (await service.callback(1, "setup:googlelink"))[0]
     assert "Secret address" in link.text or "link" in link.text.lower()
@@ -389,7 +389,6 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     assert app.text == "📅 Open Google Calendar app ↗" and app.url == "https://calendar.google.com"
     computer = (await service.callback(1, tap(first, "💻 On a computer instead?")))[0]
     assert "What's your Google email?" in computer.text and computer.edit
-    assert "📱 On my phone instead?" in labels(computer)
     for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone", "gs:phone:1:2"):
         assert "isn't valid" in (await service.callback(1, bad))[0].text
 
@@ -751,7 +750,7 @@ async def test_removing_the_google_calendar_disconnects_it(with_google, referenc
     await onboard(service, reference)
     await connect(service, 1, "me@gmail.com", reference)
     status = (await service.command(1, "calendar"))[0]
-    assert "Plans you say Going to are added here" in status.text
+    assert ("📅 Google Calendar\n✅ Checks for clashes\n✅ Adds your plans\n") in status.text
 
     gone, unshare = await service.callback(1, tap(status, "Remove Google Calendar"))
 

@@ -17,6 +17,8 @@ class User(BaseModel):
     dm_blocked: bool = False
     calendar_feed_token: str | None = None
     calendar_feed_seen_at: datetime | None = None
+    # "apple", "outlook" or "google": the app that fetches the AmIFree calendar (migration 017).
+    calendar_feed_app: str | None = None
     google_connected: bool = False
 
 

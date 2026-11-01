@@ -369,12 +369,10 @@ async def test_calendar_offers_nusmods_setup_and_updates_after_onboarding(
     if with_nusmods:
         await onboard(service, reference)
     status = (await service.command(1, "calendar"))[0]
-    assert "Share/Sync link" in status.text
     if with_nusmods:
-        assert "NUSMods: 2026-2027, semester 1" in status.text
-        assert "update your timetable" in status.text
+        assert "📚 NUSMods: ✅ linked (2026-2027, semester 1)" in status.text
     else:
-        assert "Add your classes" in status.text
+        assert "📚 NUSMods: not linked" in status.text
     assert "📤 Plans in my calendar app" not in labels(status)
     guide = (await service.callback(1, tap(status, "📚 Add or update NUSMods")))[0]
     assert guide.edit and guide.parse_mode == "HTML"
@@ -388,7 +386,7 @@ async def test_calendar_offers_nusmods_setup_and_updates_after_onboarding(
     assert "<b>Timetable connected</b>" in added.text
     assert not labels(added) and added.parse_mode == "HTML"
     status = (await service.command(1, "calendar"))[0]
-    assert "NUSMods: 2026-2027, semester 1" in status.text
+    assert "📚 NUSMods: ✅ linked (2026-2027, semester 1)" in status.text
     user = await repo.ensure_user(1)
     assert len(await repo.list_calendars(user.id)) == int(with_personal_calendar)
 

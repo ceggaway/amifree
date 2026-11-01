@@ -1165,7 +1165,9 @@ class SchedulingService:
             # Computer setup asked for the email first: open its settings, don't check yet.
             email = text.strip().lower()
             await self.repo.set_pending(user.id, {"stage": "gcal_shared", "email": email})
-            share, photo, keyboard = onboarding.google_share_screen(self.google.email, email)
+            share, photo, keyboard = onboarding.google_share_screen(
+                self.google.email, email, self.settings.app_base_url
+            )
             return [Reply(share, keyboard, parse_mode="HTML", photo=photo)]
         if self.google_sync.enabled and GOOGLE_EMAIL.fullmatch(text.strip()):
             if not self.calendar_limit.allow(user.id):

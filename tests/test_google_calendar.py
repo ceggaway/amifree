@@ -9,6 +9,8 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from app.config import Settings
+from app.main import create_app
 from app.models.timetable import BusyBlock  # noqa: F401  (documents what /free reads)
 from app.schemas.event import SG, Event, Status
 from app.services.google_calendar import (
@@ -311,8 +313,8 @@ class FakeGoogle:
 
 @pytest.fixture
 def with_google(service_factory):
-    def make(*items, access=Access.WRITE):
-        service, repo = service_factory(*items)
+    def make(*items, access=Access.WRITE, **settings):
+        service, repo = service_factory(*items, **settings)
         service.google = FakeGoogle(access)
         return service, repo, service.google
 
@@ -414,6 +416,33 @@ async def test_on_a_computer_the_email_comes_first_and_opens_its_settings(with_g
     # Different email starts over.
     again = (await service.callback(1, tap(share, "✏️ Different email")))[0]
     assert "What's your Google email?" in again.text
+    # Changed their mind about the computer: the phone steps are one tap away.
+    phone = (await service.callback(1, tap(share, "📱 Phone steps")))[0]
+    assert "1 of 5" in phone.text
+
+
+async def test_the_sharing_button_goes_through_our_page(with_google, reference):
+    # Phones hand Google's links to its app, which can't open settings, so the button opens
+    # our page, which sends computers on to Google. The email is after the #, never sent to us.
+    service, _, _ = with_google(app_base_url="https://amifree.example/")
+    await onboard(service, reference)
+    await service.callback(1, "gcal:computer")
+    share = (await service.message(1, 2, "me+cal@gmail.com", reference))[0]
+    [link] = [b for row in share.keyboard.inline_keyboard for b in row if b.url]
+    assert link.url == "https://amifree.example/google/share#me%2Bcal@gmail.com"
+
+
+async def test_google_share_page_route():
+    app = create_app(Settings(_env_file=None, bot_mode="disabled"))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client,
+    ):
+        page = await client.get("/google/share")
+    assert page.status_code == 200 and page.headers["content-type"].startswith("text/html")
+    # It builds Google's address itself, so it can't be used to send anyone elsewhere.
+    assert '"https://calendar.google.com/calendar/r/settings"' in page.text
+    assert "location.replace(url)" in page.text and "Phone steps" in page.text
 
 
 async def test_done_without_an_email_asks_for_it(with_google, reference):

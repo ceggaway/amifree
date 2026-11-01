@@ -18,6 +18,7 @@ from telegram import BotCommand, BotCommandScopeAllGroupChats, MenuButtonCommand
 from telegram.ext import Application
 
 from app.api.routes import build_router
+from app.bot import onboarding
 from app.bot.concurrency import KeyedLocks, PerUserProcessor, update_keys
 from app.bot.delivery import Delivery, webhook_delivery
 from app.bot.handlers import register_handlers
@@ -315,6 +316,15 @@ def create_app(
             raise HTTPException(404, "Not found")
         return Response(
             page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"}
+        )
+
+    @app.get("/google/share")
+    async def google_share():
+        # The same page for everyone: the email is after the #, read by the page itself.
+        return Response(
+            onboarding.google_share_page(),
+            media_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "no-store"},
         )
 
     @app.get("/ics/event/{event_id}.ics")

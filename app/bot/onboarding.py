@@ -5,6 +5,7 @@ Every screen edits the same message, so setup never floods the chat (ux-flows.md
 
 import base64
 import html
+import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -848,7 +849,7 @@ def google_email_first_keyboard() -> InlineKeyboardMarkup:
 
 
 def google_share_screen(
-    bot_email: str, email: str
+    bot_email: str, email: str, base_url: str = ""
 ) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
     """Computer step 2 of 3: one screen, with a button straight to that calendar's settings."""
     text = (
@@ -871,8 +872,13 @@ def google_share_screen(
         photo = None
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("📅 Open sharing settings ↗", url=google_share_link(email))],
+            [
+                InlineKeyboardButton(
+                    "📅 Open sharing settings ↗", url=google_share_link(email, base_url)
+                )
+            ],
             [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:shared")],
+            [InlineKeyboardButton("📱 Phone steps", callback_data="gcal:start")],
             [InlineKeyboardButton("✏️ Different email", callback_data="gcal:computer")],
             [_button("« Other calendars", "calendar")],
         ]
@@ -899,9 +905,62 @@ def google_calendar_settings(email: str) -> str:
     return f"{GOOGLE_SETTINGS}/calendar/{calendar}"
 
 
-def google_share_link(email: str) -> str:
-    """That calendar's settings, opened in the right account when the browser has several."""
+def google_share_link(email: str, base_url: str = "") -> str:
+    """That calendar's settings, opened in the right account when the browser has several.
+
+    With our own address, the button goes through google_share_page first: phones hand
+    Google's links to the Google Calendar app, which can't open settings. The email goes after
+    the #, which browsers never send, so it stays out of our server's logs."""
+    if base_url:
+        return f"{base_url.rstrip('/')}/google/share#{quote(email, safe='@')}"
     return f"{google_calendar_settings(email)}?authuser={quote(email, safe='@')}"
+
+
+def google_share_page() -> str:
+    """The page behind Open sharing settings. A computer goes straight on to Google; a phone
+    or tablet stays here and is pointed to the phone steps, since Google would only open its
+    app. The address is built here from the email, so the page can't send anyone elsewhere."""
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Google Calendar sharing</title>
+<style>
+body{{font:17px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:24px 16px;
+background:#fff;color:#111;max-width:480px;margin:auto}}
+#phone{{display:none}}
+a.anyway{{color:#0a7cff}}
+@media (prefers-color-scheme: dark){{body{{background:#111;color:#eee}}a.anyway{{color:#5aa9ff}}}}
+</style></head><body>
+<p id="wait">Opening Google Calendar…</p>
+<div id="phone">
+<h1>📱 You're on a phone</h1>
+<p>Google opens its sharing settings only on a computer. On a phone, this link opens the
+Google Calendar app instead, which can't go straight to them.</p>
+<p><b>Easiest:</b> close this page and tap <b>📱 Phone steps</b> under my message in Telegram.
+I'll show you where to tap in the app.</p>
+<p><b>Or</b> open Telegram on your computer (the app or web.telegram.org) and tap
+<b>Open sharing settings</b> there.</p>
+<p><a class="anyway" id="anyway" href="#">Open it here anyway</a></p>
+</div>
+<script>
+var email = decodeURIComponent(location.hash.slice(1));
+var url = {json.dumps(GOOGLE_SETTINGS)};
+if (/^[^@\\s]+@[^@\\s]+$/.test(email)) {{
+  url += "/calendar/" + btoa(email).replace(/=+$/, "") + "?authuser=" + encodeURIComponent(email);
+}}
+var ua = navigator.userAgent;
+var phone = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+  (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+if (phone) {{
+  document.getElementById("wait").style.display = "none";
+  document.getElementById("phone").style.display = "block";
+  document.getElementById("anyway").href = url;
+}} else {{
+  location.replace(url);
+}}
+</script>
+</body></html>"""
 
 
 def unlink_guide(

@@ -286,11 +286,13 @@ async def test_calendar_screen_lists_each_calendar_with_remove(with_calendar, re
     await service.message(1, 1, ICLOUD_CCA, reference)
     await service.message(1, 2, ICLOUD_EVENTS, reference)
     status = (await service.command(1, "calendar"))[-1]
-    assert "• CCA · refreshed" in status.text and "• Events · refreshed" in status.text
+    # One entry per calendar, with a blank line between them.
+    assert "📅 CCA\n✅ Checks for clashes\n❌ Doesn't add your plans\n🔄 Refreshed" in status.text
+    assert "\n\n📅 Events\n✅ Checks for clashes" in status.text
     assert "3 more allowed" in status.text
     removed = (await service.callback(1, tap(status, "Remove CCA")))[0]
     assert removed.edit and removed.text.startswith("Removed CCA")
-    assert "• Events" in removed.text and "• CCA" not in removed.text
+    assert "📅 Events\n" in removed.text and "📅 CCA\n" not in removed.text
     assert [c.label for c in await connected(repo)] == ["Events"]
     assert "already removed" in (await service.callback(1, tap(status, "Remove CCA")))[0].text
 
@@ -342,7 +344,10 @@ async def test_one_broken_calendar_does_not_affect_the_others(with_calendar, ref
     assert repo.calendar_blocks[by_label["CCA"].id] == []  # revoked: busy times cleared
     assert repo.calendar_blocks[by_label["Events"].id] == [FRIDAY_DINNER]
     status = (await service.command(1, "calendar"))[-1]
-    assert "• CCA: ⚠️ That calendar link doesn't work any more." in status.text
+    assert (
+        "📅 CCA\n✅ Checks for clashes\n❌ Doesn't add your plans\n⚠️ That calendar link doesn't work any more."
+        in status.text
+    )
     # Not retried every minute: the next try is an hour later.
     service.clock = lambda: reference + timedelta(hours=2, minutes=5)
     assert await service.refresh_calendars() == 0
@@ -402,7 +407,7 @@ async def test_calendar_shows_what_is_connected_then_asks_which_to_add(with_cale
     assert "Where do you usually add your events?" in first[0].text
     await service.message(1, 1, ICLOUD_CCA, reference)
     status = (await service.command(1, "calendar"))[0]
-    assert "• CCA · refreshed" in status.text and "Plans in your phone's calendar" in status.text
+    assert "📅 CCA\n✅ Checks for clashes" in status.text and "🔄 Refreshed" in status.text
     # Adding another asks which one; the phone subscription steps are behind their own button.
     pick = (await service.callback(1, tap(status, "➕ Add a calendar")))[0]
     assert "📅 Google" in str(pick.keyboard)

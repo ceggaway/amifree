@@ -196,7 +196,10 @@ async def test_half_done_apple_setup_shows_in_calendar(service_factory, referenc
     await service.callback(1, "setup:apple")
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
     status = (await service.command(1, "calendar"))[0]
-    assert "✓ adding plans · ✗ not checking busy times" in status.text
+    assert (
+        "📤 AmIFree calendar (in Apple or Outlook)\n❌ Doesn't check for clashes\n"
+        "✅ Adds your plans\n🔄 Last synced"
+    ) in status.text
     part2 = (await service.callback(1, tap(status, "🍎 Finish Apple setup")))[0]
     assert "Part 2 of 2" in part2.text
     skipped = (await service.callback(1, tap(part2, "⏭ Skip this part")))[0]

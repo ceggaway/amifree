@@ -193,6 +193,16 @@ BLOCK_TIME = re.compile(
 )
 
 
+def calendar_block(name: str, *, checks: bool, adds: bool, status: str) -> str:
+    """One calendar on /calendar: what it does for the user, then how it's doing."""
+    return (
+        f"{name}\n"
+        + ("✅ Checks for clashes\n" if checks else "❌ Doesn't check for clashes\n")
+        + ("✅ Adds your plans\n" if adds else "❌ Doesn't add your plans\n")
+        + status
+    )
+
+
 def synced(user: User) -> str:
     """Where plans go by themselves, as cards name it ("your Google Calendar"); "" for nowhere."""
     places = []
@@ -2065,72 +2075,71 @@ class SchedulingService:
             or "amifree-development-only"
         )
 
-    def feed_line(self, user: User) -> str:
-        if user.calendar_feed_token and user.calendar_feed_seen_at:
-            seen = user.calendar_feed_seen_at.astimezone(SG)
-            return f"📤 Plans in your phone's calendar: ✅ on, last synced {seen:%-d %b, %-I:%M%p}"
-        return "📤 Plans in your phone's calendar: not set up"
+    def feed_block(self, user: User) -> str:
+        """The AmIFree calendar as one entry of /calendar, once a calendar app uses it."""
+        if not (user.calendar_feed_token and user.calendar_feed_seen_at):
+            return ""
+        seen = user.calendar_feed_seen_at
+        return calendar_block(
+            "📤 AmIFree calendar (in Apple or Outlook)",
+            checks=False,
+            adds=True,
+            status=f"🔄 Last synced {clock(seen)}, {seen.astimezone(SG):%-d %b}",
+        )
 
     async def personal_calendar_status(self, user: User, intro: str = "") -> Reply:
+        """/calendar: one entry per calendar, each saying whether it checks for clashes and
+        whether it gets your plans, then NUSMods."""
         calendars = await self.repo.list_calendars(user.id)
         lead = intro + "\n\n" if intro else ""
         nusmods = (
-            f"📚 NUSMods: {user.academic_year}, semester {user.semester}. "
-            "Paste a new Share/Sync link to update your timetable."
+            f"📚 NUSMods: ✅ linked ({user.academic_year}, semester {user.semester})"
             if user.onboarding_status == "READY"
-            else "📚 Add your classes with a NUSMods Share/Sync link. Tap below for the steps."
+            else "📚 NUSMods: not linked"
         )
+        feed = self.feed_block(user)
         if not calendars:
             # Apple part 1 done, part 2 not: one tap back to where they stopped.
-            half_done = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+            half_done = bool(feed)
             keyboard = onboarding.first_calendar_keyboard(finish_apple=half_done, feed=half_done)
-            if half_done:
-                status = "🍎 Apple: ✓ adding plans · ✗ not checking busy times yet"
-            else:
-                status = self.feed_line(user)
             return Reply(
-                lead + "📅 Your calendars\n\n"
-                "No calendar connected yet. Connect the one you use and its busy times count "
-                "when I check your plans and /free. I keep only start and end times, never "
-                "titles, places or notes.\n\n"
+                lead
+                + "📅 Your calendars\n\n"
+                + (feed + "\n\n" if feed else "No calendar connected yet. ")
+                + "Connect the one you use and its busy times count when I check your plans "
+                "and /free. I keep only start and end times, never titles, places or notes.\n\n"
                 f"{nusmods}\n\n"
-                f"{status}\n\n"
                 "Where do you usually add your events?",
                 keyboard,
             )
-        lines = []
         google = (
             await self.repo.get_google_connection(user.id)
             if self.google_sync.enabled and user.google_connected
             else None
         )
+        blocks = []
         for c in calendars:
             if c.error:
-                lines.append(f"• {c.label}: ⚠️ {c.error}")
+                status = f"⚠️ {c.error}"
             elif c.synced_at:
-                lines.append(
-                    f"• {c.label} · refreshed {clock(c.synced_at)}, {c.synced_at.astimezone(SG):%-d %b}"
-                )
+                status = f"🔄 Refreshed {clock(c.synced_at)}, {c.synced_at.astimezone(SG):%-d %b}"
             else:
-                lines.append(f"• {c.label} · connecting")
-            if google and c.id == google.calendar_id:
-                lines[-1] += "\n   ✍️ Plans you say Going to are added here"
+                status = "🔄 Connecting…"
+            adds = bool(google and c.id == google.calendar_id)
+            blocks.append(calendar_block(f"📅 {c.label}", checks=True, adds=adds, status=status))
+        if feed:
+            blocks.append(feed)
         room = MAX_CALENDARS - len(calendars)
         more = (
-            f"Paste another calendar's link to add it ({room} more allowed)."
+            f"➕ Paste another calendar's link to add it ({room} more allowed)."
             if room > 0
             else f"That's the most I check ({MAX_CALENDARS}). Remove one to add another."
         )
         return Reply(
-            lead
-            + "📅 Your calendars\n\nI check these for busy times:\n"
-            + "\n".join(lines)
-            + f"\n\n{nusmods}"
-            + f"\n\n{self.feed_line(user)}\n\n{more} I refresh them every hour and keep only "
-            "when you're busy, never what your events are.",
-            personal_calendars_keyboard(
-                calendars, feed=bool(user.calendar_feed_token and user.calendar_feed_seen_at)
-            ),
+            lead + "📅 Your calendars\n\n" + "\n\n".join(blocks) + f"\n\n{nusmods}\n\n{more}\n"
+            "🔒 I refresh them every hour and keep only when you're busy, never what your "
+            "events are.",
+            personal_calendars_keyboard(calendars, feed=bool(feed)),
         )
 
     async def connect_calendar(self, user: User, link: str) -> list[Reply]:

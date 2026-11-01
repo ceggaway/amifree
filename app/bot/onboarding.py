@@ -203,24 +203,37 @@ OUTLOOK_PART1_DONE = (
     "calendar there."
 )
 
-APPLE_PART1 = (
-    "🍎 <b>Apple Calendar · Part 1 of 2</b>\n"
-    "<b>Add your plans to your calendar automatically</b>\n\n"
-    "Every event you save with me will show up in your calendar by itself, and update if it "
-    "changes. No more adding them by hand.\n\n"
-    "<b>1.</b> Tap <b>Add to Calendar</b> below, then tap <b>Subscribe</b>. A calendar called "
-    "<b>AmIFree</b> appears.\n\n"
-    "<b>2.</b> Make changes show up faster:\n"
-    "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → "
-    "<b>Every 15 Minutes</b> (the fastest an iPhone allows)\n"
-    "• Mac: in Calendar, right-click AmIFree → Get Info → Auto-refresh → "
-    "<b>Every 5 minutes</b>\n\n"
-    "I'll message you here once your calendar has subscribed, then we'll do part 2."
-)
-APPLE_ALREADY_GOOGLE = (
-    "\n\nℹ️ Your plans already go to your Google Calendar. If that's the calendar on your "
-    "iPhone, you don't need this part: they'd show up twice."
-)
+
+def apple_part1(google: bool = False) -> tuple[str, bytes | None]:
+    """Apple part 1: subscribe, then set the refresh time (the picture shows it on a Mac).
+    With Google connected, Google already gives busy times, so there's no part 2."""
+    text = (
+        ("🍎 <b>Apple Calendar</b>\n" if google else "🍎 <b>Apple Calendar · Part 1 of 2</b>\n")
+        + "<b>Your plans in your calendar, automatically</b>\n\n"
+        "<b>1.</b> Tap <b>Add to Calendar</b> below, then <b>Subscribe</b>.\n\n"
+        "<b>2.</b> Make changes show up faster:\n"
+        "• Mac: right-click <b>AmIFree</b> → Get Info → Auto-refresh → <b>Every 5 minutes</b>\n"
+        "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → "
+        "<b>Every 15 Minutes</b>\n\n"
+    )
+    if google:
+        text += (
+            "I'll message you once it's subscribed. That's all: Google already tells me when "
+            "you're busy.\n\n"
+            "ℹ️ If Google is the calendar on your iPhone, skip this. Your plans are already "
+            "there, and they'd show up twice."
+        )
+    else:
+        text += "I'll message you once it's subscribed, then we'll do part 2."
+    try:
+        photo = (
+            Path(__file__).resolve().parent.parent / "assets" / "ios" / "mac_refresh.png"
+        ).read_bytes()
+    except OSError:
+        photo = None
+    return text, photo
+
+
 APPLE_NO_FEED = (
     "🍎 <b>Apple Calendar</b>\n\n"
     "Adding plans to your calendar by themselves isn't available yet, so tap 🍎 on a plan to "
@@ -690,15 +703,15 @@ def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
     ]
 
 
-def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
-            [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
-            [_button("⏭ Skip to part 2", "apple2")],
-            [_button("« Other calendars", "calendar")],
-        ]
-    )
+def apple_part1_keyboard(add_url: str, part2: bool = True) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
+        [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
+    ]
+    if part2:
+        rows.append([_button("⏭ Skip to part 2", "apple2")])
+    rows.append([_button("« Other calendars", "calendar")])
+    return InlineKeyboardMarkup(rows)
 
 
 def first_calendar_keyboard(finish_apple: bool = False, feed: bool = False) -> InlineKeyboardMarkup:

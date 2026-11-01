@@ -127,7 +127,7 @@ async def test_apple_part_one_is_one_tap_to_subscribe(service_factory, reference
     service, repo = service_factory(app_base_url=BASE)
     await onboard(service, reference)
     part1 = (await service.callback(1, "setup:apple"))[0]
-    assert "Part 1 of 2" in part1.text and part1.parse_mode == "HTML"
+    assert "Part 1 of 2" in part1.text and part1.parse_mode == "HTML" and part1.photo
     # The refresh setting is part of part 1, before moving on.
     assert "Fetch New Data" in part1.text and "Every 5 minutes" in part1.text
     token = repo.users[1].calendar_feed_token
@@ -158,6 +158,21 @@ async def test_first_feed_fetch_moves_on_to_part_two(service_factory, reference)
     # Coming back to Apple setup now starts at part 2.
     again = (await service.callback(1, "setup:apple"))[0]
     assert "Part 1 done" in again.text and "Part 2 of 2" in again.text
+
+
+async def test_with_google_apple_is_one_part(service_factory, reference):
+    # Google already gives busy times, so nothing promises a part 2 that never comes.
+    service, repo = service_factory(app_base_url=BASE)
+    service.send_private = sent = Sent()
+    await onboard(service, reference)
+    repo.users[1].google_connected = True
+    part1 = (await service.callback(1, "setup:apple"))[0]
+    assert "Part 1" not in part1.text and "part 2" not in part1.text
+    assert "⏭ Skip to part 2" not in labels(part1) and len(part1.text) <= 1024
+    await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
+    [(_, done)] = sent.messages
+    # Part 1 already showed the refresh setting: it isn't repeated.
+    assert "All set" in done.text and "Auto-refresh" not in done.text
 
 
 async def test_feed_after_a_link_says_all_set(service_factory, reference):

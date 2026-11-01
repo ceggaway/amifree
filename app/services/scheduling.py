@@ -412,7 +412,7 @@ class SchedulingService:
                 return await self.groups.manage_panel(user, args)
             if args == onboarding.GOOGLE_PHONE_START and self.google_sync.enabled:
                 # Tapped Open sharing settings on a phone: the page sent them back here.
-                [step] = self.google_sync.steps()
+                [step] = self.google_sync.steps(computer=False)
                 step.text = "📱 You're on your phone, so here are the phone steps.\n\n" + step.text
                 step.edit = False
                 return [step]

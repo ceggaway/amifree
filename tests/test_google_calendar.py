@@ -454,6 +454,9 @@ async def test_back_from_the_share_page_on_a_phone_shows_the_phone_steps(with_go
     [step] = await service.command(1, "start", "gphone")
     assert step.text.startswith("📱 You're on your phone") and "1 of 5" in step.text
     assert step.photo and not step.edit and len(step.text) <= 1024
+    # Known to be on a phone: no "On a computer instead?".
+    assert "💻 On a computer instead?" not in labels(step)
+    assert "💻 On a computer instead?" in labels((await service.callback(1, "gcal:start"))[0])
 
 
 async def test_done_without_an_email_asks_for_it(with_google, reference):

@@ -410,6 +410,12 @@ class SchedulingService:
                 return await self.groups.begin_change(user, args)
             if args.startswith("manage_"):
                 return await self.groups.manage_panel(user, args)
+            if args == onboarding.GOOGLE_PHONE_START and self.google_sync.enabled:
+                # Tapped Open sharing settings on a phone: the page sent them back here.
+                [step] = self.google_sync.steps()
+                step.text = "📱 You're on your phone, so here are the phone steps.\n\n" + step.text
+                step.edit = False
+                return [step]
             connected = []
             if user.onboarding_status == "READY":
                 connected.append(f"NUSMods ({user.academic_year}, semester {user.semester})")

@@ -433,7 +433,7 @@ async def test_the_sharing_button_goes_through_our_page(with_google, reference):
 
 
 async def test_google_share_page_route():
-    app = create_app(Settings(_env_file=None, bot_mode="disabled"))
+    app = create_app(Settings(_env_file=None, bot_mode="disabled", bot_username="@amifree_bot"))
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client,
@@ -443,6 +443,16 @@ async def test_google_share_page_route():
     # It builds Google's address itself, so it can't be used to send anyone elsewhere.
     assert '"https://calendar.google.com/calendar/r/settings"' in page.text
     assert "location.replace(url)" in page.text and "Phone steps" in page.text
+    # A phone goes back to the chat, which then shows the phone steps.
+    assert '"https://t.me/amifree_bot?start=gphone"' in page.text
+
+
+async def test_back_from_the_share_page_on_a_phone_shows_the_phone_steps(with_google, reference):
+    service, _, _ = with_google()
+    await onboard(service, reference)
+    [step] = await service.command(1, "start", "gphone")
+    assert step.text.startswith("📱 You're on your phone") and "1 of 5" in step.text
+    assert step.photo and not step.edit and len(step.text) <= 1024
 
 
 async def test_done_without_an_email_asks_for_it(with_google, reference):

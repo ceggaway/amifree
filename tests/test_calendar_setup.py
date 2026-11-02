@@ -236,6 +236,25 @@ async def test_part_one_again_on_another_device(service_factory, reference):
     assert "Part 2 of 2" in back.text
 
 
+async def test_part_one_again_on_another_device(service_factory, reference):
+    # Subscribed on the iPhone: that stays on the iPhone, so the Mac needs part 1 too.
+    service, repo = service_factory(app_base_url=BASE)
+    await onboard(service, reference)
+    await service.callback(1, "setup:apple")
+    token = repo.users[1].calendar_feed_token
+    await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
+    part2 = (await service.callback(1, "setup:apple"))[0]
+    assert "Part 2 of 2" in part2.text
+    again = (await service.callback(1, tap(part2, "➕ Add my plans on another device")))[0]
+    assert "Another device" in again.text and "Part 1" not in again.text
+    assert again.photo and len(again.text) <= 1024
+    add = again.keyboard.inline_keyboard[0][0]
+    assert add.url == f"{BASE}/cal/{token}/add"  # the same calendar, not a new link
+    assert "⏭ Skip to part 2" not in labels(again)
+    back = (await service.callback(1, tap(again, "« Back")))[0]
+    assert "Part 2 of 2" in back.text
+
+
 async def test_half_done_apple_setup_shows_in_calendar(service_factory, reference):
     service, repo = service_factory(app_base_url=BASE)
     await onboard(service, reference)

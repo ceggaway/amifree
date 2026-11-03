@@ -1,12 +1,13 @@
 """Personal deadlines: saved from a forward or /deadline, listed, never busy, reminded twice."""
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
 from app.schemas.event import SG, DeadlineDraft
 from app.services.date_resolution import Clarification
-from app.services.deadlines import validate_deadline
+from app.services.deadlines import reminder_promise, validate_deadline
 from app.services.jobs import Notifier
 from tests.conftest import extraction, tap
 
@@ -247,7 +248,7 @@ async def test_nightly_summary_mentions_tomorrows_deadlines(service_factory, ref
     hour = service.settings.nightly_hour
     sent = await reminders_at(service, repo, at(8, hour) + timedelta(minutes=5))
     nightly = [r for r in sent if r.text.startswith("Tomorrow")]
-    assert "📌 Due: CS3244 report (11:59pm)" in nightly[0].text
+    assert "📌 Due tomorrow\n• CS3244 report · 11:59pm" in nightly[0].text
 
 
 async def test_list_shows_overdue_first_and_days_left(service_factory, reference):
@@ -354,3 +355,28 @@ async def test_deadline_cards_and_reminders_point_to_current_commands(service_fa
     for reply in (enabled, disabled, reminder):
         assert "/settings" in reply.text and "/deadline lists them all" in reply.text
         assert "/reminders" not in reply.text and "/deadlines" not in reply.text
+
+
+# ---------- what the card promises ----------
+
+
+@pytest.mark.parametrize(
+    "now, due_at, promise",
+    [
+        # Due Fri 11:59pm, added Mon: both reminders are still to come.
+        ((10, 12, 15), (10, 16, 23, 59), "the day before and on the morning it's due, at 9am"),
+        # "Due tmr" said at 3pm: today's 9am has passed, only tomorrow morning is left.
+        ((10, 12, 15), (10, 13, 23, 59), "tomorrow at 9am"),
+        # Said at 8am for tonight: only this morning's reminder is left.
+        ((10, 12, 8), (10, 12, 23, 59), "today at 9am"),
+        # Due 8am Fri: no morning reminder, only Thursday's.
+        ((10, 12, 15), (10, 16, 8, 0), "on Thu 15 Oct at 9am"),
+        # Due tonight, said after 9am: nothing left to send.
+        ((10, 12, 15), (10, 12, 23, 59), "no reminder"),
+    ],
+)
+def test_the_card_only_promises_reminders_that_will_be_sent(now, due_at, promise):
+    month, day, hour = now
+    deadline = SimpleNamespace(due_at=datetime(2026, *due_at, tzinfo=SG))
+    text = reminder_promise(deadline, datetime(2026, month, day, hour, tzinfo=SG))
+    assert promise in text

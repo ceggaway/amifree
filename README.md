@@ -222,7 +222,7 @@ Night-before summaries, change alerts and nudges are rows in `notification_logs`
 curl -fsS -X POST -H "X-Jobs-Secret: $JOBS_SECRET" "$APP_BASE_URL/internal/jobs/run"
 ```
 
-Summaries are sent from `NIGHTLY_HOUR` (default 20, Singapore time) until midnight. A message is marked sent only after Telegram accepts it; failures retry with backoff up to five times.
+Summaries are sent from `NIGHTLY_HOUR` (default 20, Singapore time) until midnight. A summary goes to anyone with a plan (Going or still undecided) or a deadline tomorrow. It lists tomorrow's plans, deadlines due tomorrow, and deadlines in the following week ("Coming up"); undecided plans get Going / Not going buttons. On Sunday nights it also lists deadlines due later in the next 30 days ("Later this month"), and goes to anyone with such a deadline even if Monday is empty. Each list shows at most five, then points to /deadline. A message is marked sent only after Telegram accepts it; failures retry with backoff up to five times.
 
 ## Verification
 

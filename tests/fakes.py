@@ -857,6 +857,9 @@ class MemoryRepository:
             key=lambda d: d.due_at,
         )
 
+    async def deadline_owners(self, start, end):
+        return {d.user_id for d in await self.deadlines_between(start, end)}
+
     async def finish_deadline(self, user_id, deadline_id):
         d = self.deadlines.get(deadline_id)
         if not d or d.user_id != user_id:

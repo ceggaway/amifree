@@ -863,6 +863,14 @@ class MemoryRepository:
     async def deadline_owners(self, start, end):
         return {d.user_id for d in await self.deadlines_between(start, end)}
 
+    async def update_deadline(self, user_id, deadline_id, **fields):
+        d = self.deadlines.get(deadline_id)
+        if not d or d.user_id != user_id:
+            return None
+        for key, value in fields.items():
+            setattr(d, key, value)
+        return d.model_copy(deep=True)
+
     async def finish_deadline(self, user_id, deadline_id):
         d = self.deadlines.get(deadline_id)
         if not d or d.user_id != user_id:

@@ -428,6 +428,20 @@ class SupabaseRepository:
         )
         return {row["user_id"] for row in rows}
 
+    async def update_deadline(self, user_id: str, deadline_id: str, **fields) -> Deadline | None:
+        """Change a deadline's title, due_at or notes. None if it's gone."""
+        values = DeadlineDraft.model_validate(
+            {"title": "x", "due_at": datetime.now(SG)} | fields
+        ).model_dump(mode="json", include=set(fields))
+        rows = (
+            await self.client.table("deadlines")
+            .update(values)
+            .eq("user_id", user_id)
+            .eq("id", deadline_id)
+            .execute()
+        ).data
+        return Deadline.model_validate(rows[0]) if rows else None
+
     async def finish_deadline(self, user_id: str, deadline_id: str) -> bool:
         result = (
             await self.client.table("deadlines")

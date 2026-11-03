@@ -93,7 +93,7 @@ In disabled mode `/healthz` returns 200 and `/readyz` returns 503. This does not
 
 Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `/deadline`, `/settings`, `/free`, `/calendar`, `/cancel`, `/deletemydata`. Deletion requires a confirmation.
 
-Send `/deadline <text>` to save a deadline, or `/deadline` alone for one numbered list, grouped into **⚠️ Overdue** and **Coming up** with due times and relative dates. Tap a number to open its card with **Done** and **Remove**. Lists have ten items per page; Previous/Next updates the same message. Manage deadline reminders in `/settings`.
+Send `/deadline <text>` to save a deadline, or `/deadline` alone for one numbered list, grouped into **⚠️ Overdue** and **Coming up** with due times and relative dates. Tap a number to open its card with **Done**, **Edit** and **Remove**. **Edit** asks what to change (**Name**, **Due date & time** or **Notes**), then takes the new value as typed or spoken. A new due time is read with plain rules, not the AI: "sat 5pm", "tmr", "20 oct 2359", "6pm". Whatever isn't mentioned stays the same (a day keeps the time, a time keeps the day), and a bare "5" asks AM or PM. Reminders and synced calendars follow the new time. Lists have ten items per page; Previous/Next updates the same message. Manage deadline reminders in `/settings`.
 
 ### Groups
 

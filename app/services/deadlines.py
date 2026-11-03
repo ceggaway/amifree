@@ -80,6 +80,44 @@ def validate_deadline(extraction: Extraction, source: str, reference: datetime) 
     return DeadlineDraft(title=title, due_at=due, notes=extraction.notes)
 
 
+NO_NOTES = {"none", "no", "-", "clear", "remove", "delete"}
+
+
+def changed_due(text: str, current: datetime, now: datetime) -> datetime:
+    """A new due time typed while editing: "sat 5pm", "tmr", "20 oct", "2359".
+
+    Read with plain rules, never the AI. Whatever isn't mentioned stays: a day keeps the time,
+    a time keeps the day. Raises Clarification for anything unclear or already past.
+    """
+    current = current.astimezone(SG)
+    raw = " ".join(text.split())
+    token = next((m for m in TIME_TOKEN.finditer(raw) if WRITTEN_TIME.search(m.group())), None)
+    due_time = current.timetz().replace(tzinfo=None)
+    rest = raw
+    if re.search(r"\bmidnight\b", raw, re.IGNORECASE):
+        due_time = END_OF_DAY
+        rest = re.sub(r"\bmidnight\b", " ", rest, flags=re.IGNORECASE)
+    elif token:
+        due_time = resolve_time(token.group().strip())
+        rest = raw[: token.start()] + " " + raw[token.end() :]
+    rest = re.sub(r"\b(?:due|by|at|on|before)\b|[,@]", " ", rest, flags=re.IGNORECASE)
+    rest = " ".join(rest.split())
+    if not rest and not token and "midnight" not in raw.lower():
+        raise Clarification("Send the new due date, time, or both, like: sat 5pm, or tmr.")
+    try:
+        day = resolve_date(rest, now) if rest else current.date()
+    except Clarification as exc:
+        if not token and re.search(r"(?<![\d/.:-])\d{1,2}(?![\d/.:-])", rest):
+            raise Clarification("Is that AM or PM? Send, for example: sat 5pm.") from None
+        if "event date" in str(exc):
+            raise Clarification("I couldn't read that day. " + ASK_DATE) from None
+        raise
+    due = datetime.combine(day, due_time, SG)
+    if due <= now:
+        raise Clarification(f"{due:%a %-d %b} {clock(due)} has already passed. " + ASK_DATE)
+    return due
+
+
 def when(due: datetime, now: datetime) -> str:
     """'Fri 23 Oct, 11:59pm (in 8 days)'."""
     due, today = due.astimezone(SG), now.astimezone(SG).date()

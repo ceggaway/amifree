@@ -70,7 +70,7 @@ async def test_the_deadline_example_follows_and_saves_nothing(service_factory, r
     assert second.edit and second.parse_mode == "HTML"
     assert onboarding.DEADLINE_DEMO_MESSAGE in second.text
     assert "Due Fri" in second.text and "11:59pm" in second.text
-    assert "9am the day before" in second.text and "(Google or Apple)" in second.text
+    assert "evening summary the night before" in second.text and "(Google or Apple)" in second.text
     assert labels(second) == ["📅 Connect calendar", "📩 Try my own message", "« Back"]
     assert (await service.callback(1, tap(second, "« Back")))[0].text == demo.text
     assert service.extractor.calls == [] and not repo.deadlines
@@ -88,7 +88,7 @@ async def test_sending_the_deadline_example_saves_that_deadline(service_factory,
     service, repo = service_factory(found)
     card = (await service.message(1, 1, onboarding.DEADLINE_DEMO_MESSAGE, reference))[0]
     assert card.text.startswith("📌 CS3244 report\nDue Fri")
-    assert "the day before and on the morning it's due" in card.text  # what the example says
+    assert "at 9am, and again at 8:59pm, 3 hours before" in card.text  # what the example says
     assert len(repo.deadlines) == 1
 
 
@@ -271,7 +271,7 @@ async def test_skip_button_and_existing_menu_callbacks_work(service_factory):
     skipped = (await service.callback(1, tap(demo, "📩 Try my own message")))[0]
     assert skipped.text == onboarding.SKIPPED and skipped.edit
     assert (await service.callback(1, "menu:plans"))[0].text.startswith("Nothing coming up")
-    assert "Reminders: on" in (await service.callback(1, "menu:settings"))[0].text
+    assert "Evening summary: on" in (await service.callback(1, "menu:settings"))[0].text
 
 
 async def test_nusmods_guide_returns_to_classes_question(service_factory):

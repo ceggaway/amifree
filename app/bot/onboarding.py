@@ -65,7 +65,8 @@ DEMO_OUTRO = (
 # The second example, a deadline. Sent as is, it saves the same deadline (test_onboarding).
 DEADLINE_DEMO_MESSAGE = "CS3244 report due Fri 11:59pm"
 DEADLINE_DEMO_OUTRO = (
-    "⏰ I’ll remind you at 9am the day before, and on the morning it’s due.\n\n"
+    "⏰ It’s in your evening summary the night before. On the day, I’ll remind you at 9am "
+    "and again 3 hours before it’s due.\n\n"
     "📅 With your calendar connected (Google or Apple), it shows up there too, as "
     "“Due: CS3244 report”.\n\n"
     "<i>This is an example, and nothing was saved.</i>"

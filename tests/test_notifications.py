@@ -263,7 +263,8 @@ async def test_reminder_opt_out_and_cancelled_plans(service_factory, reference):
     assert "Reminders are on" in (await service.command(1, "reminders"))[0].text
     assert "are off" in (await service.command(1, "reminders", "off"))[0].text
     at(service, 18)
-    assert (await service.notifier.run())["skipped"] == 1 and outbox.sent == []
+    # Turned off: nothing is even queued.
+    assert (await service.notifier.run())["queued"] == 0 and outbox.sent == []
     # A second user's only plan is declined after the summary was queued.
     service.extractor.items.append(
         extraction(title="Run", date_text="Monday", start_time_text="07:00", end_time_text="08:00")

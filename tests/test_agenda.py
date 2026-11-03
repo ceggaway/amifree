@@ -85,12 +85,11 @@ async def test_start_menu_buttons_run_the_matching_command(service_factory, refe
         "Nothing coming up"
     )
     panel = (await service.callback(1, tap(menu, "⚙️ Settings")))[0]
-    assert "Reminders: on" in panel.text
-    flipped = (await service.callback(1, tap(panel, "🔔 Turn off reminders")))[0]
-    assert "Reminders: off" in flipped.text and flipped.edit
-    assert (
-        "Reminders: on" in (await service.callback(1, tap(flipped, "🔔 Turn on reminders")))[0].text
-    )
+    assert "Evening summary: on" in panel.text
+    flipped = (await service.callback(1, tap(panel, "🌙 Turn off evening summary")))[0]
+    assert "Evening summary: off" in flipped.text and flipped.edit
+    back = (await service.callback(1, tap(flipped, "🌙 Turn on evening summary")))[0]
+    assert "Evening summary: on, at 8pm" in back.text
     assert "No upcoming deadlines" in (await service.callback(1, tap(menu, "📌 Deadlines")))[0].text
     assert await service.callback(1, tap(menu, "🕒 Am I free?"))
 

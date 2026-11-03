@@ -857,6 +857,9 @@ class MemoryRepository:
             key=lambda d: d.due_at,
         )
 
+    async def users_by_ids(self, user_ids):
+        return [u.model_copy(deep=True) for u in self.users.values() if u.id in set(user_ids)]
+
     async def deadline_owners(self, start, end):
         return {d.user_id for d in await self.deadlines_between(start, end)}
 

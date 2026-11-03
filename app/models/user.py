@@ -13,7 +13,13 @@ class User(BaseModel):
     coverage_start: datetime | None = None
     coverage_end: datetime | None = None
     pending: dict | None = None
+    # Group check-ins ("Still coming?") and nudges to answer group plans and polls.
     reminders_enabled: bool = True
+    # The evening summary, and its Singapore hour (None: NIGHTLY_HOUR). Migration 018.
+    summary_enabled: bool = True
+    summary_hour: int | None = None
+    # The morning "Today" list of deadlines and the 3-hours-before alert. Migration 018.
+    deadline_alerts: bool = True
     dm_blocked: bool = False
     calendar_feed_token: str | None = None
     calendar_feed_seen_at: datetime | None = None

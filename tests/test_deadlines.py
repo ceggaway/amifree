@@ -357,12 +357,14 @@ async def test_deadline_cards_and_reminders_point_to_current_commands(service_fa
     service, repo = service_factory(due())
     (enabled,) = await service.command(1, "deadline", REPORT)
     (panel,) = await service.command(1, "settings")
-    await service.callback(1, tap(panel, "📌 Turn off deadline reminders"))
+    (panel,) = await service.callback(1, tap(panel, "☀️ Turn off morning list"))
+    await service.callback(1, tap(panel, "⏰ Turn off deadline alerts"))
     (listed,) = await service.command(1, "deadline")
     (disabled,) = await service.callback(1, tap(listed, "1"))
     assert "Reminders are off" in disabled.text
     (panel,) = await service.command(1, "settings")
-    await service.callback(1, tap(panel, "📌 Turn on deadline reminders"))
+    (panel,) = await service.callback(1, tap(panel, "☀️ Turn on morning list"))
+    await service.callback(1, tap(panel, "⏰ Turn on deadline alerts"))
     for deadline in repo.deadlines.values():
         deadline.created_at = reference
     (reminder,) = await reminders_at(service, repo, at(9, 9))

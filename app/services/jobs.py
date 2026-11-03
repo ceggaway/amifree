@@ -24,14 +24,16 @@ from app.bot.messages import Reply, details, event_card, time_range, verdict_lin
 from app.schemas.event import SG, Poll, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
-from app.services.deadlines import enqueue_deadline_reminders, reminder_text, today_text
+from app.services.deadlines import enqueue_deadline_reminders, reminder_text
 from app.services.quick_reminders import enqueue_reminders, ringing_text
 from app.services.reminders import (
     COMING_UP_DAYS,
     MONTH_DAYS,
+    enqueue_morning,
     enqueue_nightly,
     is_weekly,
     summary,
+    today_text,
 )
 from app.services.scheduling import synced
 
@@ -89,7 +91,9 @@ class Notifier:
         # Each kind follows its own /settings switch.
         if row["kind"] == "NIGHTLY" and not user.summary_enabled:
             return None
-        if row["kind"] in ("TODAY", "DEADLINE") and not user.deadline_alerts:
+        if row["kind"] == "TODAY" and not user.morning_enabled:
+            return None
+        if row["kind"] == "DEADLINE" and not user.deadline_alerts:
             return None
         if row["kind"] not in ("NIGHTLY", "TODAY", "DEADLINE") and not user.reminders_enabled:
             return None
@@ -98,7 +102,8 @@ class Notifier:
             end = datetime.combine(now.astimezone(SG).date() + timedelta(days=1), time.min, SG)
             due = await self.repo.deadlines_between(now, end, user.id)
             plans = await self.repo.events_between(now, end, [Status.GOING], user.id)
-            text = today_text(due, sorted(plans, key=lambda e: e.start_at), now)
+            plans = sorted((e for e in plans if e.start_at >= now), key=lambda e: e.start_at)
+            text = today_text(due, plans, now)
             return Reply(text, today_keyboard(due)) if text else None
         if row["kind"] == "NIGHTLY":
             start = datetime.combine(date.fromisoformat(payload["date"]), time.min, SG)
@@ -303,6 +308,7 @@ class Notifier:
         extra = await self.group_tick()
         queued += extra.pop("confirmations", 0)
         queued += await enqueue_deadline_reminders(self.repo, self.scheduling.clock())
+        queued += await enqueue_morning(self.repo, self.scheduling.clock())
         queued += await enqueue_reminders(self.repo, self.scheduling.clock())
         try:
             calendars = await self.scheduling.refresh_calendars()

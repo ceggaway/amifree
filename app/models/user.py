@@ -18,7 +18,9 @@ class User(BaseModel):
     # The evening summary, and its Singapore hour (None: NIGHTLY_HOUR). Migration 018.
     summary_enabled: bool = True
     summary_hour: int | None = None
-    # The morning "Today" list of deadlines and the 3-hours-before alert. Migration 018.
+    # The 9am Today list: the day's plans and what's due. Migration 019.
+    morning_enabled: bool = True
+    # The alert 3 hours before a deadline. Migration 018.
     deadline_alerts: bool = True
     dm_blocked: bool = False
     calendar_feed_token: str | None = None

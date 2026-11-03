@@ -133,6 +133,7 @@ from app.services.voice_reader import VoiceError
 # /settings callbacks: set:<switch>:on|off, and set:hour:<20|21|22> for the summary time.
 SETTING_SWITCHES = {
     "summary": "summary_enabled",
+    "morning": "morning_enabled",
     "deadlines": "deadline_alerts",
     "reminders": "reminders_enabled",
     "hour": "summary_hour",
@@ -141,7 +142,12 @@ SETTING_SWITCHES = {
 
 def all_reminders(on: bool) -> dict[str, bool]:
     """/reminders on|off: every switch in /settings together."""
-    return {"summary_enabled": on, "deadline_alerts": on, "reminders_enabled": on}
+    return {
+        "summary_enabled": on,
+        "morning_enabled": on,
+        "deadline_alerts": on,
+        "reminders_enabled": on,
+    }
 
 
 log = logging.getLogger(__name__)
@@ -540,14 +546,16 @@ class SchedulingService:
                 await self.repo.set_user_flags(user.id, **all_reminders(choice == "on"))
                 return [
                     Reply(
-                        "Evening summaries, deadline reminders and group check-ins are on."
+                        "Evening summaries, the morning list, deadline alerts and group check-ins"
+                        " are on."
                         if choice == "on"
-                        else "Evening summaries, deadline reminders and group check-ins are off."
+                        else "Evening summaries, the morning list, deadline alerts and group"
+                        " check-ins are off."
                         " Change alerts for plans you saved still arrive. /settings turns"
                         " them back on one by one."
                     )
                 ]
-            on = user.summary_enabled or user.deadline_alerts or user.reminders_enabled
+            on = any(getattr(user, field) for field in all_reminders(True))
             state = "on" if on else "off"
             return [Reply(f"Reminders are {state}. Send /reminders on or /reminders off.")]
         if command == "block":
@@ -661,7 +669,9 @@ class SchedulingService:
         _, _, kind, fields = found
         if kind == "deadline":
             deadline = await self.repo.create_deadline(user.id, None, DeadlineDraft(**fields))
-            text = card_text(deadline, self.clock(), user.deadline_alerts)
+            text = card_text(
+                deadline, self.clock(), user.deadline_alerts, morning=user.morning_enabled
+            )
             return [
                 Reply(
                     "↩️ Restored.\n" + text.rsplit("\n\n", 1)[0],
@@ -714,8 +724,10 @@ class SchedulingService:
             f"🌙 Evening summary: {state(user.summary_enabled)}"
             f"{when if user.summary_enabled else ''}\n"
             "Tomorrow's plans and deadlines, and what's due in the weeks ahead.\n\n"
-            f"📌 Deadline reminders: {state(user.deadline_alerts)}\n"
-            "What's due today at 9am, and a heads-up 3 hours before it's due.\n\n"
+            f"☀️ Morning list: {state(user.morning_enabled)}, at 9am\n"
+            "Today's plans and what's due today.\n\n"
+            f"⏰ Deadline alerts: {state(user.deadline_alerts)}\n"
+            "A heads-up 3 hours before something is due.\n\n"
             f"👥 Group check-ins: {state(user.reminders_enabled)}\n"
             '"Still coming?" checks, and nudges to reply to group plans and polls.\n\n'
             "Reminders you set with /remind, and updates to plans you've added, always arrive."
@@ -1126,7 +1138,9 @@ class SchedulingService:
                 return [Reply("That deadline is gone or already done. Use /deadline.")]
             return [
                 Reply(
-                    card_text(deadline, self.clock(), user.deadline_alerts),
+                    card_text(
+                        deadline, self.clock(), user.deadline_alerts, morning=user.morning_enabled
+                    ),
                     deadline_keyboard(deadline.id),
                 )
             ]
@@ -1517,6 +1531,7 @@ class SchedulingService:
                     self.clock(),
                     user.deadline_alerts,
                     await self.deadline_calendar_line(user, deadline),
+                    morning=user.morning_enabled,
                 ),
                 deadline_keyboard(deadline.id),
             )

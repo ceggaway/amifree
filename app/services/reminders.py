@@ -1,4 +1,4 @@
-"""Night-before summary: tomorrow's plans and deadlines, and what's due soon after.
+"""The evening summary (tomorrow) and the 9am Today list (the day's plans and what's due).
 
 Sent when tomorrow has a plan (Going or still undecided) or a deadline. On Sunday nights it
 also goes to anyone with a deadline in the next 30 days, with a "Later this month" list, so
@@ -11,11 +11,12 @@ from html import escape
 from app.bot.keyboards import SUMMARY_HOURS
 from app.bot.messages import clock, personal_details
 from app.schemas.event import SG, Deadline, Event, Status
-from app.services.deadlines import when
+from app.services.deadlines import REMIND_AT, hours_left, when
 
 COMING_UP_DAYS = 7  # listed every night: due in the week after tomorrow
 MONTH_DAYS = 30  # listed on Sunday nights: due later this month
 LIST_LIMIT = 5
+MORNING_UNTIL = time(12)  # a Today list not out by noon (the server was asleep) is skipped
 
 
 def tomorrow_window(now: datetime) -> tuple[datetime, datetime]:
@@ -112,3 +113,55 @@ def summary(
             later, lambda d: f"{d.due_at.astimezone(SG):%a %-d %b}"
         )
     return text + "\n\n/plans for details. /settings to change the time or turn this off."
+
+
+async def enqueue_morning(repo, now: datetime) -> int:
+    """Queue the 9am Today list for everyone with a Going plan or a deadline today.
+
+    Only in the morning, from 9am until noon. Plans and deadlines added after 9am don't count:
+    they've just been seen, and the list has gone out (or not) for the day.
+    """
+    local = now.astimezone(SG)
+    if not REMIND_AT <= local.time() < MORNING_UNTIL:
+        return 0
+    morning = datetime.combine(local.date(), REMIND_AT, SG)
+    end = datetime.combine(local.date() + timedelta(days=1), time.min, SG)
+
+    def before_morning(item) -> bool:
+        return not item.created_at or item.created_at <= morning
+
+    users = {
+        e.user_id
+        for e in await repo.events_between(now, end, [Status.GOING])
+        if before_morning(e) and e.start_at >= now
+    }
+    users |= {d.user_id for d in await repo.deadlines_between(now, end) if before_morning(d)}
+    day = local.date().isoformat()
+    queued = 0
+    for user_id in sorted(users):
+        queued += await repo.enqueue_notification(user_id, "TODAY", day, {"date": day})
+    return queued
+
+
+def today_text(deadlines: list[Deadline], plans: list[Event], now: datetime) -> str | None:
+    """The 9am Today list: the day's plans, then what's due. None on an empty day."""
+    if not (deadlines or plans):
+        return None
+    text = f"☀️ Today, {now.astimezone(SG):%a %-d %b}"
+    if plans:
+        text += "\n\n🗓 Your plans\n" + "\n".join(
+            f"• {clock(e.start_at)}–{clock(e.end_at)} {e.title[:60]}"
+            + (f" · {e.location[:40]}" if e.location else "")
+            for e in plans[:8]
+        )
+        if len(plans) > 8:
+            text += f"\n+ {len(plans) - 8} more · /plans"
+    if deadlines:
+        text += "\n\n📌 Due today\n" + "\n".join(
+            f"• {d.title[:60]} · {clock(d.due_at)}{hours_left(d.due_at, now)}"
+            for d in deadlines[:LIST_LIMIT]
+        )
+        if len(deadlines) > LIST_LIMIT:
+            text += f"\n+ {len(deadlines) - LIST_LIMIT} more · /deadline"
+        text += "\n\nTap Done once it's handed in. /deadline lists them all."
+    return text + "\n/settings to change reminders."

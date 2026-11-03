@@ -23,6 +23,7 @@ from app.bot.keyboards import (
     change_keyboard,
     choose_keyboard,
     confirm_keyboard,
+    deadline_edit_keyboard,
     deadline_keyboard,
     feedback_choice_keyboard,
     free_keyboard,
@@ -82,7 +83,7 @@ from app.services.date_resolution import (
     weekly_weekdays,
 )
 from app.services.deadlines import EXAMPLE as DEADLINE_EXAMPLE
-from app.services.deadlines import card_text, due_line, validate_deadline
+from app.services.deadlines import NO_NOTES, card_text, changed_due, due_line, validate_deadline
 from app.services.deadlines import when as deadline_when
 from app.services.detection import DetectionService
 from app.services.event_extractor import settle_ambiguity, settle_kind
@@ -137,6 +138,15 @@ SETTING_SWITCHES = {
     "deadlines": "deadline_alerts",
     "reminders": "reminders_enabled",
     "hour": "summary_hour",
+}
+
+
+# What can be changed on a deadline, and the question asked for each.
+DEADLINE_FIELDS = {
+    "title": "Send the new name.",
+    "due": "Send the new due date, time, or both, like: sat 5pm, tmr, or 20 oct 2359."
+    " Anything you don’t mention stays the same.",
+    "notes": "Send the new notes, or “none” to remove them.",
 }
 
 
@@ -1220,6 +1230,12 @@ class SchedulingService:
     ) -> list[Reply]:
         if user.pending and user.pending.get("stage") == "feedback_text":
             return await self.receive_feedback_text(user, text)
+        if user.pending and user.pending.get("stage") == "deadline_field":
+            return await self.edit_deadline_field(user, user.pending, text)
+        if user.pending and user.pending.get("stage") == "deadline_menu":
+            # A message instead of a button: the edit is dropped and this is read as new.
+            await self.repo.set_pending(user.id, None)
+            user.pending = None
         if len(text) > 8000:
             return [
                 Reply(
@@ -1550,6 +1566,59 @@ class SchedulingService:
             lines.append("📅 It'll show up in your AmIFree calendar at its next refresh.")
         return "\n".join(lines)
 
+    async def begin_deadline_edit(self, user: User, deadline) -> list[Reply]:
+        nonce = secrets.token_hex(8)
+        await self.repo.set_pending(
+            user.id, {"stage": "deadline_menu", "deadline_id": deadline.id, "nonce": nonce}
+        )
+        return [
+            Reply(
+                f"What do you want to change?\n\n📌 {deadline.title}\n"
+                f"Due {deadline_when(deadline.due_at, self.clock())}",
+                deadline_edit_keyboard(nonce),
+            )
+        ]
+
+    async def choose_deadline_field(self, user: User, field: str, nonce: str) -> list[Reply]:
+        pending = user.pending
+        if not pending or pending.get("nonce") != nonce or not pending.get("deadline_id"):
+            return [Reply("That edit expired. Use /deadline and tap Edit again.")]
+        await self.repo.set_pending(user.id, pending | {"stage": "deadline_field", "field": field})
+        return [Reply(DEADLINE_FIELDS[field] + "\n/cancel to keep it unchanged.")]
+
+    async def edit_deadline_field(self, user: User, pending: dict, text: str) -> list[Reply]:
+        """The typed name, due time or notes, applied at once: none of them can clash."""
+        deadline = await self.repo.get_deadline(user.id, pending["deadline_id"])
+        if not deadline or deadline.done:
+            await self.repo.set_pending(user.id, None)
+            return [Reply("That deadline is gone or done. /deadline lists the rest.")]
+        field, value = pending["field"], " ".join(text.split())
+        if field == "due":
+            try:
+                changes = {"due_at": changed_due(value, deadline.due_at, self.clock())}
+            except Clarification as exc:
+                return [Reply(f"{exc}\n/cancel to keep it unchanged.")]
+            note = f"✏️ Due time changed (was {deadline_when(deadline.due_at, self.clock())})."
+        elif field == "notes":
+            notes = None if value.lower() in NO_NOTES else text.strip()[:500]
+            changes, note = {"notes": notes}, "✏️ Notes updated." if notes else "✏️ Notes removed."
+        else:
+            if not value or len(value) > 200:
+                return [Reply("Send the name in one line (up to 200 characters), or /cancel.")]
+            changes, note = {"title": value}, f"✏️ Renamed (was {deadline.title})."
+        updated = await self.repo.update_deadline(user.id, deadline.id, **changes)
+        await self.repo.set_pending(user.id, None)
+        if not updated:
+            return [Reply("That deadline is gone. /deadline lists the rest.")]
+        await self.safe_action(user.id, "deadline_edit", metadata={"field": field})
+        synced_note = (
+            "\n📅 Your calendar will update with it."
+            if user.google_connected or (user.calendar_feed_token and user.calendar_feed_seen_at)
+            else ""
+        )
+        card = card_text(updated, self.clock(), user.deadline_alerts, morning=user.morning_enabled)
+        return [Reply(note + synced_note + "\n\n" + card, deadline_keyboard(updated.id))]
+
     async def list_deadlines(self, user: User, page: int = 0) -> list[Reply]:
         """One numbered message: overdue first, then upcoming, with a button per deadline."""
         now = self.clock()
@@ -1589,6 +1658,8 @@ class SchedulingService:
         deadline = await self.repo.get_deadline(user.id, deadline_id)
         if not deadline:
             return [Reply("That deadline is already gone. /deadline lists the rest.", edit=True)]
+        if action == "edit":
+            return await self.begin_deadline_edit(user, deadline)
         if action == "rm":
             await self.repo.delete_deadline(user.id, deadline_id)
             token = self.remember_removed(
@@ -2518,8 +2589,10 @@ class SchedulingService:
         action = parts[0]
         if action in ("pc", "dc", "bc", "rc") and len(parts) == 2:
             return await self.open_item(user, action, parts[1])
-        if action == "dl" and len(parts) == 3 and parts[1] in ("done", "ok", "rm"):
+        if action == "dl" and len(parts) == 3 and parts[1] in ("done", "ok", "rm", "edit"):
             return await self.deadline_action(user, parts[1], parts[2])
+        if action == "dle" and len(parts) == 3 and parts[1] in DEADLINE_FIELDS:
+            return await self.choose_deadline_field(user, parts[1], parts[2])
         if action == "chg" and len(parts) == 3 and parts[1] in ("venue", "time", "title"):
             return await self.choose_field(user, parts[1], parts[2])
         if data.startswith("rec:") and len(parts) == 3 and parts[1] in ("once", "weekly"):

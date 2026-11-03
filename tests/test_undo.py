@@ -53,7 +53,11 @@ async def test_removed_deadline_comes_back(service_factory, reference):
     assert gone.text == "🗑 Removed: CS3244 report" and not repo.deadlines
     back = (await service.callback(1, tap(gone, "↩️ Undo")))[0]
     assert back.text.startswith("↩️ Restored.\n📌 CS3244 report") and len(repo.deadlines) == 1
-    assert [b.text for row in back.keyboard.inline_keyboard for b in row] == ["✅ Done", "🗑 Remove"]
+    assert [b.text for row in back.keyboard.inline_keyboard for b in row] == [
+        "✅ Done",
+        "✏️ Edit",
+        "🗑 Remove",
+    ]
 
 
 async def test_removed_reminder_comes_back(service_factory, reference):

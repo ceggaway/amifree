@@ -234,11 +234,30 @@ def today_keyboard(deadlines) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(rows) if rows else None
 
 
+def deadline_edit_keyboard(nonce: str) -> InlineKeyboardMarkup:
+    """What to change on a deadline: picked here, then typed."""
+
+    def pick(label: str, field: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(label, callback_data=f"dle:{field}:{nonce}")
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                pick("📌 Name", "title"),
+                pick("🕒 Due date & time", "due"),
+                pick("📝 Notes", "notes"),
+            ],
+            [InlineKeyboardButton("Keep unchanged", callback_data=f"dismiss:{nonce}")],
+        ]
+    )
+
+
 def deadline_keyboard(deadline_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("✅ Done", callback_data=f"dl:done:{deadline_id}"),
+                InlineKeyboardButton("✏️ Edit", callback_data=f"dl:edit:{deadline_id}"),
                 InlineKeyboardButton("🗑 Remove", callback_data=f"dl:rm:{deadline_id}"),
             ]
         ]

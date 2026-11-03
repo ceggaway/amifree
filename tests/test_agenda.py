@@ -55,9 +55,13 @@ async def test_tapping_a_label_opens_the_item_and_back_returns(service_factory, 
     assert "CS3244 report" in dl_card.text and dl_card.edit
     assert [b.text for row in dl_card.keyboard.inline_keyboard for b in row] == [
         "✅ Done",
+        "✏️ Edit",
         "🗑 Remove",
         "← Back to plans",
     ]
+    # Edit works from inside /plans too.
+    menu = (await service.callback(1, tap(dl_card, "✏️ Edit")))[0]
+    assert menu.text.startswith("What do you want to change?") and tap(menu, "📌 Name")
     back = (await service.callback(1, tap(dl_card, "← Back to plans")))[0]
     assert back.text == reply.text and back.edit
     plan_card = (await service.callback(1, tap(back, "9 Oct · CCA dinner")))[0]

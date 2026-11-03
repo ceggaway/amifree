@@ -17,6 +17,7 @@ from app.bot.keyboards import (
     deadline_keyboard,
     nudge_keyboard,
     reminder_keyboard,
+    undecided_keyboard,
 )
 from app.bot.messages import Reply, details, event_card, time_range, verdict_line
 from app.schemas.event import SG, Poll, Status
@@ -24,7 +25,13 @@ from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
 from app.services.deadlines import enqueue_deadline_reminders, reminder_text
 from app.services.quick_reminders import enqueue_reminders, ringing_text
-from app.services.reminders import enqueue_nightly, summary
+from app.services.reminders import (
+    COMING_UP_DAYS,
+    MONTH_DAYS,
+    enqueue_nightly,
+    is_weekly,
+    summary,
+)
 from app.services.scheduling import synced
 
 log = logging.getLogger(__name__)
@@ -87,9 +94,19 @@ class Notifier:
                 start, start + timedelta(days=1), [Status.GOING, Status.SAVED], user.id
             )
             due = await self.repo.deadlines_between(start, start + timedelta(days=1), user.id)
-            text = summary(start, events, due)
+            week = start + timedelta(days=1 + COMING_UP_DAYS)
+            coming_up = await self.repo.deadlines_between(start + timedelta(days=1), week, user.id)
+            later = (
+                await self.repo.deadlines_between(week, start + timedelta(days=MONTH_DAYS), user.id)
+                if is_weekly(start)
+                else []
+            )
+            text = summary(
+                start, events, due, coming_up=coming_up, later=later, now=self.scheduling.clock()
+            )
             html_mode = any(not e.group_event_id and e.status == Status.GOING for e in events)
-            return Reply(text, parse_mode="HTML" if html_mode else None) if text else None
+            keyboard = undecided_keyboard([e for e in events if e.status == Status.SAVED])
+            return Reply(text, keyboard, parse_mode="HTML" if html_mode else None) if text else None
         if row["kind"] == "CONFIRM":
             event = await self.repo.get_group_event(payload["id"])
             now = self.scheduling.clock()

@@ -210,6 +210,20 @@ def change_keyboard(nonce: str, *, personal: bool = False) -> InlineKeyboardMark
     )
 
 
+def undecided_keyboard(events: list[Event]) -> InlineKeyboardMarkup | None:
+    """Going / Not going for plans still undecided, answered straight from the summary."""
+    rows = [
+        [
+            InlineKeyboardButton(
+                f"✅ Going: {e.title[:24]}", callback_data=f"go:{e.id}:{e.version}"
+            ),
+            InlineKeyboardButton("Not going", callback_data=f"decline:{e.id}:{e.version}"),
+        ]
+        for e in events[:3]
+    ]
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
 def deadline_keyboard(deadline_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

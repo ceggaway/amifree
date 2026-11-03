@@ -14,3 +14,11 @@ node_modules/
 
 # Worktrees made by Claude Code: each is its own checkout, never part of this repo.
 .claude/worktrees/
+
+# Local marketing and pitch files, kept out of the repo
+*.pptx
+/mascot-*.png
+/slide*-preview.png
+marketing/fake-screens/
+marketing/video/
+marketing/start-vs-calendar.png

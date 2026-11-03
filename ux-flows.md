@@ -402,7 +402,9 @@ Free-time lists run from 8am to 11pm. Checks use NUSMods classes, the personal c
 
 ### Night-before summary
 
-- Sent at **9pm by default**, **only if there's something tomorrow**.
+- Sent at **8pm by default** (`NIGHTLY_HOUR`), **only if there's something tomorrow**: a plan (Going or undecided) or a deadline. Sunday's summary also goes out when anything is due in the next 30 days.
+- Adds **📌 Due tomorrow**, **🔜 Coming up** (deadlines in the following week) and, on Sundays, **🗓 Later this month**. At most five per list, then "+ N more · /deadline".
+- Undecided plans get **Going / Not going** buttons.
 - Includes saved plans, group events marked Going and **blocked times**. Excludes classes.
 
 ```
@@ -414,7 +416,7 @@ Free-time lists run from 8am to 11pm. Checks use NUSMods classes, the personal c
 • 7pm  Dinner with Jun · 📍 ?
 ```
 
-- No buttons on normal summaries.
+- The only buttons are Going / Not going for undecided plans.
 - 🔔 marks details changed since the plan was saved. "?" marks missing details.
 - Items with no time are listed at the end ("• Time ?  Dinner with Jun").
 - A pending plan question is added at the bottom:

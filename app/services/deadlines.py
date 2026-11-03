@@ -104,8 +104,7 @@ def card_text(deadline: Deadline, now: datetime, reminders: bool, calendar: str 
     if calendar:
         text += "\n\n" + calendar
     if reminders:
-        text += "\n\nI'll remind you the day before and on the morning it's due."
-        text += " /settings to change reminders."
+        text += "\n\n" + reminder_promise(deadline, now) + " /settings to change reminders."
     else:
         text += "\n\nReminders are off (/settings to turn them on)."
     return text + "\n/deadline lists them all."
@@ -119,6 +118,21 @@ def reminder_moments(deadline: Deadline) -> dict[str, datetime]:
     if morning < due:
         moments["morning"] = morning
     return moments
+
+
+def reminder_promise(deadline: Deadline, now: datetime) -> str:
+    """The reminders still to come, so the card never promises one that won't be sent."""
+    moments = [m for m in reminder_moments(deadline).values() if m > now]
+    if len(moments) == 2:
+        return "I'll remind you the day before and on the morning it's due, at 9am."
+    if not moments:
+        return "It's due soon, so there's no reminder to send."
+    day, today = moments[0].date(), now.astimezone(SG).date()
+    if day == today:
+        return "I'll remind you today at 9am."
+    if day == today + timedelta(days=1):
+        return "I'll remind you tomorrow at 9am."
+    return f"I'll remind you on {moments[0]:%a %-d %b} at 9am."
 
 
 async def enqueue_deadline_reminders(repo, now: datetime) -> int:

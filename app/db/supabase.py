@@ -414,6 +414,20 @@ class SupabaseRepository:
         rows = (await query.order("due_at").limit(500).execute()).data
         return [Deadline.model_validate(row) for row in rows]
 
+    async def deadline_owners(self, start: datetime, end: datetime) -> set[str]:
+        """Users with an open deadline due in [start, end), however many there are."""
+        rows = await self._all(
+            lambda: (
+                self.client.table("deadlines")
+                .select("user_id")
+                .eq("done", False)
+                .gte("due_at", start.isoformat())
+                .lt("due_at", end.isoformat())
+                .order("id")
+            )
+        )
+        return {row["user_id"] for row in rows}
+
     async def finish_deadline(self, user_id: str, deadline_id: str) -> bool:
         result = (
             await self.client.table("deadlines")

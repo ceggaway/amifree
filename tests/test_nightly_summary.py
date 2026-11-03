@@ -4,6 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from app.schemas.event import SG, Status
+from app.services.deadlines import reminder_promise
 from app.services.reminders import summary
 from tests.conftest import extraction, tap
 from tests.test_deadlines import at, due, reminders_at
@@ -92,11 +93,16 @@ async def test_each_switch_turns_off_only_its_own_reminders(service_factory):
     for d in repo.deadlines.values():
         d.created_at = at(4, 8)
     (panel,) = await service.command(1, "settings")
-    (panel,) = await service.callback(1, tap(panel, "📌 Turn off deadline reminders"))
-    assert "📌 Deadline reminders: off" in panel.text and "🌙 Evening summary: on" in panel.text
-    # The summary still lists it the night before; the 9am Today list doesn't come.
+    (panel,) = await service.callback(1, tap(panel, "☀️ Turn off morning list"))
+    assert "☀️ Morning list: off" in panel.text and "🌙 Evening summary: on" in panel.text
+    # The summary still lists it the night before; the 9am Today list doesn't come, but the
+    # alert 3 hours before (10am) now does, since no morning list covers it.
     assert len(await nightly(service, repo, at(4, 20, 5))) == 1
     assert await reminders_at(service, repo, at(5, 9, 5)) == []
+    (alert,) = await reminders_at(service, repo, at(5, 10, 5))
+    assert alert.text.startswith("⏰ Due at 1pm")
+    (panel,) = await service.callback(1, tap(panel, "⏰ Turn off deadline alerts"))
+    assert "⏰ Deadline alerts: off" in panel.text
 
 
 async def test_the_summary_comes_at_the_chosen_hour(service_factory):
@@ -120,7 +126,47 @@ async def test_reminders_off_turns_every_switch_off(service_factory):
     service, repo = service_factory()
     await service.command(1, "reminders", "off")
     (panel,) = await service.command(1, "settings")
-    assert panel.text.count(": off") == 3
+    assert panel.text.count(": off") == 4
     await service.command(1, "reminders", "on")
     (panel,) = await service.command(1, "settings")
-    assert panel.text.count(": on") == 3
+    assert panel.text.count(": on") == 4
+
+
+async def test_a_day_with_only_plans_gets_a_morning_list(service_factory, reference):
+    service, repo = service_factory(
+        extraction(
+            title="Badminton",
+            date_text="Monday",
+            start_time_text="8pm",
+            end_time_text="10pm",
+            location="MPSH 2",
+        )
+    )
+    card = (await service.message(1, 1, "Badminton Monday 8pm-10pm at MPSH 2", reference))[0]
+    await service.callback(1, tap(card, "Add to plans"))
+    for e in repo.events.values():
+        e.created_at = reference
+    assert await reminders_at(service, repo, at(5, 8, 55)) == []
+    (today,) = await reminders_at(service, repo, at(5, 9, 5))
+    assert today.text == (
+        "☀️ Today, Mon 5 Oct\n\n🗓 Your plans\n• 8pm–10pm Badminton · MPSH 2"
+        "\n/settings to change reminders."
+    )
+    assert today.keyboard is None
+    # Not out by noon (the server slept through the morning): skipped for the day.
+    service2, repo2 = service_factory(
+        extraction(title="Run", date_text="Monday", start_time_text="7pm", end_time_text="8pm")
+    )
+    card = (await service2.message(1, 1, "Run Monday 7pm-8pm", reference))[0]
+    await service2.callback(1, tap(card, "Add to plans"))
+    for e in repo2.events.values():
+        e.created_at = reference
+    assert await reminders_at(service2, repo2, at(5, 12, 5)) == []
+
+
+def test_without_the_morning_list_the_alert_covers_the_morning():
+    deadline = SimpleNamespace(due_at=datetime(2026, 10, 13, 13, tzinfo=SG))
+    now = datetime(2026, 10, 12, 15, tzinfo=SG)
+    assert "tomorrow at 9am." in reminder_promise(deadline, now)
+    off = reminder_promise(deadline, now, morning=False)
+    assert "tomorrow at 10am, 3 hours before" in off and "9am" not in off

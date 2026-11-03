@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:

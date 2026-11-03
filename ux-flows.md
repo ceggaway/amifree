@@ -462,22 +462,24 @@ Recent changes are flagged: `7:30pm · MPSH 2  🔔 venue changed from UTSRC`
 
 ### Settings (`/settings`)
 
-Built (migration 018): one switch per kind, and the summary's time while it's on.
+Built (migrations 018 and 019): one switch per kind, and the summary's time while it's on.
 
 ```
 ⚙️ Settings
 
-🌙 Evening summary: on, at 8pm
-📌 Deadline reminders: on      (☀️ Today at 9am, ⏰ 3 hours before)
-👥 Group check-ins: on         ("Still coming?", nudges)
+🌙 Evening summary: on, at 8pm     (tomorrow's plans and deadlines, the weeks ahead)
+☀️ Morning list: on, at 9am         (today's plans and what's due today)
+⏰ Deadline alerts: on              (3 hours before something is due)
+👥 Group check-ins: on              ("Still coming?", nudges)
 
 [🌙 Turn off evening summary]
 [✓ 8pm]  [9pm]  [10pm]
-[📌 Turn off deadline reminders]
+[☀️ Turn off morning list]
+[⏰ Turn off deadline alerts]
 [👥 Turn off group check-ins]
 ```
 
-`/reminders on|off` sets all three. Still to build: a before-event reminder for plans
+`/reminders on|off` sets all four. Still to build: a before-event reminder for plans
 (Off / 15 / 30 / 60 min).
 
 ### Changes from current (`reminders.py`, `jobs.py`)

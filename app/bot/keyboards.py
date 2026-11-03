@@ -509,7 +509,8 @@ def settings_keyboard(user, summary_hour: int) -> InlineKeyboardMarkup:
                 for hour in SUMMARY_HOURS
             ]
         )
-    rows.append(switch(user.deadline_alerts, "📌", "deadline reminders", "deadlines"))
+    rows.append(switch(user.morning_enabled, "☀️", "morning list", "morning"))
+    rows.append(switch(user.deadline_alerts, "⏰", "deadline alerts", "deadlines"))
     rows.append(switch(user.reminders_enabled, "👥", "group check-ins", "reminders"))
     return InlineKeyboardMarkup(rows)
 

@@ -190,9 +190,7 @@ def build_router(settings: Settings) -> APIRouter:
         calendars = await service_of(request).repo.list_calendars(user.id)
         return {
             "telegram_user_id": user.telegram_user_id,
-            "reminders_enabled": (
-                user.summary_enabled or user.deadline_alerts or user.reminders_enabled
-            ),
+            "reminders_enabled": any(getattr(user, field) for field in all_reminders(True)),
             "nusmods": {
                 "connected": user.onboarding_status == "READY",
                 "academic_year": user.academic_year,

@@ -99,37 +99,42 @@ def when(due: datetime, now: datetime) -> str:
     return f"{due:%a %-d %b}, {clock(due)} ({relative})"
 
 
-def card_text(deadline: Deadline, now: datetime, reminders: bool, calendar: str = "") -> str:
-    """reminders: the person's deadline-reminder switch."""
-    """calendar: what happened in the student's calendar, said only once it's true."""
+def card_text(
+    deadline: Deadline, now: datetime, reminders: bool, calendar: str = "", *, morning: bool = True
+) -> str:
+    """reminders: the 3-hours-before switch; morning: the 9am Today list's switch.
+    calendar: what happened in the student's calendar, said only once it's true."""
     text = f"📌 {deadline.title}\nDue {when(deadline.due_at, now)}"
     if deadline.notes:
         text += "\n" + deadline.notes[:300]
     if calendar:
         text += "\n\n" + calendar
-    if reminders:
-        text += "\n\n" + reminder_promise(deadline, now) + " /settings to change reminders."
+    if reminders or morning:
+        promise = reminder_promise(deadline, now, morning=morning, alert=reminders)
+        text += "\n\n" + promise + " /settings to change reminders."
     else:
         text += "\n\nReminders are off (/settings to turn them on)."
     return text + "\n/deadline lists them all."
 
 
-def reminder_moments(deadline: Deadline) -> dict[str, datetime]:
+def reminder_moments(deadline: Deadline, *, morning: bool = True) -> dict[str, datetime]:
     """When each reminder is due.
 
     "today": the 9am Today list on the due day, if it's due after 9am.
     "final": 3 hours before it's due. Skipped in quiet hours (11pm to 9am), and on the due
-    day before noon, when the 9am list was only a few hours earlier.
+    day before noon, when the 9am list was only a few hours earlier (unless morning=False:
+    the person turned that list off).
     The day before is the evening summary's job ("Due tomorrow"), not a separate message.
     """
     due = deadline.due_at.astimezone(SG)
     moments = {}
-    morning = datetime.combine(due.date(), REMIND_AT, SG)
-    if morning < due:
-        moments["today"] = morning
+    nine = datetime.combine(due.date(), REMIND_AT, SG)
+    if nine < due:
+        moments["today"] = nine
     final = due - timedelta(hours=FINAL_HOURS)
     if final.date() == due.date():
-        timely = final.time() >= FINAL_EARLIEST
+        earliest = FINAL_EARLIEST if morning else REMIND_AT
+        timely = earliest <= final.time() < QUIET_FROM
     else:
         timely = REMIND_AT <= final.time() < QUIET_FROM
     if timely:
@@ -146,10 +151,14 @@ def on_day(moment: datetime, now: datetime) -> str:
     return f"on {moment:%a %-d %b}"
 
 
-def reminder_promise(deadline: Deadline, now: datetime) -> str:
-    """The reminders still to come, so the card never promises one that won't be sent."""
-    moments = {k: m for k, m in reminder_moments(deadline).items() if m > now}
-    today, final = moments.get("today"), moments.get("final")
+def reminder_promise(
+    deadline: Deadline, now: datetime, *, morning: bool = True, alert: bool = True
+) -> str:
+    """The reminders still to come, so the card never promises one that won't be sent.
+    morning and alert are the person's switches for the 9am list and the 3-hours-before alert."""
+    moments = {k: m for k, m in reminder_moments(deadline, morning=morning).items() if m > now}
+    today = moments.get("today") if morning else None
+    final = moments.get("final") if alert else None
     if today and final:
         return (
             f"I'll remind you {on_day(today, now)} at 9am, and again at {clock(final)},"
@@ -167,27 +176,34 @@ def reminder_promise(deadline: Deadline, now: datetime) -> str:
 async def enqueue_deadline_reminders(repo, now: datetime) -> int:
     """Queue reminders whose moment has come, on that same day, while still before the due time.
 
-    "today" moments become one Today message per person per day; "final" ones are queued per
-    deadline. A reminder whose moment was before the deadline was added is skipped: they've just
-    seen it. The (user, kind, key) uniqueness on the outbox stops any repeat.
+    Only the "final" alert is queued here; the 9am Today list is enqueue_morning's (reminders.py).
+    A reminder whose moment was before the deadline was added is skipped: they've just seen it.
+    The (user, kind, key) uniqueness on the outbox stops any repeat.
     """
     local = now.astimezone(SG)
+    deadlines = await repo.deadlines_between(now, now + timedelta(days=2))
+    # Before noon on the due day the alert is only for people who turned the 9am list off.
+    early = {
+        d.user_id
+        for d in deadlines
+        if "final" in reminder_moments(d, morning=False) and "final" not in reminder_moments(d)
+    }
+    no_morning = (
+        {u.id for u in await repo.users_by_ids(early) if not u.morning_enabled} if early else set()
+    )
     queued = 0
-    for deadline in await repo.deadlines_between(now, now + timedelta(days=2)):
-        for which, moment in reminder_moments(deadline).items():
+    for deadline in deadlines:
+        moments = reminder_moments(deadline, morning=deadline.user_id not in no_morning)
+        for which, moment in moments.items():
+            if which == "today":
+                continue
             if not (moment <= local and moment.date() == local.date() and local < deadline.due_at):
                 continue
             if deadline.created_at and deadline.created_at > moment:
                 continue
-            if which == "today":
-                day = local.date().isoformat()
-                queued += await repo.enqueue_notification(
-                    deadline.user_id, "TODAY", day, {"date": day}
-                )
-            else:
-                queued += await repo.enqueue_notification(
-                    deadline.user_id, "DEADLINE", f"{deadline.id}:{which}", {"id": deadline.id}
-                )
+            queued += await repo.enqueue_notification(
+                deadline.user_id, "DEADLINE", f"{deadline.id}:{which}", {"id": deadline.id}
+            )
     return queued
 
 
@@ -205,27 +221,6 @@ def reminder_text(deadline: Deadline, now: datetime) -> str:
 def hours_left(due: datetime, now: datetime) -> str:
     hours = int((due - now).total_seconds() // 3600)
     return f" (in {hours} hr)" if hours >= 1 else " (very soon)"
-
-
-def today_text(deadlines: list[Deadline], plans: list, now: datetime) -> str | None:
-    """The 9am Today message: what's due today, and today's plans for context."""
-    if not deadlines:
-        return None
-    text = f"☀️ Today, {now.astimezone(SG):%a %-d %b}\n\n📌 Due today\n" + "\n".join(
-        f"• {d.title[:60]} · {clock(d.due_at)}{hours_left(d.due_at, now)}" for d in deadlines[:5]
-    )
-    if len(deadlines) > 5:
-        text += f"\n+ {len(deadlines) - 5} more · /deadline"
-    if plans:
-        text += "\n\n🗓 Your plans\n" + "\n".join(
-            f"• {clock(e.start_at)}–{clock(e.end_at)} {e.title[:60]}"
-            + (f" · {e.location[:40]}" if e.location else "")
-            for e in plans[:5]
-        )
-    return (
-        text + "\n\nTap Done once it's handed in. /settings to change reminders."
-        "\n/deadline lists them all."
-    )
 
 
 def due_line(deadline: Deadline) -> str:

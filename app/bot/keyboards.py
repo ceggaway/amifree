@@ -224,6 +224,16 @@ def undecided_keyboard(events: list[Event]) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(rows) if rows else None
 
 
+def today_keyboard(deadlines) -> InlineKeyboardMarkup | None:
+    """Done for each deadline on the Today message. "ok" confirms in a new message, so the
+    list itself stays."""
+    rows = [
+        [InlineKeyboardButton(f"✅ Done: {d.title[:28]}", callback_data=f"dl:ok:{d.id}")]
+        for d in deadlines[:3]
+    ]
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
 def deadline_keyboard(deadline_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -476,11 +486,32 @@ def menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def settings_keyboard(reminders_on: bool) -> InlineKeyboardMarkup:
-    label, target = ("Turn off", "off") if reminders_on else ("Turn on", "on")
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(f"🔔 {label} reminders", callback_data=f"set:reminders:{target}")]]
-    )
+SUMMARY_HOURS = (20, 21, 22)  # the evening summary times offered in /settings
+
+
+def settings_keyboard(user, summary_hour: int) -> InlineKeyboardMarkup:
+    """One switch per kind of reminder, and the evening summary's time while it's on."""
+
+    def switch(on: bool, emoji: str, name: str, key: str) -> list[InlineKeyboardButton]:
+        label, target = ("Turn off", "off") if on else ("Turn on", "on")
+        return [
+            InlineKeyboardButton(f"{emoji} {label} {name}", callback_data=f"set:{key}:{target}")
+        ]
+
+    rows = [switch(user.summary_enabled, "🌙", "evening summary", "summary")]
+    if user.summary_enabled:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{'✓ ' if hour == summary_hour else ''}{hour - 12}pm",
+                    callback_data=f"set:hour:{hour}",
+                )
+                for hour in SUMMARY_HOURS
+            ]
+        )
+    rows.append(switch(user.deadline_alerts, "📌", "deadline reminders", "deadlines"))
+    rows.append(switch(user.reminders_enabled, "👥", "group check-ins", "reminders"))
+    return InlineKeyboardMarkup(rows)
 
 
 def reminder_keyboard(reminder_id: str) -> InlineKeyboardMarkup:

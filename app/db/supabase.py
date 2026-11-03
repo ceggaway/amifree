@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -642,6 +642,16 @@ class SupabaseRepository:
             },
         ).execute()
         return GroupEvent.model_validate(result.data[0]) if result.data else None
+
+    async def users_by_ids(self, user_ids) -> list[User]:
+        """These users, in batches small enough for one request each."""
+        ids, users = sorted(set(user_ids)), []
+        for n in range(0, len(ids), 200):
+            rows = (
+                await self.client.table("users").select("*").in_("id", ids[n : n + 200]).execute()
+            ).data
+            users += [User.model_validate(row) for row in rows]
+        return users
 
     async def get_user(self, user_id: str) -> User | None:
         result = await self.client.table("users").select("*").eq("id", user_id).limit(1).execute()

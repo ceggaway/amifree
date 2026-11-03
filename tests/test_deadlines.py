@@ -117,7 +117,7 @@ async def test_forwarded_deadline_is_saved(service_factory, reference):
     service, repo = service_factory(due(), due())
     card = (await service.message(1, 1, REPORT, reference))[0]
     assert card.text.startswith("📌 CS3244 report\nDue Fri 9 Oct, 11:59pm (in 5 days)")
-    assert "remind you the day before" in card.text
+    assert "remind you on Fri 9 Oct at 9am, and again at 8:59pm, 3 hours before" in card.text
     assert tap(card, "✅ Done") and tap(card, "🗑 Remove")
     assert len(repo.deadlines) == 1 and not repo.events
     await service.message(1, 1, REPORT, reference)  # the same message again
@@ -200,20 +200,34 @@ async def reminders_at(service, repo, now):
     return sent
 
 
-async def test_reminded_the_day_before_and_that_morning(service_factory, reference):
+async def test_today_list_at_9am_and_an_alert_3_hours_before(service_factory, reference):
     service, repo = service_factory(due())
     await service.message(1, 1, REPORT, reference)
     for d in repo.deadlines.values():
         d.created_at = reference
-    assert await reminders_at(service, repo, at(8, 8, 59)) == []
-    day = await reminders_at(service, repo, at(8, 9, 5))
-    assert [r.text.split("\n")[0] for r in day] == [
-        "📌 Due tomorrow (Fri 9 Oct, 11:59pm): CS3244 report"
-    ]
-    assert await reminders_at(service, repo, at(8, 18)) == []  # once only
-    morning = await reminders_at(service, repo, at(9, 9))
-    assert morning[0].text.startswith("📌 Due today at 11:59pm: CS3244 report")
-    assert tap(morning[0], "✅ Done")
+    # The day before is the evening summary's job, not a separate reminder.
+    assert await reminders_at(service, repo, at(8, 9, 5)) == []
+    assert await reminders_at(service, repo, at(9, 8, 59)) == []
+    (today,) = await reminders_at(service, repo, at(9, 9, 5))
+    assert today.text.startswith(
+        "☀️ Today, Fri 9 Oct\n\n📌 Due today\n• CS3244 report · 11:59pm (in 14 hr)"
+    )
+    assert tap(today, "✅ Done: CS3244 report")
+    assert await reminders_at(service, repo, at(9, 18)) == []  # once only
+    (final,) = await reminders_at(service, repo, at(9, 21))
+    assert final.text.startswith("⏰ Due at 11:59pm, in about 3 hr: CS3244 report")
+    assert tap(final, "✅ Done")
+
+
+async def test_done_from_the_today_list_keeps_the_list(service_factory, reference):
+    service, repo = service_factory(due())
+    await service.message(1, 1, REPORT, reference)
+    for d in repo.deadlines.values():
+        d.created_at = reference
+    (today,) = await reminders_at(service, repo, at(9, 9, 5))
+    (done,) = await service.callback(1, tap(today, "✅ Done: CS3244 report"))
+    assert done.text.startswith("✅ Done: CS3244 report") and not done.edit
+    assert await reminders_at(service, repo, at(9, 21)) == []  # no alert once it's done
 
 
 async def test_no_reminder_once_done_or_with_reminders_off(service_factory, reference):
@@ -343,15 +357,15 @@ async def test_deadline_cards_and_reminders_point_to_current_commands(service_fa
     service, repo = service_factory(due())
     (enabled,) = await service.command(1, "deadline", REPORT)
     (panel,) = await service.command(1, "settings")
-    await service.callback(1, tap(panel, "🔔 Turn off reminders"))
+    await service.callback(1, tap(panel, "📌 Turn off deadline reminders"))
     (listed,) = await service.command(1, "deadline")
     (disabled,) = await service.callback(1, tap(listed, "1"))
     assert "Reminders are off" in disabled.text
     (panel,) = await service.command(1, "settings")
-    await service.callback(1, tap(panel, "🔔 Turn on reminders"))
+    await service.callback(1, tap(panel, "📌 Turn on deadline reminders"))
     for deadline in repo.deadlines.values():
         deadline.created_at = reference
-    (reminder,) = await reminders_at(service, repo, at(8, 9))
+    (reminder,) = await reminders_at(service, repo, at(9, 9))
     for reply in (enabled, disabled, reminder):
         assert "/settings" in reply.text and "/deadline lists them all" in reply.text
         assert "/reminders" not in reply.text and "/deadlines" not in reply.text
@@ -363,16 +377,22 @@ async def test_deadline_cards_and_reminders_point_to_current_commands(service_fa
 @pytest.mark.parametrize(
     "now, due_at, promise",
     [
-        # Due Fri 11:59pm, added Mon: both reminders are still to come.
-        ((10, 12, 15), (10, 16, 23, 59), "the day before and on the morning it's due, at 9am"),
-        # "Due tmr" said at 3pm: today's 9am has passed, only tomorrow morning is left.
-        ((10, 12, 15), (10, 13, 23, 59), "tomorrow at 9am"),
-        # Said at 8am for tonight: only this morning's reminder is left.
-        ((10, 12, 8), (10, 12, 23, 59), "today at 9am"),
-        # Due 8am Fri: no morning reminder, only Thursday's.
-        ((10, 12, 15), (10, 16, 8, 0), "on Thu 15 Oct at 9am"),
-        # Due tonight, said after 9am: nothing left to send.
-        ((10, 12, 15), (10, 12, 23, 59), "no reminder"),
+        # Due Fri 11:59pm, added Mon: 9am on the day, and 3 hours before.
+        ((10, 12, 15), (10, 16, 23, 59), "on Fri 16 Oct at 9am, and again at 8:59pm, 3 hours"),
+        # "Due tmr" said at 3pm.
+        ((10, 12, 15), (10, 13, 23, 59), "tomorrow at 9am, and again at 8:59pm"),
+        # Said at 8am for tonight.
+        ((10, 12, 8), (10, 12, 23, 59), "today at 9am, and again at 8:59pm"),
+        # Said at 3pm for tonight: only the 3-hours-before alert is left.
+        ((10, 12, 15), (10, 12, 23, 59), "today at 8:59pm, 3 hours before"),
+        # Due 11am: 3 hours before is 8am, so the 9am list is the reminder.
+        ((10, 12, 15), (10, 13, 11, 0), "remind you tomorrow at 9am."),
+        # Due 1am: the alert goes out at 10pm the night before.
+        ((10, 12, 15), (10, 14, 1, 0), "tomorrow at 10pm, 3 hours before"),
+        # Due 8am Fri: both would be in quiet hours or too late; the summary has it.
+        ((10, 12, 15), (10, 16, 8, 0), "in your evening summary the night before"),
+        # Said at 9pm for tonight: nothing left to send.
+        ((10, 12, 21), (10, 12, 23, 59), "no reminder"),
     ],
 )
 def test_the_card_only_promises_reminders_that_will_be_sent(now, due_at, promise):

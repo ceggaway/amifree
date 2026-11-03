@@ -8,6 +8,7 @@ big deadlines are seen weeks ahead without a long list every night.
 from datetime import datetime, time, timedelta
 from html import escape
 
+from app.bot.keyboards import SUMMARY_HOURS
 from app.bot.messages import clock, personal_details
 from app.schemas.event import SG, Deadline, Event, Status
 from app.services.deadlines import when
@@ -29,19 +30,27 @@ def is_weekly(day: datetime) -> bool:
 
 
 async def enqueue_nightly(repo, now: datetime, hour: int) -> int:
-    """Queue at most one summary per user per day, from `hour` until midnight Singapore time.
+    """Queue at most one summary per user per day, from their hour until midnight Singapore time.
 
-    A run that happens after midnight does nothing: "tomorrow" would be the wrong day.
+    `hour` is the default (NIGHTLY_HOUR) for anyone who hasn't picked one in /settings. People
+    who turned the summary off get nothing queued. A run that happens after midnight does
+    nothing: "tomorrow" would be the wrong day.
     """
-    if now.astimezone(SG).hour < hour:
+    local_hour = now.astimezone(SG).hour
+    if local_hour < min(hour, *SUMMARY_HOURS):
         return 0
     start, end = tomorrow_window(now)
     users = {e.user_id for e in await repo.events_between(start, end, [Status.GOING, Status.SAVED])}
     users |= await repo.deadline_owners(start, end)
     if is_weekly(start):
         users |= await repo.deadline_owners(start, start + timedelta(days=MONTH_DAYS))
+    due = {
+        u.id
+        for u in await repo.users_by_ids(users)
+        if u.summary_enabled and local_hour >= (u.summary_hour or hour)
+    }
     queued = 0
-    for user_id in sorted(users):
+    for user_id in sorted(due):
         queued += await repo.enqueue_notification(
             user_id, "NIGHTLY", start.date().isoformat(), {"date": start.date().isoformat()}
         )
@@ -102,4 +111,4 @@ def summary(
         text += "\n\n🗓 Later this month\n" + listed(
             later, lambda d: f"{d.due_at.astimezone(SG):%a %-d %b}"
         )
-    return text + "\n\n/plans for details. /reminders off stops these summaries."
+    return text + "\n\n/plans for details. /settings to change the time or turn this off."

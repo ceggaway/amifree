@@ -17,6 +17,7 @@ from telegram import InlineKeyboardMarkup
 from app.bot import onboarding
 from app.bot.delivery import telegram_profile
 from app.bot.keyboards import (
+    SUMMARY_HOURS,
     agenda_keyboard,
     calendar_settings_keyboard,
     change_keyboard,
@@ -128,6 +129,20 @@ from app.services.ratelimit import RateLimiter
 from app.services.usual_times import describe as describe_usual
 from app.services.usual_times import parse_usual
 from app.services.voice_reader import VoiceError
+
+# /settings callbacks: set:<switch>:on|off, and set:hour:<20|21|22> for the summary time.
+SETTING_SWITCHES = {
+    "summary": "summary_enabled",
+    "deadlines": "deadline_alerts",
+    "reminders": "reminders_enabled",
+    "hour": "summary_hour",
+}
+
+
+def all_reminders(on: bool) -> dict[str, bool]:
+    """/reminders on|off: every switch in /settings together."""
+    return {"summary_enabled": on, "deadline_alerts": on, "reminders_enabled": on}
+
 
 log = logging.getLogger(__name__)
 
@@ -521,15 +536,19 @@ class SchedulingService:
         if command == "reminders":
             choice = args.lower()
             if choice in ("on", "off"):
-                await self.repo.set_user_flags(user.id, reminders_enabled=choice == "on")
+                # Every switch at once; /settings turns them on or off one by one.
+                await self.repo.set_user_flags(user.id, **all_reminders(choice == "on"))
                 return [
                     Reply(
-                        "Night-before summaries and nudges are on."
+                        "Evening summaries, deadline reminders and group check-ins are on."
                         if choice == "on"
-                        else "Night-before summaries and nudges are off. Change alerts for plans you saved still arrive."
+                        else "Evening summaries, deadline reminders and group check-ins are off."
+                        " Change alerts for plans you saved still arrive. /settings turns"
+                        " them back on one by one."
                     )
                 ]
-            state = "on" if user.reminders_enabled else "off"
+            on = user.summary_enabled or user.deadline_alerts or user.reminders_enabled
+            state = "on" if on else "off"
             return [Reply(f"Reminders are {state}. Send /reminders on or /reminders off.")]
         if command == "block":
             if not args:
@@ -642,7 +661,7 @@ class SchedulingService:
         _, _, kind, fields = found
         if kind == "deadline":
             deadline = await self.repo.create_deadline(user.id, None, DeadlineDraft(**fields))
-            text = card_text(deadline, self.clock(), user.reminders_enabled)
+            text = card_text(deadline, self.clock(), user.deadline_alerts)
             return [
                 Reply(
                     "↩️ Restored.\n" + text.rsplit("\n\n", 1)[0],
@@ -681,20 +700,27 @@ class SchedulingService:
         rule = await self.repo.create_block(user.id, BlockRule.model_validate(fields))
         return [Reply("↩️ Restored.\n" + describe(rule), remove_block_keyboard(rule.id), edit=True)]
 
+    def summary_hour(self, user: User) -> int:
+        return user.summary_hour or self.settings.nightly_hour
+
     def settings_panel(self, user: User) -> Reply:
-        on = user.reminders_enabled
+        def state(on: bool) -> str:
+            return "on" if on else "off"
+
+        hour = self.summary_hour(user)
+        when = f", at {hour - 12 if hour > 12 else hour}{'pm' if hour >= 12 else 'am'}"
         text = (
             "⚙️ Settings\n\n"
-            f"Reminders: {'on' if on else 'off'}\n\n"
-            "This toggle controls:\n"
-            "• A summary of tomorrow's plans\n"
-            "• Deadline reminders\n"
-            '• "Still coming?" checks\n'
-            "• Nudges to reply to group plans and polls\n\n"
-            "Even when off, you'll still get updates to plans you've added "
-            "and reminders you set with /remind."
+            f"🌙 Evening summary: {state(user.summary_enabled)}"
+            f"{when if user.summary_enabled else ''}\n"
+            "Tomorrow's plans and deadlines, and what's due in the weeks ahead.\n\n"
+            f"📌 Deadline reminders: {state(user.deadline_alerts)}\n"
+            "What's due today at 9am, and a heads-up 3 hours before it's due.\n\n"
+            f"👥 Group check-ins: {state(user.reminders_enabled)}\n"
+            '"Still coming?" checks, and nudges to reply to group plans and polls.\n\n'
+            "Reminders you set with /remind, and updates to plans you've added, always arrive."
         )
-        return Reply(text, settings_keyboard(on))
+        return Reply(text, settings_keyboard(user, hour))
 
     async def usual_command(self, user: User, args: str) -> list[Reply]:
         """/usual tue evenings, sat all day: standing free times that pre-fill poll grids."""
@@ -1100,7 +1126,7 @@ class SchedulingService:
                 return [Reply("That deadline is gone or already done. Use /deadline.")]
             return [
                 Reply(
-                    card_text(deadline, self.clock(), user.reminders_enabled),
+                    card_text(deadline, self.clock(), user.deadline_alerts),
                     deadline_keyboard(deadline.id),
                 )
             ]
@@ -1489,7 +1515,7 @@ class SchedulingService:
                 card_text(
                     deadline,
                     self.clock(),
-                    user.reminders_enabled,
+                    user.deadline_alerts,
                     await self.deadline_calendar_line(user, deadline),
                 ),
                 deadline_keyboard(deadline.id),
@@ -1558,7 +1584,10 @@ class SchedulingService:
             return [Reply(f"🗑 Removed: {deadline.title}", undo_keyboard(token), edit=True)]
         await self.repo.finish_deadline(user.id, deadline_id)
         await self.safe_action(user.id, "deadline_done")
-        return [Reply(f"✅ Done: {deadline.title}. No more reminders for it.", edit=True)]
+        # "ok" comes from the Today list: confirm below it rather than replacing the list.
+        return [
+            Reply(f"✅ Done: {deadline.title}. No more reminders for it.", edit=action == "done")
+        ]
 
     async def load_target(self, user: User, pending: dict) -> Event | GroupEvent | None:
         """The plan a pending edit applies to: the user's own event, or a card they organise."""
@@ -2474,7 +2503,7 @@ class SchedulingService:
         action = parts[0]
         if action in ("pc", "dc", "bc", "rc") and len(parts) == 2:
             return await self.open_item(user, action, parts[1])
-        if action == "dl" and len(parts) == 3 and parts[1] in ("done", "rm"):
+        if action == "dl" and len(parts) == 3 and parts[1] in ("done", "ok", "rm"):
             return await self.deadline_action(user, parts[1], parts[2])
         if action == "chg" and len(parts) == 3 and parts[1] in ("venue", "time", "title"):
             return await self.choose_field(user, parts[1], parts[2])
@@ -2482,13 +2511,17 @@ class SchedulingService:
             return await self.choose_recurring(user, parts[1], parts[2])
         if action == "mt" and len(parts) == 3:
             return await self.choose_time(user, parts[1], parts[2])
-        if (
-            action == "set"
-            and len(parts) == 3
-            and parts[1] == "reminders"
-            and parts[2] in ("on", "off")
-        ):
-            await self.repo.set_user_flags(user.id, reminders_enabled=parts[2] == "on")
+        if action == "set" and len(parts) == 3 and parts[1] in SETTING_SWITCHES:
+            if parts[1] == "hour":
+                if not parts[2].isdigit() or int(parts[2]) not in SUMMARY_HOURS:
+                    return [Reply("That button isn't valid. Send /settings.")]
+                await self.repo.set_user_flags(user.id, summary_hour=int(parts[2]))
+            elif parts[2] in ("on", "off"):
+                await self.repo.set_user_flags(
+                    user.id, **{SETTING_SWITCHES[parts[1]]: parts[2] == "on"}
+                )
+            else:
+                return [Reply("That button isn't valid. Send /settings.")]
             user = await self.repo.ensure_user(telegram_id)
             panel = self.settings_panel(user)
             return [Reply(panel.text, panel.keyboard, edit=True)]

@@ -36,7 +36,7 @@ async def test_sunday_night_lists_tomorrow_the_week_and_the_month(service_factor
         "📌 Due tomorrow\n• MA1521 quiz · 9am\n\n"
         "🔜 Coming up\n• CS3244 report · Fri 9 Oct, 11:59pm (in 5 days)\n\n"
         "🗓 Later this month\n• CS2103T project · Tue 20 Oct\n\n"
-        "/plans for details. /reminders off stops these summaries."
+        "/plans for details. /settings to change the time or turn this off."
     )
 
 
@@ -82,3 +82,45 @@ def test_long_lists_stop_at_five_and_point_to_the_full_list():
 def test_nothing_tomorrow_and_no_month_list_sends_nothing():
     later = [SimpleNamespace(title="Essay", due_at=datetime(2026, 10, 9, tzinfo=SG))]
     assert summary(datetime(2026, 10, 6, tzinfo=SG), [], [], coming_up=later) is None
+
+
+async def test_each_switch_turns_off_only_its_own_reminders(service_factory):
+    service, repo = service_factory(
+        due(title="MA1521 quiz", date_text="Mon", start_time_text="1pm")
+    )
+    await add_deadlines(service, "MA1521 quiz due Mon 1pm")
+    for d in repo.deadlines.values():
+        d.created_at = at(4, 8)
+    (panel,) = await service.command(1, "settings")
+    (panel,) = await service.callback(1, tap(panel, "📌 Turn off deadline reminders"))
+    assert "📌 Deadline reminders: off" in panel.text and "🌙 Evening summary: on" in panel.text
+    # The summary still lists it the night before; the 9am Today list doesn't come.
+    assert len(await nightly(service, repo, at(4, 20, 5))) == 1
+    assert await reminders_at(service, repo, at(5, 9, 5)) == []
+
+
+async def test_the_summary_comes_at_the_chosen_hour(service_factory):
+    service, repo = service_factory(due())
+    await add_deadlines(service, "CS3244 report due Fri 11:59pm")
+    (panel,) = await service.command(1, "settings")
+    assert "Evening summary: on, at 8pm" in panel.text
+    (panel,) = await service.callback(1, tap(panel, "9pm"))
+    assert "Evening summary: on, at 9pm" in panel.text and tap(panel, "✓ 9pm")
+    assert await nightly(service, repo, at(8, 20, 5)) == []
+    assert len(await nightly(service, repo, at(8, 21, 5))) == 1
+    # Off: nothing at any hour, and no time buttons.
+    (panel,) = await service.callback(1, tap(panel, "🌙 Turn off evening summary"))
+    assert "Evening summary: off" in panel.text and not any(
+        b.text.endswith("pm") for row in panel.keyboard.inline_keyboard for b in row
+    )
+    assert "isn't valid" in (await service.callback(1, "set:hour:5"))[0].text
+
+
+async def test_reminders_off_turns_every_switch_off(service_factory):
+    service, repo = service_factory()
+    await service.command(1, "reminders", "off")
+    (panel,) = await service.command(1, "settings")
+    assert panel.text.count(": off") == 3
+    await service.command(1, "reminders", "on")
+    (panel,) = await service.command(1, "settings")
+    assert panel.text.count(": on") == 3

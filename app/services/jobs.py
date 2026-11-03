@@ -17,13 +17,14 @@ from app.bot.keyboards import (
     deadline_keyboard,
     nudge_keyboard,
     reminder_keyboard,
+    today_keyboard,
     undecided_keyboard,
 )
 from app.bot.messages import Reply, details, event_card, time_range, verdict_line
 from app.schemas.event import SG, Poll, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
-from app.services.deadlines import enqueue_deadline_reminders, reminder_text
+from app.services.deadlines import enqueue_deadline_reminders, reminder_text, today_text
 from app.services.quick_reminders import enqueue_reminders, ringing_text
 from app.services.reminders import (
     COMING_UP_DAYS,
@@ -85,8 +86,20 @@ class Notifier:
             if not reminder or reminder.done or reminder.remind_at > self.scheduling.clock():
                 return None
             return Reply(ringing_text(reminder), reminder_keyboard(reminder.id))
-        if not user.reminders_enabled:
+        # Each kind follows its own /settings switch.
+        if row["kind"] == "NIGHTLY" and not user.summary_enabled:
             return None
+        if row["kind"] in ("TODAY", "DEADLINE") and not user.deadline_alerts:
+            return None
+        if row["kind"] not in ("NIGHTLY", "TODAY", "DEADLINE") and not user.reminders_enabled:
+            return None
+        if row["kind"] == "TODAY":
+            now = self.scheduling.clock()
+            end = datetime.combine(now.astimezone(SG).date() + timedelta(days=1), time.min, SG)
+            due = await self.repo.deadlines_between(now, end, user.id)
+            plans = await self.repo.events_between(now, end, [Status.GOING], user.id)
+            text = today_text(due, sorted(plans, key=lambda e: e.start_at), now)
+            return Reply(text, today_keyboard(due)) if text else None
         if row["kind"] == "NIGHTLY":
             start = datetime.combine(date.fromisoformat(payload["date"]), time.min, SG)
             # Read at send time, so a plan cancelled since queuing is not announced.

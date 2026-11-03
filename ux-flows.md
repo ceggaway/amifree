@@ -460,17 +460,25 @@ Recent changes are flagged: `7:30pm · MPSH 2  🔔 venue changed from UTSRC`
 | Event cancelled or the user is no longer going | Pending reminders cancelled |
 | Two items start at the same time | One before-event reminder |
 
-### Settings (`/settings` → Reminders)
+### Settings (`/settings`)
+
+Built (migration 018): one switch per kind, and the summary's time while it's on.
 
 ```
-🔔 Reminders
+⚙️ Settings
 
-Night before: 9pm
-[8pm]  [9pm]  [10pm]  [Off]
+🌙 Evening summary: on, at 8pm
+📌 Deadline reminders: on      (☀️ Today at 9am, ⏰ 3 hours before)
+👥 Group check-ins: on         ("Still coming?", nudges)
 
-Before each event: 30 min
-[Off]  [15 min]  [30 min]  [1 hour]
+[🌙 Turn off evening summary]
+[✓ 8pm]  [9pm]  [10pm]
+[📌 Turn off deadline reminders]
+[👥 Turn off group check-ins]
 ```
+
+`/reminders on|off` sets all three. Still to build: a before-event reminder for plans
+(Off / 15 / 30 / 60 min).
 
 ### Changes from current (`reminders.py`, `jobs.py`)
 

@@ -1,167 +1,138 @@
-"""The evening summary: tomorrow's plans and deadlines, the week ahead, and a monthly look."""
+"""A daily overview contains only saved plans and is delivered once per plan date."""
 
-from datetime import datetime
-from types import SimpleNamespace
-
-from app.schemas.event import SG, Status
-from app.services.deadlines import reminder_promise
-from app.services.reminders import summary
+from app.schemas.event import Status
+from app.services.jobs import Notifier
+from app.services.reminders import enqueue_nightly, summary
 from tests.conftest import extraction, tap
 from tests.test_deadlines import at, due, reminders_at
+from tests.test_notifications import Outbox
 
 
-async def nightly(service, repo, now):
-    return [r for r in await reminders_at(service, repo, now) if r.text.startswith("Tomorrow")]
-
-
-async def add_deadlines(service, *texts):
-    for n, text in enumerate(texts):
-        await service.message(1, 100 + n, text, datetime(2026, 10, 4, 12, tzinfo=SG))
-
-
-async def test_sunday_night_lists_tomorrow_the_week_and_the_month(service_factory):
-    service, repo = service_factory(
-        due(title="MA1521 quiz", date_text="Mon", start_time_text="9am"),
-        due(title="CS3244 report"),
-        due(title="CS2103T project", date_text="2026-10-20"),
-    )
-    await add_deadlines(
-        service,
-        "MA1521 quiz due Mon 9am",
-        "CS3244 report due Fri 11:59pm",
-        "CS2103T project due 2026-10-20 11:59pm",
-    )
-    (sent,) = await nightly(service, repo, at(4, 20, 5))  # Sunday
-    assert sent.text == (
-        "Tomorrow, 📅 05/10/2026 (Monday):\n\n📌 Due tomorrow\n• MA1521 quiz · 9am\n\n🔜 Coming up\n• CS3244 report · 📅 09/10/2026 (Friday), 11:59pm (in 5 days)\n\n🗓 Later this month\n• CS2103T project · 📅 20/10/2026 (Tuesday)\n\n/plans for details. /settings to change the time or turn this off."
-    )
-
-
-async def test_other_nights_skip_days_with_only_later_deadlines(service_factory):
-    service, repo = service_factory(due(), due(title="CS2103T project", date_text="2026-10-20"))
-    await add_deadlines(
-        service, "CS3244 report due Fri 11:59pm", "CS2103T project due 2026-10-20 11:59pm"
-    )
-    # Monday night: nothing tomorrow, so no message, even with deadlines later in the week.
-    assert await nightly(service, repo, at(5, 20, 5)) == []
-    # Thursday night: the report is due tomorrow, and the month list is left for Sunday.
-    (sent,) = await nightly(service, repo, at(8, 20, 5))
-    assert "📌 Due tomorrow\n• CS3244 report · 11:59pm" in sent.text
-    assert "Later this month" not in sent.text and "CS2103T" not in sent.text
-
-
-async def test_undecided_plans_can_be_answered_from_the_summary(service_factory, reference):
+async def saved_plan(service_factory, reference):
     service, repo = service_factory(
         extraction(
             title="Badminton", date_text="Monday", start_time_text="8pm", end_time_text="10pm"
         )
     )
-    await service.message(1, 1, "Badminton Monday 8pm-10pm", reference)
-    plan = next(iter(repo.events.values()))
-    await repo.save(plan.user_id, plan)
-    (sent,) = await nightly(service, repo, at(4, 20, 5))
-    assert "Still undecided: Badminton" in sent.text
-    await service.callback(1, tap(sent, "✅ Going: Badminton"))
-    assert next(iter(repo.events.values())).status == Status.GOING
-
-
-def test_long_lists_stop_at_five_and_point_to_the_full_list():
-    now = datetime(2026, 10, 4, 20, tzinfo=SG)
-    soon = [
-        SimpleNamespace(title=f"Task {n}", due_at=datetime(2026, 10, 6 + n % 5, 9, tzinfo=SG))
-        for n in range(7)
-    ]
-    first = SimpleNamespace(title="Quiz", due_at=datetime(2026, 10, 5, 9, tzinfo=SG))
-    text = summary(datetime(2026, 10, 5, tzinfo=SG), [], [first], coming_up=soon, now=now)
-    assert text.count("• Task") == 5 and "+ 2 more · /deadline" in text
-
-
-def test_nothing_tomorrow_and_no_month_list_sends_nothing():
-    later = [SimpleNamespace(title="Essay", due_at=datetime(2026, 10, 9, tzinfo=SG))]
-    assert summary(datetime(2026, 10, 6, tzinfo=SG), [], [], coming_up=later) is None
-
-
-async def test_each_switch_turns_off_only_its_own_reminders(service_factory):
-    service, repo = service_factory(
-        due(title="MA1521 quiz", date_text="Mon", start_time_text="1pm")
-    )
-    await add_deadlines(service, "MA1521 quiz due Mon 1pm")
-    for d in repo.deadlines.values():
-        d.created_at = at(4, 8)
-    (panel,) = await service.command(1, "settings")
-    (panel,) = await service.callback(1, tap(panel, "☀️ Turn off morning list"))
-    assert "☀️ Morning list: off" in panel.text and "🌙 Evening summary: on" in panel.text
-    # The summary still lists it the night before; the 9am Today list doesn't come, but the
-    # alert 3 hours before (10am) now does, since no morning list covers it.
-    assert len(await nightly(service, repo, at(4, 20, 5))) == 1
-    assert await reminders_at(service, repo, at(5, 9, 5)) == []
-    (alert,) = await reminders_at(service, repo, at(5, 10, 5))
-    assert alert.text.startswith("⏰ Due at 1pm")
-    (panel,) = await service.callback(1, tap(panel, "⏰ Turn off deadline alerts"))
-    assert "⏰ Deadline alerts: off" in panel.text
-
-
-async def test_the_summary_comes_at_the_chosen_hour(service_factory):
-    service, repo = service_factory(due())
-    await add_deadlines(service, "CS3244 report due Fri 11:59pm")
-    (panel,) = await service.command(1, "settings")
-    assert "Evening summary: on, at 8pm" in panel.text
-    (panel,) = await service.callback(1, tap(panel, "9pm"))
-    assert "Evening summary: on, at 9pm" in panel.text and tap(panel, "✓ 9pm")
-    assert await nightly(service, repo, at(8, 20, 5)) == []
-    assert len(await nightly(service, repo, at(8, 21, 5))) == 1
-    # Off: nothing at any hour, and no time buttons.
-    (panel,) = await service.callback(1, tap(panel, "🌙 Turn off evening summary"))
-    assert "Evening summary: off" in panel.text and not any(
-        b.text.endswith("pm") for row in panel.keyboard.inline_keyboard for b in row
-    )
-    assert "isn't valid" in (await service.callback(1, "set:hour:5"))[0].text
-
-
-async def test_reminders_off_turns_every_switch_off(service_factory):
-    service, repo = service_factory()
-    await service.command(1, "reminders", "off")
-    (panel,) = await service.command(1, "settings")
-    assert panel.text.count(": off") == 4
-    await service.command(1, "reminders", "on")
-    (panel,) = await service.command(1, "settings")
-    assert panel.text.count(": on") == 4
-
-
-async def test_a_day_with_only_plans_gets_a_morning_list(service_factory, reference):
-    service, repo = service_factory(
-        extraction(
-            title="Badminton",
-            date_text="Monday",
-            start_time_text="8pm",
-            end_time_text="10pm",
-            location="MPSH 2",
-        )
-    )
-    card = (await service.message(1, 1, "Badminton Monday 8pm-10pm at MPSH 2", reference))[0]
+    card = (await service.message(1, 1, "Badminton Monday 8pm-10pm", reference))[0]
     await service.callback(1, tap(card, "Add to plans"))
-    for e in repo.events.values():
-        e.created_at = reference
-    assert await reminders_at(service, repo, at(5, 8, 55)) == []
-    (today,) = await reminders_at(service, repo, at(5, 9, 5))
-    assert today.text == (
-        "☀️ Today, 📅 05/10/2026 (Monday)\n\n🗓 Your plans\n• 8pm–10pm Badminton · MPSH 2\n/settings to change reminders."
-    )
-    assert today.keyboard is None
-    # Not out by noon (the server slept through the morning): skipped for the day.
-    service2, repo2 = service_factory(
-        extraction(title="Run", date_text="Monday", start_time_text="7pm", end_time_text="8pm")
-    )
-    card = (await service2.message(1, 1, "Run Monday 7pm-8pm", reference))[0]
-    await service2.callback(1, tap(card, "Add to plans"))
-    for e in repo2.events.values():
-        e.created_at = reference
-    assert await reminders_at(service2, repo2, at(5, 12, 5)) == []
+    for event in repo.events.values():
+        event.created_at = reference
+    return service, repo, await repo.ensure_user(1)
 
 
-def test_without_the_morning_list_the_alert_covers_the_morning():
-    deadline = SimpleNamespace(due_at=datetime(2026, 10, 13, 13, tzinfo=SG))
-    now = datetime(2026, 10, 12, 15, tzinfo=SG)
-    assert "tomorrow at 9am." in reminder_promise(deadline, now)
-    off = reminder_promise(deadline, now, morning=False)
-    assert "tomorrow at 10am, 3 hours before" in off and "9am" not in off
+async def test_one_morning_overview_and_no_evening_duplicate(service_factory, reference):
+    service, repo, user = await saved_plan(service_factory, reference)
+    assert await reminders_at(service, repo, at(4, 21)) == []
+    assert await reminders_at(service, repo, at(5, 8, 59)) == []
+    (sent,) = await reminders_at(service, repo, at(5, 9))
+    assert "Daily overview" in sent.text and "Today · 📅 05/10/2026 (Mon)" in sent.text
+    assert "<b>Badminton</b>" in sent.text and sent.parse_mode == "HTML"
+    assert await reminders_at(service, repo, at(5, 9, 1)) == []
+    await repo.set_user_flags(user.id, overview_period="evening")
+    # No plans tomorrow, so changing the period doesn't send a second overview.
+    assert await reminders_at(service, repo, at(5, 21)) == []
+
+
+async def test_night_before_and_morning_share_a_deduplication_key(service_factory, reference):
+    service, repo, user = await saved_plan(service_factory, reference)
+    await repo.set_user_flags(user.id, overview_period="evening")
+    assert await reminders_at(service, repo, at(4, 20, 59)) == []
+    (sent,) = await reminders_at(service, repo, at(4, 21))
+    assert "Tomorrow · 📅 05/10/2026 (Mon)" in sent.text
+    await repo.set_user_flags(user.id, overview_period="morning")
+    assert await reminders_at(service, repo, at(5, 9)) == []
+
+
+async def test_custom_time_is_observed_to_the_minute(service_factory, reference):
+    service, repo, user = await saved_plan(service_factory, reference)
+    await repo.set_user_flags(user.id, overview_morning_minute=7 * 60 + 45)
+    assert await reminders_at(service, repo, at(5, 7, 44)) == []
+    assert len(await reminders_at(service, repo, at(5, 7, 45))) == 1
+    assert await reminders_at(service, repo, at(5, 9)) == []
+
+
+async def test_daily_overview_off_does_not_disable_deadline_alerts(service_factory, reference):
+    service, repo = service_factory(due(date_text="Mon", start_time_text="1pm"))
+    await service.message(1, 1, "Report due Mon 1pm", reference)
+    user = await repo.ensure_user(1)
+    await repo.set_user_flags(user.id, overview_enabled=False)
+    for deadline in repo.deadlines.values():
+        deadline.created_at = reference
+    assert await reminders_at(service, repo, at(5, 9)) == []
+    (sent,) = await reminders_at(service, repo, at(5, 10))
+    assert "Deadline reminder" in sent.text
+
+
+async def test_overviews_never_include_deadlines_or_unsaved_previews(service_factory, reference):
+    service, repo = service_factory(due(date_text="Mon"), extraction(date_text="Monday"))
+    await service.message(1, 1, "Report due Mon 11:59pm", reference)
+    await service.message(1, 2, "Dinner Monday 7-9pm", reference)  # preview only
+    for d in repo.deadlines.values():
+        d.created_at = reference
+    assert await reminders_at(service, repo, at(5, 9)) == []
+    assert summary(at(5, 0), [], list(repo.deadlines.values())) is None
+
+
+async def test_saved_status_is_included_and_cancelled_plan_is_not(service_factory, reference):
+    service, repo, user = await saved_plan(service_factory, reference)
+    event = next(iter(repo.events.values()))
+    event.status = Status.SAVED
+    assert "Badminton" in summary(at(5, 0), [event])
+    event.status = Status.CANCELLED
+    assert summary(at(5, 0), [event]) is None
+
+
+async def test_time_changed_after_queue_is_deferred_and_not_lost(service_factory, reference):
+    service, repo, user = await saved_plan(service_factory, reference)
+    await repo.set_user_flags(user.id, overview_period="evening", overview_evening_minute=20 * 60)
+    assert await enqueue_nightly(repo, at(4, 20)) == 1
+    await repo.set_user_flags(user.id, overview_evening_minute=21 * 60)
+    outbox = Outbox()
+    service.notifier = Notifier(service, outbox)
+    service.clock = lambda: at(4, 20)
+    assert (await service.notifier.deliver())["deferred"] == 1
+    assert not outbox.sent
+    service.clock = lambda: at(4, 21)
+    assert (await service.notifier.deliver())["sent"] == 1
+    assert len(outbox.sent) == 1
+
+
+async def test_late_morning_overview_and_empty_day_are_skipped(service_factory, reference):
+    service, repo, user = await saved_plan(service_factory, reference)
+    assert await reminders_at(service, repo, at(5, 12)) == []
+    assert await reminders_at(service, repo, at(6, 9)) == []
+
+
+async def test_personal_reminders_off_keeps_group_delivery_enabled(service_factory):
+    service, repo = service_factory()
+    user = await repo.ensure_user(1)
+    await service.command(1, "reminders", "off")
+    user = await repo.ensure_user(1)
+    assert not user.overview_enabled and not user.deadline_alerts
+    assert user.reminders_enabled
+    await service.command(1, "reminders", "on")
+    user = await repo.ensure_user(1)
+    assert user.overview_enabled and user.deadline_alerts
+
+
+async def test_moving_a_deferred_overview_earlier_wakes_its_queue(service_factory, reference):
+    service, repo, user = await saved_plan(service_factory, reference)
+    await repo.set_user_flags(user.id, overview_period="evening", overview_evening_minute=20 * 60)
+    assert await enqueue_nightly(repo, at(4, 20)) == 1
+    await repo.set_user_flags(user.id, overview_evening_minute=22 * 60)
+    outbox = Outbox()
+    service.notifier = Notifier(service, outbox)
+    service.clock = lambda: at(4, 20)
+    assert (await service.notifier.deliver())["deferred"] == 1
+    assert repo.notifications[0]["next_attempt_at"] == at(4, 22)
+    service.clock = lambda: at(4, 20, 15)
+    await service.save_personal_preferences(
+        await repo.ensure_user(1), overview_evening_minute=20 * 60 + 30
+    )
+    assert repo.notifications[0]["next_attempt_at"] == at(4, 20, 15)
+    assert (await service.notifier.deliver())["deferred"] == 1
+    assert repo.notifications[0]["next_attempt_at"] == at(4, 20, 30)
+    service.clock = lambda: at(4, 20, 30)
+    assert (await service.notifier.deliver())["sent"] == 1
+    assert len(outbox.sent) == 1

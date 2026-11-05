@@ -770,8 +770,8 @@ class GroupEventService:
         if not queued:
             return "Nobody left to nudge. Each member is nudged at most once per card."
         return (
-            f"Nudging {queued} member{'s' if queued != 1 else ''} privately. People who have"
-            " never used AmIFree in this group, or turned reminders off, aren't messaged."
+            f"Nudging {queued} member{'s' if queued != 1 else ''} privately. Only members who"
+            " have used AmIFree in this group and can receive bot messages can be reached."
         )
 
     async def from_private(self, telegram_id: int, data: str) -> list[Reply]:

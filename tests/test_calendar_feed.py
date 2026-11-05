@@ -195,7 +195,8 @@ async def test_the_feed_settings_appear_once_a_calendar_uses_the_feed(online):
     feed = (await service.callback(1, tap(status, "🍎 AmIFree calendar settings")))[0]
     assert "Add Subscribed Calendar" in feed.text
     back = (await service.callback(1, tap(feed, "« Back to my calendars")))[0]
-    assert back.edit and "Your calendars" in back.text
+    assert back.edit and back.text.startswith("<b>📅 Calendar</b>")
+    assert back.parse_mode == "HTML"
 
 
 # ---- deadlines ----

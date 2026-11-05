@@ -460,6 +460,15 @@ class MemoryRepository:
         else:
             n["status"] = "failed" if permanent or n["attempts"] >= 5 else "pending"
 
+    async def defer_notification(self, notification_id, until):
+        n = next(n for n in self.notifications if n["id"] == notification_id)
+        n.update(status="pending", next_attempt_at=until)
+
+    async def retime_pending_overviews(self, user_id, now):
+        for n in self.notifications:
+            if n["user_id"] == user_id and n["kind"] == "NIGHTLY" and n["status"] == "pending":
+                n["next_attempt_at"] = now
+
     async def create_poll(
         self, user_id, chat_id, message_id, title, minutes, start, end, deadline=None
     ):

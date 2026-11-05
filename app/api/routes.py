@@ -212,7 +212,7 @@ def build_router(settings: Settings) -> APIRouter:
     @router.patch("/me")
     async def update_settings(body: SettingsPatch, request: Request, user: CurrentUser):
         service = service_of(request)
-        # The app has one switch: it turns every kind on or off, like /reminders.
+        # Compatibility switch for personal reminders only; group delivery is independent.
         await service.repo.set_user_flags(user.id, **all_reminders(body.reminders_enabled))
         return {"reminders_enabled": body.reminders_enabled}
 

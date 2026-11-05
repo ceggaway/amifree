@@ -151,11 +151,11 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
         report = group_report(transport)
         assert "Results for project meeting (2 hours)" in report["text"]
         # Date labels use the same calendar marker as other bot messages.
-        assert "📅 05/10/2026 (Monday)" in report["text"]
+        assert "📅 05/10/2026 (Mon)" in report["text"]
         assert "3 people have submitted their availability" in report["text"]
         # Everyone is free from 14:00, so the morning never appears.
-        assert "1. 📅 05/10/2026 (Monday), 14:00–16:00 (3 of 3 available)" in report["text"]
-        assert "2. 📅 05/10/2026 (Monday), 16:00–18:00 (3 of 3 available)" in report["text"]
+        assert "1. 📅 05/10/2026 (Mon), 14:00–16:00 (3 of 3 available)" in report["text"]
+        assert "2. 📅 05/10/2026 (Mon), 16:00–18:00 (3 of 3 available)" in report["text"]
         # Counts only: no names, no titles of anyone's plans.
         assert "Lab" not in report["text"] and "Brunch" not in report["text"]
         choose = buttons(report["reply_markup"])
@@ -179,7 +179,7 @@ async def test_self_filling_poll_end_to_end(service_factory, reference):
         )
         assert "Confirmed" in alerts(transport)[-1]["text"]
         # The results message is updated in place, without its buttons.
-        assert "confirmed for 📅 05/10/2026 (Monday), 16:00–18:00" in last_card(transport)["text"]
+        assert "confirmed for 📅 05/10/2026 (Mon), 16:00–18:00" in last_card(transport)["text"]
     # Without the Mini App, the usual event card is posted in the group.
     event_card = transport.sent[sent_before]
     assert int(event_card["chat_id"]) == CHAT
@@ -232,7 +232,7 @@ async def test_choosing_announces_the_time_with_calendar_buttons(service_factory
     assert int(announced["chat_id"]) == CHAT
     text = announced["text"]
     assert "<b>project meeting is confirmed</b>" in text and announced["parse_mode"] == "HTML"
-    assert "📅 05/10/2026 (Monday)" in text and "🕑 08:00–10:00" in text
+    assert "📅 05/10/2026 (Mon)" in text and "🕑 08:00–10:00" in text
     # A notice, not a card: no buttons.
     assert not announced.get("reply_markup")
     # Only people free at the chosen time are added as Going (their calendars follow). Someone
@@ -344,7 +344,7 @@ async def test_organiser_can_choose_any_time_from_the_heatmap(service_factory):
     assert event.start_at == late and event.end_at == datetime(2026, 10, 5, 21, 30, tzinfo=SG)
     announced = transport.sent[sent_before]
     assert int(announced["chat_id"]) == CHAT
-    assert "📅 05/10/2026 (Monday)" in announced["text"] and "🕑 19:30–21:30" in announced["text"]
+    assert "📅 05/10/2026 (Mon)" in announced["text"] and "🕑 19:30–21:30" in announced["text"]
     assert "👥 3 of 3 who filled in are free" in announced["text"]
     # A second choice changes nothing.
     try:

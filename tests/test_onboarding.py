@@ -31,7 +31,7 @@ async def test_the_example_shows_a_clash_and_saves_nothing(service_factory):
     assert demo.edit and demo.parse_mode == "HTML"
     assert onboarding.DEMO_MESSAGE in demo.text
     assert "⚠️ Overlaps with CS1231S Lecture · 10AM–12:30PM SGT" in demo.text
-    assert "(Wednesday)" in demo.text and "nothing was saved" in demo.text
+    assert "(Wed)" in demo.text and "nothing was saved" in demo.text
     assert labels(demo) == [
         "📌 Next: a deadline",
         "📅 Connect calendar",
@@ -39,7 +39,9 @@ async def test_the_example_shows_a_clash_and_saves_nothing(service_factory):
         "« Back",
     ]
     assert service.extractor.calls == []  # canned, no LLM call
-    assert (await service.command(1, "plans"))[0].text.startswith("Nothing coming up")
+    assert (await service.command(1, "plans"))[0].text.startswith(
+        "<b>📋 My plans</b>\n\nNothing coming up"
+    )
     own = (await service.callback(1, tap(demo, "📩 Try my own message")))[0]
     assert own.text == onboarding.SKIPPED
     picker = (await service.callback(1, tap(demo, "📅 Connect calendar")))[0]
@@ -69,8 +71,8 @@ async def test_the_deadline_example_follows_and_saves_nothing(service_factory, r
     second = (await service.callback(1, tap(demo, "📌 Next: a deadline")))[0]
     assert second.edit and second.parse_mode == "HTML"
     assert onboarding.DEADLINE_DEMO_MESSAGE in second.text
-    assert "Due 📅 09/10/2026 (Friday)" in second.text and "11:59pm" in second.text
-    assert "evening summary the night before" in second.text and "(Google or Apple)" in second.text
+    assert "Due 📅 09/10/2026 (Fri)" in second.text and "11:59pm" in second.text
+    assert "3 hours before" in second.text and "(Google or Apple)" in second.text
     assert labels(second) == ["📅 Connect calendar", "📩 Try my own message", "« Back"]
     assert (await service.callback(1, tap(second, "« Back")))[0].text == demo.text
     assert service.extractor.calls == [] and not repo.deadlines
@@ -87,8 +89,8 @@ async def test_sending_the_deadline_example_saves_that_deadline(service_factory,
     )
     service, repo = service_factory(found)
     card = (await service.message(1, 1, onboarding.DEADLINE_DEMO_MESSAGE, reference))[0]
-    assert card.text.startswith("📌 CS3244 report\nDue 📅 09/10/2026 (Friday)")
-    assert "at 9am, and again at 8:59pm, 3 hours before" in card.text  # what the example says
+    assert card.text.startswith("📌 CS3244 report\nDue 📅 09/10/2026 (Fri)")
+    assert "at 8:59pm, 3 hours before" in card.text  # what the example says
     assert len(repo.deadlines) == 1
 
 
@@ -98,7 +100,7 @@ def test_the_example_is_always_a_coming_wednesday():
     for offset in range(7):
         today = date(2026, 11, 2) + timedelta(days=offset)
         text, _ = onboarding.demo_screen(today)
-        assert "(Wednesday)" in text
+        assert "(Wed)" in text
         assert today.strftime("%-d %b %Y") not in text  # never today, always ahead
 
 
@@ -270,8 +272,10 @@ async def test_skip_button_and_existing_menu_callbacks_work(service_factory):
     demo = (await service.callback(1, tap(welcome, "▶️ Try an example")))[0]
     skipped = (await service.callback(1, tap(demo, "📩 Try my own message")))[0]
     assert skipped.text == onboarding.SKIPPED and skipped.edit
-    assert (await service.callback(1, "menu:plans"))[0].text.startswith("Nothing coming up")
-    assert "Evening summary: on" in (await service.callback(1, "menu:settings"))[0].text
+    assert (await service.callback(1, "menu:plans"))[0].text.startswith(
+        "<b>📋 My plans</b>\n\nNothing coming up"
+    )
+    assert "Daily overview · On" in (await service.callback(1, "menu:settings"))[0].text
 
 
 async def test_nusmods_guide_returns_to_classes_question(service_factory):
@@ -356,7 +360,9 @@ async def test_after_nusmods_start_says_all_set(service_factory, reference):
     )
 
 
-async def test_returning_start_lists_both_calendars_and_matches_menu(service_factory, reference):
+async def test_returning_start_lists_calendars_and_commands_without_buttons(
+    service_factory, reference
+):
     service, _ = service_factory()
     await onboard(service, reference)
     service.calendar_reader = FakeReader(labels={GOOGLE: "Google Calendar"})
@@ -365,8 +371,7 @@ async def test_returning_start_lists_both_calendars_and_matches_menu(service_fac
     assert "• NUSMods · AY 2026/2027, Semester 1\n• Google Calendar" in reply.text
     assert all(command in reply.text for command in ("/plans", "/free", "/deadline", "/settings"))
     assert "/feedback" not in reply.text
-    assert [len(row) for row in reply.keyboard.inline_keyboard] == [2, 2]
-    assert labels(reply) == ["📋 My plans", "🕒 Am I free?", "📌 Deadlines", "⚙️ Settings"]
+    assert reply.keyboard is None
 
 
 async def test_google_shared_connection_alone_gets_returning_menu(service_factory):

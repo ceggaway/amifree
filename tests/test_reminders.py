@@ -62,9 +62,7 @@ async def test_typed_reminder_is_saved_and_listed_but_not_busy(service_factory, 
     assert any(
         "Reminder: Buy milk" in b.text for row in plans.keyboard.inline_keyboard for b in row
     )
-    opened = (await service.callback(1, tap(plans, "📅 04/10/2026 (Sunday) · Reminder: Buy milk")))[
-        0
-    ]
+    opened = (await service.callback(1, tap(plans, "📅 04/10/2026 (Sun) · Reminder: Buy milk")))[0]
     assert "Buy milk" in opened.text and "Rings today at 5pm" in opened.text
 
     # It does not make 5pm busy.

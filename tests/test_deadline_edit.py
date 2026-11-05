@@ -44,7 +44,7 @@ async def test_change_the_due_time(service_factory, reference, typed, expected):
     service, repo = service_factory(due())
     await edit(service, repo, reference, "🕒 Due date & time")
     (card,) = await service.message(1, 2, typed, reference)
-    assert card.text.startswith("✏️ Due time changed (was 📅 09/10/2026 (Friday), 11:59pm")
+    assert card.text.startswith("✏️ Due time changed (was 📅 09/10/2026 (Fri), 11:59pm")
     (deadline,) = repo.deadlines.values()
     assert deadline.due_at == expected
 
@@ -89,13 +89,12 @@ async def test_reminders_follow_the_new_due_time(service_factory, reference):
     service, repo = service_factory(due())
     await edit(service, repo, reference, "🕒 Due date & time")
     (card,) = await service.message(1, 2, "tmr 5pm", reference)
-    assert "I'll remind you tomorrow at 9am, and again at 2pm, 3 hours before." in card.text
+    assert "I'll remind you tomorrow at 2pm, 3 hours before." in card.text
     for d in repo.deadlines.values():
         d.created_at = reference
-    (today,) = await reminders_at(service, repo, at(5, 9, 5))
-    assert "• CS3244 report · 5pm" in today.text
+    assert await reminders_at(service, repo, at(5, 9, 5)) == []
     (alert,) = await reminders_at(service, repo, at(5, 14, 5))
-    assert alert.text.startswith("⏰ Due at 5pm")
+    assert "Deadline reminder" in alert.text and "5pm" in alert.text
     assert await reminders_at(service, repo, at(9, 9, 5)) == []  # nothing on the old day
 
 

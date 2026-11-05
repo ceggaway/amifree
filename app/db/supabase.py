@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -53,7 +53,9 @@ class SupabaseRepository:
         # Check everything the current code needs (tables, columns and the calendar function),
         # not merely that the host responds. A missing migration fails here, by name, in the log.
         required = {
-            "users": "id,calendar_feed_token,calendar_feed_seen_at,calendar_feed_app,google_connected",
+            "users": "id,calendar_feed_token,calendar_feed_seen_at,calendar_feed_app,google_connected,"
+            "overview_enabled,overview_period,overview_morning_minute,overview_evening_minute,"
+            "deadline_lead_minutes",
             "timetable_blocks": "id",
             "events": "id",
             "event_extractions": "id",
@@ -671,7 +673,7 @@ class SupabaseRepository:
         result = await self.client.table("users").select("*").eq("id", user_id).limit(1).execute()
         return User.model_validate(result.data[0]) if result.data else None
 
-    async def set_user_flags(self, user_id: str, **flags: bool):
+    async def set_user_flags(self, user_id: str, **flags: bool | int | str):
         await self.client.table("users").update(flags).eq("id", user_id).execute()
 
     async def list_calendars(self, user_id: str) -> list[PersonalCalendar]:
@@ -949,6 +951,26 @@ class SupabaseRepository:
             {"p_id": notification_id, "p_ok": ok, "p_permanent": permanent},
         ).execute()
 
+    async def defer_notification(self, notification_id: str, until: datetime):
+        await (
+            self.client.table("notification_logs")
+            .update({"status": "pending", "next_attempt_at": until.isoformat(), "claimed_at": None})
+            .eq("id", notification_id)
+            .eq("status", "sending")
+            .execute()
+        )
+
+    async def retime_pending_overviews(self, user_id: str, now: datetime):
+        """Wake unsent overviews so delivery rechecks a newly selected timing."""
+        await (
+            self.client.table("notification_logs")
+            .update({"next_attempt_at": now.isoformat()})
+            .eq("user_id", user_id)
+            .eq("kind", "NIGHTLY")
+            .eq("status", "pending")
+            .execute()
+        )
+
     async def create_poll(
         self,
         user_id: str,
@@ -972,6 +994,7 @@ class SupabaseRepository:
                 "p_window_end": end.isoformat(),
             },
         ).execute()
+
         poll = Poll.model_validate(result.data[0])
         if deadline and poll.deadline_at is None:
             await (

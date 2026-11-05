@@ -79,8 +79,8 @@ function Reminders({ initial }: { initial: boolean }) {
           label="Reminders"
           hint={
             on
-              ? "On: the night-before summary, deadline reminders, \"still coming?\" checks and nudges about group plans you haven't answered."
-              : "Off: none of those. Alerts when a plan you saved changes, and reminders you set with /remind, still arrive."
+              ? "On: your daily overview and deadline alerts. Customise their timing with /settings in the bot."
+              : "Off: none of those. Updates to saved plans and reminders you set with /remind still arrive."
           }
           on={on}
           busy={busy}

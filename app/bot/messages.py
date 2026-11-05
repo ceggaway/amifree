@@ -15,7 +15,7 @@ HELP = """<b>AmIFree</b> — forward me a plan, I'll tell you if you're free and
 <b>How to use me</b>
 📩 Forward or type a plan with a time, like "Dinner Fri 7-9pm at Vivo". I check it, then you tap Add to plans or Skip.
 🎙 Or send a voice note (up to a minute) saying the plan. The card shows what I heard.
-⏰ Forward a deadline, like "report due Fri 11:59pm". I'll remind you on the day, and 3 hours before.
+⏰ Forward a deadline, like "report due Fri 11:59pm". Choose when to be reminded in /settings.
 📅 Connect a calendar or NUSMods so I can see your classes and busy times (optional).
 
 <i>"No clashes found" only covers what I know about.</i>
@@ -65,6 +65,8 @@ class Reply:
     photo: bytes | None = None
     # Replace the card whose button was tapped instead of sending a new message.
     edit: bool = False
+    # A typed settings answer updates the originating bot message, rather than adding a new one.
+    edit_message_id: int | None = None
     parse_mode: str | None = None
     # When these photos form an album that should replace an earlier album in the same chat,
     # the group name both share; the earlier album's messages are deleted before this is sent.
@@ -486,6 +488,23 @@ async def send_reply(update, reply: Reply):
     if reply.clear_album_group is not None:
         await _clear_guide_album(update, reply.clear_album_group)
     query = getattr(update, "callback_query", None)
+    if reply.edit_message_id is not None and query is None:
+        from telegram.error import BadRequest
+
+        try:
+            await update.get_bot().edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=reply.edit_message_id,
+                text=reply.text,
+                parse_mode=reply.parse_mode,
+                reply_markup=reply.keyboard,
+                **preview_options,
+            )
+            return
+        except BadRequest as exc:
+            if "not modified" in str(exc).lower():
+                return
+            # A deleted or expired settings message can be replaced normally.
     if reply.edit and query is not None and not reply.document:
         from telegram import InputMediaPhoto
         from telegram.error import BadRequest, TelegramError

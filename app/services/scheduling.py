@@ -17,7 +17,6 @@ from telegram import InlineKeyboardMarkup
 from app.bot import onboarding
 from app.bot.delivery import telegram_profile
 from app.bot.keyboards import (
-    SUMMARY_HOURS,
     agenda_keyboard,
     calendar_settings_keyboard,
     change_keyboard,
@@ -27,7 +26,6 @@ from app.bot.keyboards import (
     deadline_keyboard,
     feedback_choice_keyboard,
     free_keyboard,
-    menu_keyboard,
     page_keyboard,
     personal_calendars_keyboard,
     personal_change_confirmation,
@@ -35,7 +33,6 @@ from app.bot.keyboards import (
     recurring_keyboard,
     reminder_keyboard,
     remove_block_keyboard,
-    settings_keyboard,
     times_keyboard,
     undo_keyboard,
     with_plans_navigation,
@@ -70,6 +67,7 @@ from app.schemas.event import (
     Status,
 )
 from app.services import analytics, calendar_export, quick_reminders
+from app.services import personal_reminder_settings as reminder_settings
 from app.services.availability import check_availability
 from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
@@ -132,16 +130,6 @@ from app.services.usual_times import describe as describe_usual
 from app.services.usual_times import parse_usual
 from app.services.voice_reader import VoiceError
 
-# /settings callbacks: set:<switch>:on|off, and set:hour:<20|21|22> for the summary time.
-SETTING_SWITCHES = {
-    "summary": "summary_enabled",
-    "morning": "morning_enabled",
-    "deadlines": "deadline_alerts",
-    "reminders": "reminders_enabled",
-    "hour": "summary_hour",
-}
-
-
 # What can be changed on a deadline, and the question asked for each.
 DEADLINE_FIELDS = {
     "title": "Send the new name.",
@@ -157,7 +145,7 @@ def all_reminders(on: bool) -> dict[str, bool]:
         "summary_enabled": on,
         "morning_enabled": on,
         "deadline_alerts": on,
-        "reminders_enabled": on,
+        "overview_enabled": on,
     }
 
 
@@ -303,6 +291,33 @@ FEEDBACK_ASK = (
     "Choose an option below."
 )
 
+FEATURE_HEADINGS = {
+    "plans": ("📋 My plans", ("Your plans",)),
+    "free": ("🕒 Am I free?", ()),
+    "deadline": ("📌 Deadlines", ()),
+    "deadlines": ("📌 Deadlines", ()),
+    "calendar": ("📅 Calendar", ("📅 Your calendars",)),
+    "settings": ("⚙️ Settings", ("⚙️ Settings",)),
+    "feedback": ("💬 Feedback", ()),
+}
+
+
+def feature_reply(reply: Reply, command: str) -> Reply:
+    """Keep feature screens recognisable, including after pagination and button actions."""
+    heading, old_headings = FEATURE_HEADINGS[command]
+    first_line = f"<b>{heading}</b>"
+    if reply.parse_mode == "HTML" and reply.text.startswith(first_line + "\n"):
+        return reply
+    text = reply.text
+    for old in old_headings:
+        for prefix in (old, f"<b>{old}</b>"):
+            if text.startswith(prefix + "\n"):
+                text = text[len(prefix) :].lstrip("\n")
+                break
+    if reply.parse_mode != "HTML":
+        text = html.escape(text, quote=False)
+    return replace(reply, text=f"{first_line}\n\n{text}", parse_mode="HTML")
+
 
 class SchedulingService:
     def __init__(
@@ -439,10 +454,13 @@ class SchedulingService:
         message = message[:2000]
         await self.repo.set_pending(user.id, {"stage": "feedback_choose", "text": message})
         return [
-            Reply(
-                "<b>Your feedback</b>\n“" + html.escape(message) + "”\n\n" + FEEDBACK_ASK,
-                feedback_choice_keyboard(),
-                parse_mode="HTML",
+            feature_reply(
+                Reply(
+                    "<b>Your feedback</b>\n“" + html.escape(message) + "”\n\n" + FEEDBACK_ASK,
+                    feedback_choice_keyboard(),
+                    parse_mode="HTML",
+                ),
+                "feedback",
             )
         ]
 
@@ -464,7 +482,16 @@ class SchedulingService:
         return [Reply(f"🙌 Thanks! Sent to the team{how}.", edit=True)]
 
     async def command(self, telegram_id: int, command: str, args: str = "") -> list[Reply]:
+        replies = await self._command(telegram_id, command, args)
+        if replies and command in FEATURE_HEADINGS:
+            replies[0] = feature_reply(replies[0], command)
+        return replies
+
+    async def _command(self, telegram_id: int, command: str, args: str = "") -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
+        if (user.pending or {}).get("stage") == "settings_time":
+            await self.repo.set_pending(user.id, None)
+            user = user.model_copy(update={"pending": None})
         if command == "help":
             return [Reply(HELP, parse_mode="HTML")]
         if command == "feedback":
@@ -510,7 +537,6 @@ class SchedulingService:
                         + "\n".join("• " + html.escape(name) for name in connected)
                         + "\n\n"
                         + onboarding.EVERYDAY_HELP,
-                        menu_keyboard(),
                         parse_mode="HTML",
                     )
                 ]
@@ -567,19 +593,8 @@ class SchedulingService:
         if command == "reminders":
             choice = args.lower()
             if choice in ("on", "off"):
-                # Every switch at once; /settings turns them on or off one by one.
                 await self.repo.set_user_flags(user.id, **all_reminders(choice == "on"))
-                return [
-                    Reply(
-                        "Evening summaries, the morning list, deadline alerts and group check-ins"
-                        " are on."
-                        if choice == "on"
-                        else "Evening summaries, the morning list, deadline alerts and group"
-                        " check-ins are off."
-                        " Change alerts for plans you saved still arrive. /settings turns"
-                        " them back on one by one."
-                    )
-                ]
+                return [Reply(f"Personal reminders are {choice}. Use /settings to customise them.")]
             on = any(getattr(user, field) for field in all_reminders(True))
             state = "on" if on else "off"
             return [Reply(f"Reminders are {state}. Send /reminders on or /reminders off.")]
@@ -695,7 +710,11 @@ class SchedulingService:
         if kind == "deadline":
             deadline = await self.repo.create_deadline(user.id, None, DeadlineDraft(**fields))
             text = card_text(
-                deadline, self.clock(), user.deadline_alerts, morning=user.morning_enabled
+                deadline,
+                self.clock(),
+                user.deadline_alerts,
+                morning=False,
+                lead_minutes=user.deadline_lead_minutes,
             )
             return [
                 Reply(
@@ -735,29 +754,163 @@ class SchedulingService:
         rule = await self.repo.create_block(user.id, BlockRule.model_validate(fields))
         return [Reply("↩️ Restored.\n" + describe(rule), remove_block_keyboard(rule.id), edit=True)]
 
-    def summary_hour(self, user: User) -> int:
-        return user.summary_hour or self.settings.nightly_hour
-
     def settings_panel(self, user: User) -> Reply:
-        def state(on: bool) -> str:
-            return "on" if on else "off"
+        return reminder_settings.screen(user)
 
-        hour = self.summary_hour(user)
-        when = f", at {hour - 12 if hour > 12 else hour}{'pm' if hour >= 12 else 'am'}"
-        text = (
-            "⚙️ Settings\n\n"
-            f"🌙 Evening summary: {state(user.summary_enabled)}"
-            f"{when if user.summary_enabled else ''}\n"
-            "Tomorrow's plans and deadlines, and what's due in the weeks ahead.\n\n"
-            f"☀️ Morning list: {state(user.morning_enabled)}, at 9am\n"
-            "Today's plans and what's due today.\n\n"
-            f"⏰ Deadline alerts: {state(user.deadline_alerts)}\n"
-            "A heads-up 3 hours before something is due.\n\n"
-            f"👥 Group check-ins: {state(user.reminders_enabled)}\n"
-            '"Still coming?" checks, and nudges to reply to group plans and polls.\n\n'
-            "Reminders you set with /remind, and updates to plans you've added, always arrive."
+    async def save_personal_preferences(self, user: User, **flags) -> User:
+        overview_changed = any(
+            key.startswith("overview_") and getattr(user, key) != value
+            for key, value in flags.items()
         )
-        return Reply(text, settings_keyboard(user, hour))
+        if "overview_enabled" in flags or "overview_period" in flags:
+            enabled = flags.get("overview_enabled", user.overview_enabled)
+            period = flags.get("overview_period", user.overview_period)
+            flags.update(
+                summary_enabled=enabled and period == "evening",
+                morning_enabled=enabled and period == "morning",
+            )
+        await self.repo.set_user_flags(user.id, **flags)
+        if overview_changed:
+            await self.repo.retime_pending_overviews(user.id, self.clock())
+        return await self.repo.ensure_user(user.telegram_user_id)
+
+    async def personal_settings_action(
+        self, user: User, action: str, message_id=None, settings_pending=None
+    ) -> list[Reply]:
+        page = "home"
+        if action in ("home", "overview", "deadline", "deadline_timing"):
+            page = action
+        elif action in ("overview:on", "overview:off", "deadline:on", "deadline:off"):
+            kind, value = action.split(":")
+            field = "overview_enabled" if kind == "overview" else "deadline_alerts"
+            user = await self.save_personal_preferences(user, **{field: value == "on"})
+            page = kind
+        elif action in ("period:morning", "period:evening"):
+            page = "overview"
+            if user.overview_enabled:
+                user = await self.save_personal_preferences(
+                    user, overview_period=action.split(":")[1]
+                )
+        elif action in ("overview:time", "deadline:custom"):
+            kind = action.split(":")[0]
+            if not (user.overview_enabled if kind == "overview" else user.deadline_alerts):
+                return [replace(reminder_settings.screen(user, kind), edit=True)]
+            page = "overview_time" if kind == "overview" else "deadline_custom"
+            await self.repo.set_pending(
+                user.id,
+                {
+                    "stage": "settings_time",
+                    "kind": kind,
+                    "period": user.overview_period,
+                    "settings_message_id": message_id,
+                },
+            )
+        elif action == "deadline:timing":
+            page = "deadline_timing" if user.deadline_alerts else "deadline"
+        elif action in ("lead:60", "lead:180", "lead:1440"):
+            if user.deadline_alerts:
+                user = await self.save_personal_preferences(
+                    user, deadline_lead_minutes=int(action.split(":")[1])
+                )
+            page = "deadline"
+        elif action.startswith("confirm:"):
+            proposal = (settings_pending or {}).get("proposal", {})
+            valid = (
+                (settings_pending or {}).get("stage") == "settings_time"
+                and settings_pending.get("kind") == "overview"
+                and settings_pending.get("period") == user.overview_period
+                and user.overview_enabled
+                and proposal.get("nonce") == action.removeprefix("confirm:")
+                and proposal.get("nonce")
+            )
+            if not valid:
+                return [
+                    replace(
+                        reminder_settings.screen(
+                            user,
+                            "overview",
+                            note="That time choice has expired. Please choose your timing again.",
+                        ),
+                        edit=True,
+                    )
+                ]
+            period, minute = proposal["period"], proposal["minute"]
+            user = await self.save_personal_preferences(
+                user, overview_period=period, **{f"overview_{period}_minute": minute}
+            )
+            page = "overview"
+        else:
+            return [Reply("That settings option isn't available. Open /settings again.", edit=True)]
+        if page in ("deadline_timing", "deadline_custom") and not user.deadline_alerts:
+            page = "deadline"
+        return [replace(reminder_settings.screen(user, page), edit=True)]
+
+    async def personal_settings_input(self, user: User, text: str) -> list[Reply]:
+        pending = user.pending
+        kind = pending["kind"]
+        page = "overview_time" if kind == "overview" else "deadline_custom"
+        target = pending.get("settings_message_id")
+        if len(text) > 120:
+            return [
+                replace(
+                    reminder_settings.screen(
+                        user, page, note="Please send just the time or interval."
+                    ),
+                    edit_message_id=target,
+                )
+            ]
+        if not (user.overview_enabled if kind == "overview" else user.deadline_alerts):
+            await self.repo.set_pending(user.id, None)
+            return [replace(reminder_settings.screen(user, kind), edit_message_id=target)]
+        try:
+            if kind == "overview":
+                minute, period = reminder_settings.parse_delivery(text)
+                if period != pending["period"]:
+                    label = reminder_settings.PERIODS[period]
+                    nonce = secrets.token_hex(8)
+                    await self.repo.set_pending(
+                        user.id,
+                        pending
+                        | {"proposal": {"period": period, "minute": minute, "nonce": nonce}},
+                    )
+                    reply = reminder_settings.screen(
+                        user,
+                        page,
+                        note=f"{reminder_settings.time_label(minute)} is for {label.lower()}. "
+                        "Switch and use this time?",
+                    )
+                    reply.keyboard = reminder_settings.keyboard(
+                        [(f"Use {label}", f"confirm:{nonce}")], [("‹ Back", "overview")]
+                    )
+                    return [replace(reply, edit_message_id=target)]
+                if user.overview_period != pending["period"]:
+                    await self.repo.set_pending(user.id, None)
+                    return [
+                        replace(
+                            reminder_settings.screen(
+                                user,
+                                kind,
+                                note="Your timing preference changed. Please choose the time again.",
+                            ),
+                            edit_message_id=target,
+                        )
+                    ]
+                user = await self.save_personal_preferences(
+                    user, **{f"overview_{period}_minute": minute}
+                )
+            else:
+                minutes = reminder_settings.parse_interval(text)
+                user = await self.save_personal_preferences(user, deadline_lead_minutes=minutes)
+        except Clarification as exc:
+            return [
+                replace(reminder_settings.screen(user, page, note=str(exc)), edit_message_id=target)
+            ]
+        await self.repo.set_pending(user.id, None)
+        return [
+            replace(
+                reminder_settings.screen(user, kind, note="Timing updated."), edit_message_id=target
+            )
+        ]
 
     async def usual_command(self, user: User, args: str) -> list[Reply]:
         """/usual tue evenings, sat all day: standing free times that pre-fill poll grids."""
@@ -1110,7 +1263,12 @@ class SchedulingService:
                 block = min(upcoming, key=lambda b: b.start_at)
                 items.append((block.start_at, "bc", rule.id, "Busy: " + rule.title))
         if not items:
-            return [Reply("Nothing coming up. Forward a plan, or add a deadline with /deadline.")]
+            return [
+                feature_reply(
+                    Reply("Nothing coming up. Forward a plan, or add a deadline with /deadline."),
+                    "plans",
+                )
+            ]
         items.sort(key=lambda item: (item[0], item[1], item[2]))
         pages = (len(items) + PLANS_PAGE - 1) // PLANS_PAGE
         page = max(0, min(page, pages - 1))
@@ -1125,7 +1283,7 @@ class SchedulingService:
             buttons.append((f"{display_date(when.astimezone(SG))} · {title}", kind, item_id))
         return [
             Reply(
-                "<b>Your plans</b>\nSelect a plan below to view its details.\n\n"
+                "<b>📋 My plans</b>\n\nSelect a plan below to view its details.\n\n"
                 f"<i>Page {page + 1} of {pages}</i>",
                 plans_keyboard(buttons, page, pages),
                 parse_mode="HTML",
@@ -1164,7 +1322,11 @@ class SchedulingService:
             return [
                 Reply(
                     card_text(
-                        deadline, self.clock(), user.deadline_alerts, morning=user.morning_enabled
+                        deadline,
+                        self.clock(),
+                        user.deadline_alerts,
+                        morning=False,
+                        lead_minutes=user.deadline_lead_minutes,
                     ),
                     deadline_keyboard(deadline.id),
                 )
@@ -1243,6 +1405,8 @@ class SchedulingService:
     async def _message(
         self, user: User, telegram_id: int, message_id: int, text: str, reference: datetime
     ) -> list[Reply]:
+        if (user.pending or {}).get("stage") == "settings_time":
+            return await self.personal_settings_input(user, text)
         if user.pending and user.pending.get("stage") == "feedback_text":
             return await self.receive_feedback_text(user, text)
         if user.pending and user.pending.get("stage") == "deadline_field":
@@ -1562,7 +1726,8 @@ class SchedulingService:
                     self.clock(),
                     user.deadline_alerts,
                     await self.deadline_calendar_line(user, deadline),
-                    morning=user.morning_enabled,
+                    morning=False,
+                    lead_minutes=user.deadline_lead_minutes,
                 ),
                 deadline_keyboard(deadline.id),
             )
@@ -1631,7 +1796,13 @@ class SchedulingService:
             if user.google_connected or (user.calendar_feed_token and user.calendar_feed_seen_at)
             else ""
         )
-        card = card_text(updated, self.clock(), user.deadline_alerts, morning=user.morning_enabled)
+        card = card_text(
+            updated,
+            self.clock(),
+            user.deadline_alerts,
+            morning=False,
+            lead_minutes=user.deadline_lead_minutes,
+        )
         return [Reply(note + synced_note + "\n\n" + card, deadline_keyboard(updated.id))]
 
     async def list_deadlines(self, user: User, page: int = 0) -> list[Reply]:
@@ -1642,16 +1813,19 @@ class SchedulingService:
         )
         if not found:
             return [
-                Reply(
-                    "No upcoming deadlines. Forward a message with a due date, or send "
-                    f"/deadline {DEADLINE_EXAMPLE.removeprefix('For example: ')}"
+                feature_reply(
+                    Reply(
+                        "No upcoming deadlines. Forward a message with a due date, or send "
+                        f"/deadline {DEADLINE_EXAMPLE.removeprefix('For example: ')}"
+                    ),
+                    "deadline",
                 )
             ]
         found.sort(key=lambda d: d.due_at)
         pages = (len(found) + AGENDA_PAGE - 1) // AGENDA_PAGE
         page = max(0, min(page, pages - 1))
         shown = found[page * AGENDA_PAGE : (page + 1) * AGENDA_PAGE]
-        lines = ["Deadlines — tap a number to open it."]
+        lines = ["Tap a number to view a deadline."]
         buttons = []
         last = None
         for n, deadline in enumerate(shown, 1):
@@ -1663,7 +1837,12 @@ class SchedulingService:
             buttons.append((str(n), "dc", deadline.id))
         if pages > 1:
             lines.append(f"\nPage {page + 1} of {pages}")
-        return [Reply("\n".join(lines), agenda_keyboard(buttons, page, pages, "deadline"))]
+        return [
+            feature_reply(
+                Reply("\n".join(lines), agenda_keyboard(buttons, page, pages, "deadline")),
+                "deadline",
+            )
+        ]
 
     async def deadline_action(self, user: User, action: str, deadline_id: str) -> list[Reply]:
         try:
@@ -1930,7 +2109,8 @@ class SchedulingService:
             await self.repo.set_pending(user.id, {"stage": "free"})
             return [
                 Reply(
-                    "When do you want to check? Tap a day, or type one, like: fri, 20 oct, or sat 2-5pm.",
+                    "Choose an option below, or type another date. To check specific hours, "
+                    "include a time range using AM/PM or 24-hour time.",
                     free_keyboard(),
                 )
             ]
@@ -1960,7 +2140,7 @@ class SchedulingService:
             text += " at that time."
         if query.assumed_end:
             text += "\n(No end time given, so I checked 2 hours.)"
-        return Reply(text + "\n\n" + checked_line(result))
+        return feature_reply(Reply(text + "\n\n" + checked_line(result)), "free")
 
     async def free_days(self, user: User, days) -> Reply:
         """List each day's commitments, without a separate list of free gaps."""
@@ -2012,7 +2192,7 @@ class SchedulingService:
         text = "\n\n".join(parts)
         if len(text) > 3900:  # Telegram refuses anything over 4096 characters
             text = text[:3900].rsplit("\n", 1)[0] + "\n…\nAsk about fewer days to see the rest."
-        return Reply(text, parse_mode="HTML")
+        return feature_reply(Reply(text, parse_mode="HTML"), "free")
 
     # ---- subscribed calendar feed (Apple Calendar first) ----
 
@@ -2281,6 +2461,9 @@ class SchedulingService:
         return blocks
 
     async def personal_calendar_status(self, user: User, intro: str = "") -> Reply:
+        return feature_reply(await self._personal_calendar_status(user, intro), "calendar")
+
+    async def _personal_calendar_status(self, user: User, intro: str = "") -> Reply:
         """/calendar: one entry per calendar app, each saying which calendars I check for
         clashes and whether your plans go into it, then NUSMods."""
         calendars = await self.repo.list_calendars(user.id)
@@ -2393,9 +2576,11 @@ class SchedulingService:
             f"Removed {calendars[calendar_id].label}. I've deleted its link and every busy time I "
             "read from it."
         )
-        replies = [Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True)]
+        replies = [
+            replace(status, text=f"{html.escape(removed, quote=False)}\n\n{status.text}", edit=True)
+        ]
         if guide:
-            # A new message: the status screen above stays a plain-text edit.
+            # Keep the setup instructions separate from the updated status screen.
             replies.append(Reply(guide, links, parse_mode="HTML"))
         return replies
 
@@ -2551,7 +2736,9 @@ class SchedulingService:
             )
         ]
 
-    async def callback(self, telegram_id: int, data: str) -> list[Reply]:
+    async def callback(
+        self, telegram_id: int, data: str, message_id: int | None = None
+    ) -> list[Reply]:
         page = None
         if data.startswith("fp:"):
             parts = data.split(":", 2)
@@ -2565,6 +2752,14 @@ class SchedulingService:
                 return [Reply("That button isn't valid. Use /plans.")]
             page, data = int(parts[1]), parts[2]
         user = await self.repo.ensure_user(telegram_id)
+        settings_pending = user.pending
+        if (user.pending or {}).get("stage") == "settings_time":
+            await self.repo.set_pending(user.id, None)
+            user = user.model_copy(update={"pending": None})
+        if data.startswith("prefs:"):
+            return await self.personal_settings_action(
+                user, data.removeprefix("prefs:"), message_id, settings_pending
+            )
         replies = await self._callback(user, telegram_id, data)
         if page is not None:
             return await self._plans_replies(user, replies, page)
@@ -2606,20 +2801,9 @@ class SchedulingService:
             return await self.choose_recurring(user, parts[1], parts[2])
         if action == "mt" and len(parts) == 3:
             return await self.choose_time(user, parts[1], parts[2])
-        if action == "set" and len(parts) == 3 and parts[1] in SETTING_SWITCHES:
-            if parts[1] == "hour":
-                if not parts[2].isdigit() or int(parts[2]) not in SUMMARY_HOURS:
-                    return [Reply("That button isn't valid. Send /settings.")]
-                await self.repo.set_user_flags(user.id, summary_hour=int(parts[2]))
-            elif parts[2] in ("on", "off"):
-                await self.repo.set_user_flags(
-                    user.id, **{SETTING_SWITCHES[parts[1]]: parts[2] == "on"}
-                )
-            else:
-                return [Reply("That button isn't valid. Send /settings.")]
-            user = await self.repo.ensure_user(telegram_id)
-            panel = self.settings_panel(user)
-            return [Reply(panel.text, panel.keyboard, edit=True)]
+        if action == "set":
+            # Old settings messages lead to the current controls, without changing any switch.
+            return [replace(self.settings_panel(user), edit=True)]
         if action == "rem" and len(parts) == 3 and parts[1] in ("done", "del", "10", "60", "tmr"):
             return await self.reminder_action(user, parts[1], parts[2])
         if action == "undo" and len(parts) == 2:
@@ -2688,7 +2872,7 @@ class SchedulingService:
             if user.pending and user.pending.get("stage") == "free":
                 await self.repo.set_pending(user.id, None)
             reply = await self.free_days(user, days)
-            return [Reply(reply.text, edit=True)]
+            return [replace(reply, edit=True)]
         if data in ("fb:anon", "fb:named", "fb:cancel"):
             return await self.submit_feedback(user, data)
         if data == "gcal:start":
@@ -2732,7 +2916,7 @@ class SchedulingService:
             return [await self.feed_setup(user)]
         if data == "cal:home":
             reply = await self.personal_calendar_status(user)
-            return [Reply(reply.text, reply.keyboard, edit=True)]
+            return [replace(reply, edit=True)]
         if action == "cal" and len(parts) == 2 and parts[1] in ("reset", "off"):
             return await self.calendar_change(user, parts[1])
         if action == "ics" and len(parts) == 2:

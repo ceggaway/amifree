@@ -146,12 +146,22 @@ def test_today_starts_from_the_next_quarter_hour():
 async def test_free_with_no_time_offers_buttons(service_factory, reference):
     service, _ = service_factory()
     reply = (await service.command(1, "free"))[0]
+    assert reply.text.startswith("<b>🕒 Am I free?</b>\n\n")
+    assert reply.text == (
+        "<b>🕒 Am I free?</b>\n\n"
+        "Choose an option below, or type another date. To check specific hours, "
+        "include a time range using AM/PM or 24-hour time."
+    )
+    assert len(reply.keyboard.inline_keyboard) == 1
     labels = [b.text for row in reply.keyboard.inline_keyboard for b in row]
     assert labels == ["Today", "Tomorrow", "This weekend"]
     today = (await service.callback(1, tap(reply, "Today")))[0]
+    assert today.parse_mode == "HTML"
+    assert today.text.count("<b>🕒 Am I free?</b>") == 1
     assert (
         today.edit
-        and today.text == "📅 <b>04/10/2026 (Sunday)</b>\n\n🟢 <b>No events or blocked times.</b>"
+        and today.text
+        == "<b>🕒 Am I free?</b>\n\n📅 <b>04/10/2026 (Sun)</b>\n\n🟢 <b>No events or blocked times.</b>"
     )
 
 
@@ -165,7 +175,7 @@ async def test_free_lists_busy_plans_and_calendar_without_free_gaps(service_fact
     await repo.replace_calendar(calendar.id, [lunch], reference)
     reply = (await service.command(1, "free", "fri"))[0]
     assert reply.text == (
-        "📅 <b>09/10/2026 (Friday)</b>\n\n🔴 <b>Busy:</b>\n• 12–2pm · CCA calendar\n• 7–9pm · CCA dinner (Going)"
+        "<b>🕒 Am I free?</b>\n\n📅 <b>09/10/2026 (Fri)</b>\n\n🔴 <b>Busy:</b>\n• 12–2pm · CCA calendar\n• 7–9pm · CCA dinner (Going)"
     )
 
 
@@ -175,11 +185,13 @@ async def test_free_checks_a_time(service_factory, reference):
     await service.callback(1, tap(card, "Add to plans"))
     clash = (await service.command(1, "free", "fri 8-10pm"))[0]
     assert clash.text.startswith(
-        "⚠️ Clashes with CCA dinner: it ends at 9pm, so you'd miss the first 1 hr"
+        "<b>🕒 Am I free?</b>\n\n⚠️ Clashes with CCA dinner: it ends at 9pm, so you'd miss the first 1 hr"
     )
-    assert "📅 09/10/2026 (Friday) · 8–10pm" in clash.text
+    assert "📅 09/10/2026 (Fri) · 8–10pm" in clash.text
     free = (await service.command(1, "free", "sat 2-5pm"))[0]
-    assert free.text.startswith("✅ No clashes found · 📅 10/10/2026 (Saturday) · 2–5pm")
+    assert free.text.startswith(
+        "<b>🕒 Am I free?</b>\n\n✅ No clashes found · 📅 10/10/2026 (Sat) · 2–5pm"
+    )
     guessed = (await service.command(1, "free", "sat 2pm"))[0]
     assert "No end time given, so I checked 2 hours" in guessed.text
 
@@ -196,7 +208,7 @@ async def test_free_weekend_separates_busy_and_empty_days_and_escapes_titles(
     reply = await service.free_days(user, [date(2026, 10, 10), date(2026, 10, 11)])
     assert reply.parse_mode == "HTML"
     assert reply.text == (
-        "📅 <b>10/10/2026 (Saturday)</b>\n\n🔴 <b>Busy:</b>\n• 7–9pm · Dinner &lt;friends&gt; &amp; family (Going)\n\n📅 <b>11/10/2026 (Sunday)</b>\n\n🟢 <b>No events or blocked times.</b>"
+        "<b>🕒 Am I free?</b>\n\n📅 <b>10/10/2026 (Sat)</b>\n\n🔴 <b>Busy:</b>\n• 7–9pm · Dinner &lt;friends&gt; &amp; family (Going)\n\n📅 <b>11/10/2026 (Sun)</b>\n\n🟢 <b>No events or blocked times.</b>"
     )
 
 
@@ -209,7 +221,8 @@ async def test_free_mentions_saved_plans(service_factory, reference):
     await repo.save(ev.user_id, ev)
     reply = (await service.command(1, "free", "fri 7-9pm"))[0]
     assert (
-        reply.text.startswith("✅ No clashes found") and "You also saved CCA dinner" in reply.text
+        reply.text.startswith("<b>🕒 Am I free?</b>\n\n✅ No clashes found")
+        and "You also saved CCA dinner" in reply.text
     )
 
 
@@ -238,13 +251,13 @@ async def test_free_lists_saved_plans_without_making_you_busy(service_factory, r
     await repo.save(ev.user_id, ev)  # a Saved plan; the card no longer offers Save
     reply = (await service.command(1, "free", "fri"))[0]
     assert reply.text == (
-        "📅 <b>09/10/2026 (Friday)</b>\n\nNothing confirmed:\n• 7–9pm · CCA dinner (Saved, not decided)"
+        "<b>🕒 Am I free?</b>\n\n📅 <b>09/10/2026 (Fri)</b>\n\nNothing confirmed:\n• 7–9pm · CCA dinner (Saved, not decided)"
     )
     # Going makes it definite: the slot is busy and no longer free.
     await service.callback(1, tap((await service.command(1, "events"))[0], "Add to plans"))
     reply = (await service.command(1, "free", "fri"))[0]
     assert reply.text == (
-        "📅 <b>09/10/2026 (Friday)</b>\n\n🔴 <b>Busy:</b>\n• 7–9pm · CCA dinner (Going)"
+        "<b>🕒 Am I free?</b>\n\n📅 <b>09/10/2026 (Fri)</b>\n\n🔴 <b>Busy:</b>\n• 7–9pm · CCA dinner (Going)"
     )
     assert "Checked" not in reply.text
 
@@ -256,11 +269,11 @@ async def test_free_all_day_and_fully_booked_days(service_factory, reference):
         )
     )
     assert (await service.command(1, "free", "thu"))[0].text == (
-        "📅 <b>08/10/2026 (Thursday)</b>\n\n🟢 <b>No events or blocked times.</b>"
+        "<b>🕒 Am I free?</b>\n\n📅 <b>08/10/2026 (Thu)</b>\n\n🟢 <b>No events or blocked times.</b>"
     )
     card = (await service.message(1, 1, "Hackathon Friday 08:00 23:00", reference))[0]
     await service.callback(1, tap(card, "Add to plans"))
     reply = (await service.command(1, "free", "fri"))[0]
     assert reply.text == (
-        "📅 <b>09/10/2026 (Friday)</b>\n\n🔴 <b>Busy:</b>\n• 8am–11pm · Hackathon (Going)"
+        "<b>🕒 Am I free?</b>\n\n📅 <b>09/10/2026 (Fri)</b>\n\n🔴 <b>Busy:</b>\n• 8am–11pm · Hackathon (Going)"
     )

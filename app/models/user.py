@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -13,7 +14,7 @@ class User(BaseModel):
     coverage_start: datetime | None = None
     coverage_end: datetime | None = None
     pending: dict | None = None
-    # Group check-ins ("Still coming?") and nudges to answer group plans and polls.
+    # Legacy flag retained for compatibility; personal settings do not control group delivery.
     reminders_enabled: bool = True
     # The evening summary, and its Singapore hour (None: NIGHTLY_HOUR). Migration 018.
     summary_enabled: bool = True
@@ -22,6 +23,12 @@ class User(BaseModel):
     morning_enabled: bool = True
     # The alert 3 hours before a deadline. Migration 018.
     deadline_alerts: bool = True
+    # Personal reminder preferences. Legacy switches above remain for old clients.
+    overview_enabled: bool = True
+    overview_period: Literal["morning", "evening"] = "morning"
+    overview_morning_minute: int = 9 * 60
+    overview_evening_minute: int = 21 * 60
+    deadline_lead_minutes: int = 3 * 60
     dm_blocked: bool = False
     calendar_feed_token: str | None = None
     calendar_feed_seen_at: datetime | None = None

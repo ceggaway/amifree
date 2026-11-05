@@ -24,6 +24,52 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+async def test_personal_reminder_preferences_and_deferred_delivery_persist():
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        user = await repo.ensure_user(1)
+        other = await repo.ensure_user(2)
+        await repo.set_user_flags(
+            user.id,
+            overview_period="evening",
+            overview_evening_minute=1335,
+            overview_morning_minute=455,
+            deadline_lead_minutes=150,
+        )
+        saved = await repo.get_user(user.id)
+        assert saved.overview_period == "evening" and saved.overview_evening_minute == 1335
+        assert saved.overview_morning_minute == 455 and saved.deadline_lead_minutes == 150
+        assert (await repo.get_user(other.id)).deadline_lead_minutes == 180
+        target = (datetime.now(SG) + timedelta(hours=2)).replace(second=0, microsecond=0)
+        await repo.enqueue_notification(user.id, "NIGHTLY", "2030-01-01", {"date": "2030-01-01"})
+        [row] = await repo.claim_notifications()
+        await repo.defer_notification(row["id"], target)
+        [stored] = await db.query(
+            "select status,next_attempt_at from notification_logs where id=$1", [row["id"]]
+        )
+        assert stored["status"] == "pending"
+        assert datetime.fromisoformat(stored["next_attempt_at"]) == target
+        assert await repo.claim_notifications() == []
+        await repo.enqueue_notification(other.id, "NIGHTLY", "2030-01-01", {"date": "2030-01-01"})
+        [other_row] = await repo.claim_notifications()
+        await repo.defer_notification(other_row["id"], target)
+        wake = datetime.now(SG).replace(microsecond=0) - timedelta(seconds=1)
+        await repo.retime_pending_overviews(user.id, wake)
+        [woken] = await repo.claim_notifications()
+        assert woken["id"] == row["id"]  # another user's queued overview is untouched
+        await repo.finish_notification(woken["id"], True, False)
+        await repo.retime_pending_overviews(user.id, wake)
+        assert await repo.claim_notifications() == []  # delivered overviews stay delivered
+
+
 async def test_old_upcoming_commitment_remains_discoverable():
     async with (
         SQLGateway() as db,

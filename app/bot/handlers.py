@@ -94,7 +94,11 @@ async def dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE, operation
                 pass
             analytics.track("button", action=analytics.button(update.callback_query.data or ""))
             replies = await service.callback(
-                update.effective_user.id, update.callback_query.data or ""
+                update.effective_user.id,
+                update.callback_query.data or "",
+                message_id=update.callback_query.message.message_id
+                if update.callback_query.message
+                else None,
             )
         elif operation == "command":
             name, args = split_command(update.effective_message.text)

@@ -105,7 +105,7 @@ async def test_series_makes_a_card_per_session_and_posts_them_ahead(service_fact
     # Only the first card is in the group; the rest wait.
     assert found[0].message_id == 101 and all(g.message_id is None for g in found[1:])
     card = transport.sent[-1]
-    assert "🔁 12 sessions, every Tue/Thu until 📅 12/11/2026 (Thursday)" in card["text"]
+    assert "🔁 12 sessions, every Tue/Thu until 📅 12/11/2026 (Thu)" in card["text"]
     assert "Going to all" in buttons(card["reply_markup"])
     series = next(iter(repo.series.values()))
     assert series.weekdays == [1, 3] and series.until_date == date(2026, 11, 12)
@@ -121,8 +121,7 @@ async def test_series_makes_a_card_per_session_and_posts_them_ahead(service_fact
     first = await service.notifier.run()
     assert first.get("posted") == 1  # Thu 8 Oct 19:00 is under four days away
     assert (
-        len(service.posted_cards) == 1
-        and "📅 08/10/2026 (Thursday)" in service.posted_cards[0][1].text
+        len(service.posted_cards) == 1 and "📅 08/10/2026 (Thu)" in service.posted_cards[0][1].text
     )
     assert sessions(repo)[1].message_id == 701
     assert "posted" not in await service.notifier.run()

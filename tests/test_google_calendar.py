@@ -625,7 +625,7 @@ async def test_deadline_card_says_nothing_about_calendars_nobody_connected(
     service.google = FakeGoogle()
     await onboard(service, reference)
     card = (await service.command(1, "deadline", "project report due fri 11:59pm"))[0]
-    assert "📅 09/10/2026 (Friday)" in card.text
+    assert "📅 09/10/2026 (Fri)" in card.text
     assert "Google Calendar" not in card.text and not service.google.calls
 
 

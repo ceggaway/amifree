@@ -52,12 +52,15 @@ async def test_a_time_like_reply_is_not_taken_as_a_venue(service_factory, refere
 async def test_free_accepts_a_typed_date_after_the_prompt(service_factory, reference):
     service, repo = service_factory()
     prompt = (await service.command(1, "free"))[0]
-    assert "type one" in prompt.text
+    assert "Choose an option below, or type another date." in prompt.text
     reply = (await service.message(1, 5, "15 oct", reference))[0]
-    assert reply.text == "📅 <b>15/10/2026 (Thursday)</b>\n\n🟢 <b>No events or blocked times.</b>"
+    assert (
+        reply.text
+        == "<b>🕒 Am I free?</b>\n\n📅 <b>15/10/2026 (Thu)</b>\n\n🟢 <b>No events or blocked times.</b>"
+    )
     assert not (await repo.ensure_user(1)).pending
     # Other spellings work too.
-    for typed, expected in (("oct 15", "15/10/2026 (Thursday)"), ("Fri", "09/10/2026 (Friday)")):
+    for typed, expected in (("oct 15", "15/10/2026 (Thu)"), ("Fri", "09/10/2026 (Fri)")):
         await service.command(1, "free")
         assert expected in (await service.message(1, 6, typed, reference))[0].text
 
@@ -67,11 +70,11 @@ async def test_free_accepts_a_week_and_a_time(service_factory, reference):
     await service.command(1, "free")
     week = (await service.message(1, 5, "next week", reference))[0].text
     assert week.count("No events or blocked times.") == 7
-    assert "📅 <b>05/10/2026 (Monday)</b>" in week
-    assert "📅 <b>11/10/2026 (Sunday)</b>" in week
+    assert "<b>🕒 Am I free?</b>\n\n📅 <b>05/10/2026 (Mon)</b>" in week
+    assert "📅 <b>11/10/2026 (Sun)</b>" in week
     await service.command(1, "free")
     slot = (await service.message(1, 6, "fri 7-9pm", reference))[0].text
-    assert slot.startswith("✅ No clashes found")
+    assert slot.startswith("<b>🕒 Am I free?</b>\n\n✅ No clashes found")
 
 
 async def test_a_reply_that_is_not_a_date_still_works_as_a_message(service_factory, reference):
@@ -181,13 +184,13 @@ async def test_a_bare_am_or_pm_answers_the_am_pm_question(
 async def test_free_day_message_has_no_checked_footer(service_factory, reference):
     service, _ = service_factory(extraction())
     assert (await service.command(1, "free", "tomorrow"))[0].text == (
-        "📅 <b>05/10/2026 (Monday)</b>\n\n🟢 <b>No events or blocked times.</b>"
+        "<b>🕒 Am I free?</b>\n\n📅 <b>05/10/2026 (Mon)</b>\n\n🟢 <b>No events or blocked times.</b>"
     )
     await going_dinner(service, reference)
     text = (await service.command(1, "free", "fri"))[0].text
     assert "Checked" not in text
     assert text.startswith(
-        "📅 <b>09/10/2026 (Friday)</b>\n\n🔴 <b>Busy:</b>\n• 7–9pm · CCA dinner (Going)"
+        "<b>🕒 Am I free?</b>\n\n📅 <b>09/10/2026 (Fri)</b>\n\n🔴 <b>Busy:</b>\n• 7–9pm · CCA dinner (Going)"
     )
 
 
@@ -201,7 +204,7 @@ async def test_a_block_over_a_plan_warns_before_and_after_saving(service_factory
     assert preview.text.startswith("Block this time?")
     assert "SGT" in preview.text and "Singapore" not in preview.text
     assert (
-        "⚠️ This clashes with your plans:\n• CCA dinner (Going, 📅 09/10/2026 (Friday) 7–9pm)"
+        "⚠️ This clashes with your plans:\n• CCA dinner (Going, 📅 09/10/2026 (Fri) 7–9pm)"
         in preview.text
     )
     saved = (await service.callback(1, tap(preview, "Save block")))[0]

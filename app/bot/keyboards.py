@@ -508,35 +508,6 @@ def menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-SUMMARY_HOURS = (20, 21, 22)  # the evening summary times offered in /settings
-
-
-def settings_keyboard(user, summary_hour: int) -> InlineKeyboardMarkup:
-    """One switch per kind of reminder, and the evening summary's time while it's on."""
-
-    def switch(on: bool, emoji: str, name: str, key: str) -> list[InlineKeyboardButton]:
-        label, target = ("Turn off", "off") if on else ("Turn on", "on")
-        return [
-            InlineKeyboardButton(f"{emoji} {label} {name}", callback_data=f"set:{key}:{target}")
-        ]
-
-    rows = [switch(user.summary_enabled, "🌙", "evening summary", "summary")]
-    if user.summary_enabled:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    f"{'✓ ' if hour == summary_hour else ''}{hour - 12}pm",
-                    callback_data=f"set:hour:{hour}",
-                )
-                for hour in SUMMARY_HOURS
-            ]
-        )
-    rows.append(switch(user.morning_enabled, "☀️", "morning list", "morning"))
-    rows.append(switch(user.deadline_alerts, "⏰", "deadline alerts", "deadlines"))
-    rows.append(switch(user.reminders_enabled, "👥", "group check-ins", "reminders"))
-    return InlineKeyboardMarkup(rows)
-
-
 def reminder_keyboard(reminder_id: str) -> InlineKeyboardMarkup:
     def btn(label: str, action: str) -> InlineKeyboardButton:
         return InlineKeyboardButton(label, callback_data=f"rem:{action}:{reminder_id}")

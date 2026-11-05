@@ -10,6 +10,7 @@ from html import escape
 
 from app.bot.keyboards import SUMMARY_HOURS
 from app.bot.messages import clock, personal_details
+from app.date_display import display_date
 from app.schemas.event import SG, Deadline, Event, Status
 from app.services.deadlines import REMIND_AT, hours_left, when
 
@@ -95,7 +96,7 @@ def summary(
         return text
 
     separator = "\n\n" if html_mode else "\n"
-    text = f"Tomorrow, {day:%a %-d %b}:"
+    text = f"Tomorrow, {display_date(day)}:"
     if going:
         text += "\n" + separator.join(line(e) for e in going[:limit])
         if len(going) > limit:
@@ -110,7 +111,7 @@ def summary(
         text += "\n\n🔜 Coming up\n" + listed(coming_up, lambda d: when(d.due_at, now))
     if later:
         text += "\n\n🗓 Later this month\n" + listed(
-            later, lambda d: f"{d.due_at.astimezone(SG):%a %-d %b}"
+            later, lambda d: f"{display_date(d.due_at.astimezone(SG))}"
         )
     return text + "\n\n/plans for details. /settings to change the time or turn this off."
 
@@ -147,7 +148,7 @@ def today_text(deadlines: list[Deadline], plans: list[Event], now: datetime) -> 
     """The 9am Today list: the day's plans, then what's due. None on an empty day."""
     if not (deadlines or plans):
         return None
-    text = f"☀️ Today, {now.astimezone(SG):%a %-d %b}"
+    text = f"☀️ Today, {display_date(now.astimezone(SG))}"
     if plans:
         text += "\n\n🗓 Your plans\n" + "\n".join(
             f"• {clock(e.start_at)}–{clock(e.end_at)} {e.title[:60]}"

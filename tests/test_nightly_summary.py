@@ -33,11 +33,7 @@ async def test_sunday_night_lists_tomorrow_the_week_and_the_month(service_factor
     )
     (sent,) = await nightly(service, repo, at(4, 20, 5))  # Sunday
     assert sent.text == (
-        "Tomorrow, Mon 5 Oct:\n\n"
-        "📌 Due tomorrow\n• MA1521 quiz · 9am\n\n"
-        "🔜 Coming up\n• CS3244 report · Fri 9 Oct, 11:59pm (in 5 days)\n\n"
-        "🗓 Later this month\n• CS2103T project · Tue 20 Oct\n\n"
-        "/plans for details. /settings to change the time or turn this off."
+        "Tomorrow, 📅 05/10/2026 (Monday):\n\n📌 Due tomorrow\n• MA1521 quiz · 9am\n\n🔜 Coming up\n• CS3244 report · 📅 09/10/2026 (Friday), 11:59pm (in 5 days)\n\n🗓 Later this month\n• CS2103T project · 📅 20/10/2026 (Tuesday)\n\n/plans for details. /settings to change the time or turn this off."
     )
 
 
@@ -149,8 +145,7 @@ async def test_a_day_with_only_plans_gets_a_morning_list(service_factory, refere
     assert await reminders_at(service, repo, at(5, 8, 55)) == []
     (today,) = await reminders_at(service, repo, at(5, 9, 5))
     assert today.text == (
-        "☀️ Today, Mon 5 Oct\n\n🗓 Your plans\n• 8pm–10pm Badminton · MPSH 2"
-        "\n/settings to change reminders."
+        "☀️ Today, 📅 05/10/2026 (Monday)\n\n🗓 Your plans\n• 8pm–10pm Badminton · MPSH 2\n/settings to change reminders."
     )
     assert today.keyboard is None
     # Not out by noon (the server slept through the morning): skipped for the day.

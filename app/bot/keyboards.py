@@ -1,5 +1,6 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.date_display import display_date
 from app.schemas.event import Event, GroupEvent, Poll, Status
 
 
@@ -321,7 +322,7 @@ def choose_keyboard(events: list[Event]) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    f"{e.title[:35]} · {e.start_at:%d %b %H:%M}",
+                    f"{e.title[:35]} · {display_date(e.start_at)} {e.start_at:%H:%M}",
                     callback_data=f"pick:{e.id}:{e.version}",
                 )
             ]
@@ -488,9 +489,11 @@ def feedback_choice_keyboard() -> InlineKeyboardMarkup:
     """Anonymous by default; attaching the handle is an explicit opt-in."""
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🕶 Send anonymously", callback_data="fb:anon")],
-            [InlineKeyboardButton("👤 Send with my @handle", callback_data="fb:named")],
-            [InlineKeyboardButton("Cancel", callback_data="fb:cancel")],
+            [
+                InlineKeyboardButton("🕶 Anonymously", callback_data="fb:anon"),
+                InlineKeyboardButton("👤 With @handle", callback_data="fb:named"),
+                InlineKeyboardButton("Cancel", callback_data="fb:cancel"),
+            ],
         ]
     )
 

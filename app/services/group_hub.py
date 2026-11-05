@@ -16,6 +16,7 @@ from uuid import UUID
 from pydantic import ValidationError
 from telegram.error import BadRequest, Forbidden, TelegramError
 
+from app.date_display import display_date
 from app.schemas.event import SG, EventDraft, GroupEvent, Status
 from app.services.app_links import chat_code
 from app.services.date_resolution import Clarification
@@ -624,7 +625,7 @@ class GroupHub:
                 raise Refused(str(exc)) from None
             note = (
                 f"\n\n🔁 {len(days)} sessions, every {recurrence.label()} until"
-                f" {days[-1]:%a %-d %b}. Each session's card is posted a few days before it."
+                f" {display_date(days[-1])}. Each session's card is posted a few days before it."
             )
         else:
             event = await self.repo.create_group_event(user.id, chat_id, message_id, draft)

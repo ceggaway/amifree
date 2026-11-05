@@ -98,7 +98,7 @@ async def test_block_command_list_remove_and_isolation(service_factory, referenc
     assert "busy sat" in (await service.command(1, "block"))[0].text
     assert "What time" in (await service.command(1, "block", "busy sat"))[0].text
     preview = (await service.command(1, "block", "busy sat 2-6pm"))[0]
-    assert "Sat, 10 Oct 2026 · 14:00 → 18:00" in preview.text
+    assert "📅 10/10/2026 (Saturday) · 14:00 → 18:00" in preview.text
     kept = await service.callback(1, preview.keyboard.inline_keyboard[0][1].callback_data)
     assert "Kept unchanged" in kept[0].text
     assert "No busy blocks" in (await service.command(1, "blocks"))[0].text

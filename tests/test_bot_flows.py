@@ -58,7 +58,7 @@ async def test_clarification_survives_service_restart(service_factory, reference
     assert not repo.events
     restarted = SchedulingService(repo, service.extractor, service.importer, service.settings)
     card = (await restarted.message(1, 3, "7–9pm", reference + timedelta(days=10)))[0]
-    assert "9 Oct 2026 (Friday)" in card.text
+    assert "📅 09/10/2026 (Friday)" in card.text
     assert "No clashes found" in card.text
     assert len(service.extractor.calls) == 1  # "7–9pm" answers the question without the AI
 

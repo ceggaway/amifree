@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timedelta
 
 from dateutil import parser
 
+from app.date_display import display_date
 from app.schemas.event import SG, EventDraft, Extraction
 
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -121,7 +122,7 @@ def resolve_date(raw: str, reference: datetime) -> date:
         resolved = resolve_date(rest, reference)
         if resolved.weekday() != _WEEKDAY_ABBR[weekday]:
             raise Clarification(
-                f"{resolved:%d %b} is a {resolved:%A}, not a {WEEKDAYS[_WEEKDAY_ABBR[weekday]].title()}. Which date is it?"
+                f"{display_date(resolved)} is a {resolved:%A}, not a {WEEKDAYS[_WEEKDAY_ABBR[weekday]].title()}. Which date is it?"
             )
         return resolved
     # A bare day of the month ("17th"): the next time that day comes round.

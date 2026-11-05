@@ -6,6 +6,7 @@ from telegram import InlineKeyboardMarkup, LinkPreviewOptions
 
 from app.bot.keyboards import event_keyboard, group_keyboard
 from app.bot.onboarding import LAST_CALENDAR_ASK
+from app.date_display import display_date
 from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
 from app.services.availability import Availability
 
@@ -75,9 +76,9 @@ class Reply:
 
 
 def details(draft: EventDraft) -> str:
-    result = (
-        f"{draft.title}\n{draft.start_at:%a, %d %b %Y · %H:%M} → {draft.end_at:%d %b %H:%M} SGT"
-    )
+    start, end = draft.start_at.astimezone(SG), draft.end_at.astimezone(SG)
+    end_date = f"{display_date(end)} · " if start.date() != end.date() else ""
+    result = f"{draft.title}\n{display_date(start)} · {start:%H:%M} → {end_date}{end:%H:%M} SGT"
     if draft.location:
         result += "\nLocation: " + draft.location
     if draft.notes:
@@ -212,7 +213,7 @@ def group_card(
     if ended:
         # Without check-ins nobody knows who came: say how many planned to, not that they went.
         count = f"{counts.get('GOING', 0)} said Going" if went is None else f"{went} went"
-        when = f"{event.start_at:%a %-d %b} · {time_range(event.start_at, event.end_at)}"
+        when = f"{display_date(event.start_at)} · {time_range(event.start_at, event.end_at)}"
         return Reply(f"📣 {event.title} · ended\n{when} · {count}")
     if app_url:
         series = "\n🔁 Repeats. Details lets you say Going to every session." * bool(
@@ -223,8 +224,7 @@ def group_card(
         series = "\n🔁 Recurring event. Going to all adds every session." * bool(event.series_id)
         tip = "\nAm I free? shows a private check that only you can see."
     body = (
-        "📅 "
-        + details(event)
+        details(event)
         + series
         + f"\n\nGoing {counts.get('GOING', 0)} · Can't {counts.get('DECLINED', 0)}"
         + tip
@@ -239,16 +239,16 @@ def personal_time(value: datetime) -> str:
 def personal_when(start: datetime, end: datetime) -> str:
     start, end = start.astimezone(SG), end.astimezone(SG)
     if start.date() == end.date():
-        return f"{start:%-d %b %Y (%A)} · {personal_time(start)}–{personal_time(end)} SGT"
+        return f"{display_date(start)} · {personal_time(start)}–{personal_time(end)} SGT"
     return (
-        f"{start:%-d %b %Y (%A)} · {personal_time(start)} – "
-        f"{end:%-d %b %Y (%A)} · {personal_time(end)} SGT"
+        f"{display_date(start)} · {personal_time(start)} – "
+        f"{display_date(end)} · {personal_time(end)} SGT"
     )
 
 
 def personal_details(event: EventDraft, *, compact: bool = False) -> str:
     title = event.title[:80] if compact else event.title
-    text = f"<b>{escape(title)}</b>\n📅 {personal_when(event.start_at, event.end_at)}"
+    text = f"<b>{escape(title)}</b>\n{personal_when(event.start_at, event.end_at)}"
     if event.location:
         text += "\n📍 " + escape(event.location[:80] if compact else event.location)
     if event.assumed_duration:
@@ -334,7 +334,7 @@ def personal_event_card(event: Event, availability: Availability, synced: bool |
 def time_label(event: EventDraft) -> str:
     """A short button label for one time: "Tue 27 Oct, 7pm"."""
     start = event.start_at.astimezone(SG)
-    return f"{start:%a %-d %b}, {personal_time(start)}"
+    return f"{display_date(start)}, {personal_time(start)}"
 
 
 def times_text(
@@ -362,7 +362,7 @@ def times_text(
         if first.location:
             text += "\n📍 " + escape(first.location[:80])
         for n, (event, availability) in pairs:
-            text += f"\n\n{n}. 📅 {personal_when(event.start_at, event.end_at)}"
+            text += f"\n\n{n}. {personal_when(event.start_at, event.end_at)}"
             if event.location and event.location != first.location:
                 text += "\n📍 " + escape(event.location[:80])
             text += "\n" + personal_availability(availability)
@@ -426,7 +426,7 @@ def event_card(event: Event, availability: Availability, synced: bool | str = Fa
     body = verdict_line(availability) + "\n\n" + details(event)
     if availability.conflicts:
         body += "\n\nConflicts:\n" + "\n".join(
-            f"• {b.title[:150]}: {b.start_at:%d %b %H:%M}–{b.end_at:%H:%M}"
+            f"• {b.title[:150]}: {display_date(b.start_at)} {b.start_at:%H:%M}–{b.end_at:%H:%M}"
             for b in availability.conflicts[:5]
         )
         if len(availability.conflicts) > 5:

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from app.date_display import display_date
 from app.schemas.event import SG
 
 
@@ -15,7 +16,9 @@ def _clock(value: datetime) -> str:
 
 def _when(row: dict) -> str:
     start, end = _time(row["start_at"]), _time(row["end_at"])
-    return f"{start:%a %-d %b} {_clock(start)}–{_clock(end)}"
+    if start.date() != end.date():
+        return f"{display_date(start)} {_clock(start)} – {display_date(end)} {_clock(end)}"
+    return f"{display_date(start)} {_clock(start)}–{_clock(end)}"
 
 
 def describe_change(before: dict, after: dict, cancelled: bool = False) -> str:
@@ -28,8 +31,14 @@ def describe_change(before: dict, after: dict, cancelled: bool = False) -> str:
         parts.append(f"renamed from {before['title']}")
     if (before["start_at"], before["end_at"]) != (after["start_at"], after["end_at"]):
         old, new = _when(before), _when(after)
-        same_day = _time(before["start_at"]).date() == _time(after["start_at"]).date()
-        parts.append(f"{old} → {new.split(' ', 3)[3] if same_day else new}")
+        same_day = (
+            _time(before["start_at"]).date()
+            == _time(after["start_at"]).date()
+            == _time(after["end_at"]).date()
+        )
+        if same_day:
+            new = f"{_clock(_time(after['start_at']))}–{_clock(_time(after['end_at']))}"
+        parts.append(f"{old} → {new}")
     else:
         parts.append("time unchanged")
     if (before.get("location") or "") != (after.get("location") or ""):

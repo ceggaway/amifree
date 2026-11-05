@@ -57,6 +57,7 @@ from app.bot.messages import (
     verdict_line,
 )
 from app.config import Settings
+from app.date_display import display_date
 from app.models.timetable import BlockRule
 from app.models.user import User
 from app.schemas.event import (
@@ -88,7 +89,7 @@ from app.services.deadlines import when as deadline_when
 from app.services.detection import DetectionService
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
-from app.services.free_time import RANGE, free_gaps, parse_free, weekend
+from app.services.free_time import RANGE, parse_free, weekend
 from app.services.google_calendar import EMAIL as GOOGLE_EMAIL
 from app.services.google_calendar import GCAL_PREFIX
 from app.services.google_sync import GoogleSyncService
@@ -292,11 +293,14 @@ MENU_COMMANDS = {
 }
 
 
-FEEDBACK_PROMPT = "💬 Type your feedback and I'll pass it to the team. /cancel to stop."
+FEEDBACK_PROMPT = (
+    "💬 <b>Help us improve AmIFree!</b>\n"
+    "Share a suggestion or report an issue for our team to review.\n\n"
+    "/cancel to exit."
+)
 FEEDBACK_ASK = (
-    "Send this feedback?\n\n"
-    "🕶 Anonymous — just your message.\n"
-    "👤 With your @handle — so the team can reply."
+    "You can send 🕶 anonymously or 👤 with your @handle so the team can follow up. "
+    "Choose an option below."
 )
 
 
@@ -432,8 +436,15 @@ class SchedulingService:
         message = text.strip()
         if not message:
             return [Reply("Nothing to send yet. Type your feedback, or /cancel.")]
-        await self.repo.set_pending(user.id, {"stage": "feedback_choose", "text": message[:2000]})
-        return [Reply(FEEDBACK_ASK, feedback_choice_keyboard())]
+        message = message[:2000]
+        await self.repo.set_pending(user.id, {"stage": "feedback_choose", "text": message})
+        return [
+            Reply(
+                "<b>Your feedback</b>\n“" + html.escape(message) + "”\n\n" + FEEDBACK_ASK,
+                feedback_choice_keyboard(),
+                parse_mode="HTML",
+            )
+        ]
 
     async def submit_feedback(self, user, data: str) -> list[Reply]:
         pending = user.pending
@@ -459,12 +470,9 @@ class SchedulingService:
         if command == "feedback":
             body = args.strip()
             if body:
-                await self.repo.set_pending(
-                    user.id, {"stage": "feedback_choose", "text": body[:2000]}
-                )
-                return [Reply(FEEDBACK_ASK, feedback_choice_keyboard())]
+                return await self.receive_feedback_text(user, body)
             await self.repo.set_pending(user.id, {"stage": "feedback_text"})
-            return [Reply(FEEDBACK_PROMPT)]
+            return [Reply(FEEDBACK_PROMPT, parse_mode="HTML")]
         if command == "start":
             await self.safe_action(user.id, "start")
             if user.dm_blocked:
@@ -482,18 +490,25 @@ class SchedulingService:
                 return [step]
             connected = []
             if user.onboarding_status == "READY":
-                connected.append(f"NUSMods ({user.academic_year}, semester {user.semester})")
+                year = (user.academic_year or "").replace("-", "/")
+                connected.append(f"NUSMods · AY {year}, Semester {user.semester}")
             calendars = await self.repo.list_calendars(user.id)
-            if calendars:
-                names = ", ".join(c.label for c in calendars)
-                connected.append(f"your calendar{'s' if len(calendars) > 1 else ''} ({names})")
+            connected.extend(c.label for c in calendars)
+            if user.google_connected and not any(
+                c.label.lower().startswith("google")
+                or (unseal(c.sealed_url, self.link_secret) or "").startswith(GCAL_PREFIX)
+                for c in calendars
+            ):
+                connected.append("Google Calendar")
+            if user.calendar_feed_token and user.calendar_feed_seen_at and not calendars:
+                connected.append("AmIFree calendar subscription")
             if connected:
                 return [
                     Reply(
-                        "You're all set ✅ Forward me a plan, or pick one below."
-                        "\nChecking: "
-                        + html.escape(" and ".join(connected))
-                        + ".\n\n"
+                        "✅ <b>You’re all set!</b>\n\n"
+                        "<b>Connected calendars</b>\n"
+                        + "\n".join("• " + html.escape(name) for name in connected)
+                        + "\n\n"
                         + onboarding.EVERYDAY_HELP,
                         menu_keyboard(),
                         parse_mode="HTML",
@@ -509,7 +524,7 @@ class SchedulingService:
         if command == "cancel":
             await self.google_sync.discard(user.pending)
             await self.repo.set_pending(user.id, None)
-            return [Reply("Pending action cleared. Forward an event when you're ready.")]
+            return [Reply("Pending action cleared.\n\nUse /start to choose what to do next.")]
         if command in ("delete", "deletemydata"):
             nonce = secrets.token_hex(8)
             await self.repo.set_pending(user.id, {"stage": "delete", "nonce": nonce})
@@ -815,7 +830,7 @@ class SchedulingService:
         return [
             Reply(
                 f"🔁 {draft.title}\nThis happens every week: {when}.\n\nWhat should I add?",
-                recurring_keyboard(nonce, f"{draft.start_at:%a %-d %b}", day_name),
+                recurring_keyboard(nonce, f"{display_date(draft.start_at)}", day_name),
             )
         ]
 
@@ -1069,7 +1084,7 @@ class SchedulingService:
         if not hits:
             return ""
         lines = [
-            f"• {e.title[:60]} ({e.status.value.title()}, {e.start_at.astimezone(SG):%a %-d %b} "
+            f"• {e.title[:60]} ({e.status.value.title()}, {display_date(e.start_at.astimezone(SG))} "
             f"{time_range(e.start_at, e.end_at)})"
             for e in hits[:5]
         ]
@@ -1107,7 +1122,7 @@ class SchedulingService:
                 if not title[31].isspace() and " " in short:
                     short = short.rsplit(" ", 1)[0]
                 title = short.rstrip(" ,.:;·-–—") + "…"
-            buttons.append((f"{when.astimezone(SG):%-d %b} · {title}", kind, item_id))
+            buttons.append((f"{display_date(when.astimezone(SG))} · {title}", kind, item_id))
         return [
             Reply(
                 "<b>Your plans</b>\nSelect a plan below to view its details.\n\n"
@@ -1930,7 +1945,7 @@ class SchedulingService:
     async def free_slot(self, user: User, query) -> Reply:
         slot = query.slot
         result = await self.availability(user, slot)
-        when = f"{slot.start_at:%a %-d %b} · {time_range(slot.start_at, slot.end_at)}"
+        when = f"{display_date(slot.start_at)} · {time_range(slot.start_at, slot.end_at)}"
         if result.conflicts:
             text = verdict_line(result) + "\n" + when
             if len(result.conflicts) > 1:
@@ -1948,14 +1963,14 @@ class SchedulingService:
         return Reply(text + "\n\n" + checked_line(result))
 
     async def free_days(self, user: User, days) -> Reply:
-        """What's booked on each day, then the free gaps between 8am and 11pm."""
+        """List each day's commitments, without a separate list of free gaps."""
         now = self.clock()
         today = now.astimezone(SG).date()
         parts = []
         for day in days:
-            label = f"{day:%a %-d %b}"
+            label = display_date(day, emoji=False)
             if day < today:
-                parts.append(f"{label} has already passed.")
+                parts.append(f"📅 {label} has already passed.")
                 continue
             start = datetime.combine(day, day_time(0), SG)
             end = start + timedelta(days=1)
@@ -1977,35 +1992,27 @@ class SchedulingService:
                 if e.end_at > start
             ]
             busy = [item for item in busy if item[1] > (now if day == today else start)]
-            gaps = free_gaps(day, [(a, b) for a, b, _, decided in busy if decided], now)
             # Deadlines never make you busy; they're listed so the day's picture is complete.
             due = "".join(
-                "\n" + due_line(d)
+                "\n" + html.escape(due_line(d))
                 for d in await self.repo.deadlines_between(max(start, now), end, user.id)
             )
             if not busy:
-                rest = " for the rest of the day" if day == today else " all day"
-                parts.append(f"🟢 {label}: nothing booked, free{rest}.{due}")
+                parts.append(f"📅 <b>{label}</b>\n\n🟢 <b>No events or blocked times.</b>{due}")
                 continue
             busy.sort()
             lines = [
-                f"• {time_range(max(a, start), min(b, end))} {title[:60]}"
+                f"• {time_range(max(a, start), min(b, end))} · {html.escape(title[:60])}"
                 for a, b, title, _ in busy[:8]
             ]
             if len(busy) > 8:
                 lines.append(f"…and {len(busy) - 8} more")
-            head = "Busy:" if any(item[3] for item in busy) else "Nothing confirmed:"
-            if gaps:
-                free = "Free: " + ", ".join(time_range(a, b) for a, b in gaps)
-            elif day == today and now.astimezone(SG).time() >= day_time(22, 30):
-                free = "No free time left today."
-            else:
-                free = "🔴 No free time between 8am and 11pm."
-            parts.append(f"📅 {label}\n{head}\n" + "\n".join(lines) + "\n" + free + due)
+            head = "🔴 <b>Busy:</b>" if any(item[3] for item in busy) else "Nothing confirmed:"
+            parts.append(f"📅 <b>{label}</b>\n\n{head}\n" + "\n".join(lines) + due)
         text = "\n\n".join(parts)
         if len(text) > 3900:  # Telegram refuses anything over 4096 characters
             text = text[:3900].rsplit("\n", 1)[0] + "\n…\nAsk about fewer days to see the rest."
-        return Reply(text)
+        return Reply(text, parse_mode="HTML")
 
     # ---- subscribed calendar feed (Apple Calendar first) ----
 
@@ -2192,7 +2199,7 @@ class SchedulingService:
         token = await self.ensure_feed_token(user)
         seen = user.calendar_feed_seen_at if user.calendar_feed_token else None
         status = (
-            f"✅ Connected. Your calendar last synced {seen.astimezone(SG):%-d %b, %-I:%M%p}."
+            f"✅ Connected. Your calendar last synced {display_date(seen)}, {clock(seen)}."
             if seen
             else "Not connected yet."
         )
@@ -2256,10 +2263,10 @@ class SchedulingService:
             synced = [c.synced_at for c in checked if c.synced_at and not c.error]
             if synced:
                 last = max(synced)
-                lines.append(f"🔄 Refreshed {clock(last)}, {last.astimezone(SG):%-d %b}")
+                lines.append(f"🔄 Refreshed {clock(last)}, {display_date(last.astimezone(SG))}")
             elif via_feed and not checked:
                 seen = user.calendar_feed_seen_at
-                lines.append(f"🔄 Last synced {clock(seen)}, {seen.astimezone(SG):%-d %b}")
+                lines.append(f"🔄 Last synced {clock(seen)}, {display_date(seen.astimezone(SG))}")
             elif any(not c.error for c in checked):
                 lines.append("🔄 Connecting…")
             blocks.append("\n".join(lines))
@@ -2269,7 +2276,7 @@ class SchedulingService:
             blocks.append(
                 "📤 Your calendar app\n❌ Doesn't check for clashes\n"
                 "✅ Adds your plans, through the AmIFree calendar\n"
-                f"🔄 Last synced {clock(seen)}, {seen.astimezone(SG):%-d %b}"
+                f"🔄 Last synced {clock(seen)}, {display_date(seen.astimezone(SG))}"
             )
         return blocks
 

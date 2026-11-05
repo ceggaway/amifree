@@ -11,6 +11,7 @@ import logging
 from datetime import timedelta
 
 from app.bot.messages import Reply
+from app.date_display import display_date
 from app.services.group_events import GroupResult
 
 log = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class ProService:
             charge_id, chat_id, telegram_id, amount, self.settings.pro_days
         )
         return (
-            f"✅ Clubs Pro is active for your group until {until:%a %-d %b %Y}. Thank you!"
+            f"✅ Clubs Pro is active for your group until {display_date(until)}. Thank you!"
             f"\nChanged your mind? /refund works for {self.settings.refund_window_days} days.",
             False,
         )

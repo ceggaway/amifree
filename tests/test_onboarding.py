@@ -69,7 +69,7 @@ async def test_the_deadline_example_follows_and_saves_nothing(service_factory, r
     second = (await service.callback(1, tap(demo, "📌 Next: a deadline")))[0]
     assert second.edit and second.parse_mode == "HTML"
     assert onboarding.DEADLINE_DEMO_MESSAGE in second.text
-    assert "Due Fri" in second.text and "11:59pm" in second.text
+    assert "Due 📅 09/10/2026 (Friday)" in second.text and "11:59pm" in second.text
     assert "evening summary the night before" in second.text and "(Google or Apple)" in second.text
     assert labels(second) == ["📅 Connect calendar", "📩 Try my own message", "« Back"]
     assert (await service.callback(1, tap(second, "« Back")))[0].text == demo.text
@@ -87,7 +87,7 @@ async def test_sending_the_deadline_example_saves_that_deadline(service_factory,
     )
     service, repo = service_factory(found)
     card = (await service.message(1, 1, onboarding.DEADLINE_DEMO_MESSAGE, reference))[0]
-    assert card.text.startswith("📌 CS3244 report\nDue Fri")
+    assert card.text.startswith("📌 CS3244 report\nDue 📅 09/10/2026 (Friday)")
     assert "at 9am, and again at 8:59pm, 3 hours before" in card.text  # what the example says
     assert len(repo.deadlines) == 1
 
@@ -341,8 +341,7 @@ async def test_after_a_calendar_link_start_says_all_set(
     await service.message(1, 1, GOOGLE, reference)
     again = (await service.command(1, "start"))[0]
     assert (
-        again.text.startswith("You're all set ✅")
-        and f"your calendar ({displayed_name})" in again.text
+        again.text.startswith("✅ <b>You’re all set!</b>") and f"• {displayed_name}" in again.text
     )
     assert again.parse_mode == "HTML"
 
@@ -352,9 +351,32 @@ async def test_after_nusmods_start_says_all_set(service_factory, reference):
     await onboard(service, reference)
     again = (await service.command(1, "start"))[0]
     assert (
-        again.text.startswith("You're all set ✅")
-        and "NUSMods (2026-2027, semester 1)" in again.text
+        again.text.startswith("✅ <b>You’re all set!</b>")
+        and "• NUSMods · AY 2026/2027, Semester 1" in again.text
     )
+
+
+async def test_returning_start_lists_both_calendars_and_matches_menu(service_factory, reference):
+    service, _ = service_factory()
+    await onboard(service, reference)
+    service.calendar_reader = FakeReader(labels={GOOGLE: "Google Calendar"})
+    await service.message(1, 2, GOOGLE, reference)
+    reply = (await service.command(1, "start"))[0]
+    assert "• NUSMods · AY 2026/2027, Semester 1\n• Google Calendar" in reply.text
+    assert all(command in reply.text for command in ("/plans", "/free", "/deadline", "/settings"))
+    assert "/feedback" not in reply.text
+    assert [len(row) for row in reply.keyboard.inline_keyboard] == [2, 2]
+    assert labels(reply) == ["📋 My plans", "🕒 Am I free?", "📌 Deadlines", "⚙️ Settings"]
+
+
+async def test_google_shared_connection_alone_gets_returning_menu(service_factory):
+    service, repo = service_factory()
+    user = await repo.ensure_user(1)
+    await repo.save_google_connection(user.id, "student@example.com", "calendar-id")
+    reply = (await service.command(1, "start"))[0]
+    assert "<b>Connected calendars</b>\n• Google Calendar" in reply.text
+    assert "NUSMods" not in reply.text
+    assert reply.parse_mode == "HTML"
 
 
 @pytest.mark.parametrize("with_personal_calendar", [False, True])

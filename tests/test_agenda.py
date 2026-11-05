@@ -41,7 +41,11 @@ async def test_agenda_labels_plans_deadlines_and_blocks(service_factory, referen
     assert "CCA dinner" not in reply.text
     assert reply.text.endswith("<i>Page 1 of 1</i>")
     labels = [row[0].text for row in reply.keyboard.inline_keyboard]
-    assert labels == ["7 Oct · Busy: Work", "9 Oct · CCA dinner", "9 Oct · Due: CS3244 report"]
+    assert labels == [
+        "📅 07/10/2026 (Wednesday) · Busy: Work",
+        "📅 09/10/2026 (Friday) · CCA dinner",
+        "📅 09/10/2026 (Friday) · Due: CS3244 report",
+    ]
     assert all(len(row) == 1 for row in reply.keyboard.inline_keyboard)
 
 
@@ -51,7 +55,9 @@ async def test_tapping_a_label_opens_the_item_and_back_returns(service_factory, 
     await add_dinner(service, reference)
     await service.command(1, "deadline", "CS3244 report fri 11:59pm")
     reply = (await service.command(1, "plans"))[0]
-    dl_card = (await service.callback(1, tap(reply, "9 Oct · Due: CS3244 report")))[0]
+    dl_card = (
+        await service.callback(1, tap(reply, "📅 09/10/2026 (Friday) · Due: CS3244 report"))
+    )[0]
     assert "CS3244 report" in dl_card.text and dl_card.edit
     assert [b.text for row in dl_card.keyboard.inline_keyboard for b in row] == [
         "✅ Done",
@@ -64,7 +70,7 @@ async def test_tapping_a_label_opens_the_item_and_back_returns(service_factory, 
     assert menu.text.startswith("What do you want to change?") and tap(menu, "📌 Name")
     back = (await service.callback(1, tap(dl_card, "← Back to plans")))[0]
     assert back.text == reply.text and back.edit
-    plan_card = (await service.callback(1, tap(back, "9 Oct · CCA dinner")))[0]
+    plan_card = (await service.callback(1, tap(back, "📅 09/10/2026 (Friday) · CCA dinner")))[0]
     assert "<b>CCA dinner</b>" in plan_card.text and plan_card.edit
     labels = [b.text for row in plan_card.keyboard.inline_keyboard for b in row]
     assert "Edit details" in labels and "Remove from plans" in labels
@@ -161,7 +167,7 @@ async def test_plan_pages_and_back_restore_same_page(service_factory, reference)
     assert "Page 2 of 3" in second.text and second.edit
     assert [b.text for b in second.keyboard.inline_keyboard[-1]] == ["← Previous", "Next →"]
     label = second.keyboard.inline_keyboard[0][0].text
-    assert label == "12 Oct · Plan 8"
+    assert label == "📅 12/10/2026 (Monday) · Plan 8"
     card = (await service.callback(1, tap(second, label)))[0]
     assert "<b>Plan 8</b>" in card.text and "📍 Clementi Mall" in card.text
     assert card.edit and card.parse_mode == "HTML"
@@ -208,7 +214,7 @@ async def test_long_titles_are_shortened_only_in_list(service_factory, reference
     event.title = "A very long workshop title with <tags> & more information for everyone"
     agenda = (await service.command(1, "plans"))[0]
     button = agenda.keyboard.inline_keyboard[0][0]
-    assert button.text == "5 Oct · A very long workshop title with…"
+    assert button.text == "📅 05/10/2026 (Monday) · A very long workshop title with…"
     assert event.title not in agenda.text
     card = (await service.callback(1, button.callback_data))[0]
     assert "&lt;tags&gt; &amp; more information for everyone</b>" in card.text
@@ -220,7 +226,7 @@ async def test_workshop_button_does_not_end_in_partial_word(service_factory, ref
     event.title = "Halloween Workshop: Amigurumi Ghost"
     agenda = (await service.command(1, "plans"))[0]
     button = agenda.keyboard.inline_keyboard[0][0]
-    assert button.text == "5 Oct · Halloween Workshop: Amigurumi…"
+    assert button.text == "📅 05/10/2026 (Monday) · Halloween Workshop: Amigurumi…"
     card = (await service.callback(1, button.callback_data))[0]
     assert "<b>Halloween Workshop: Amigurumi Ghost</b>" in card.text
 
@@ -237,9 +243,9 @@ async def test_plans_sort_by_event_date_and_time_not_creation(service_factory, r
         event.start_at, event.end_at = start, start + timedelta(hours=1)
     agenda = (await service.command(1, "plans"))[0]
     assert [row[0].text for row in agenda.keyboard.inline_keyboard] == [
-        "5 Oct · Plan 3",
-        "5 Oct · Plan 2",
-        "7 Oct · Plan 1",
+        "📅 05/10/2026 (Monday) · Plan 3",
+        "📅 05/10/2026 (Monday) · Plan 2",
+        "📅 07/10/2026 (Wednesday) · Plan 1",
     ]
 
 

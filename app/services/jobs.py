@@ -21,6 +21,7 @@ from app.bot.keyboards import (
     undecided_keyboard,
 )
 from app.bot.messages import Reply, details, event_card, time_range, verdict_line
+from app.date_display import display_date
 from app.schemas.event import SG, Poll, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
@@ -134,7 +135,7 @@ class Notifier:
             # Only people still marked Going are asked; someone who changed their mind is not.
             if not linked or linked.status != Status.GOING:
                 return None
-            when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+            when = f"{display_date(event.start_at)}, {time_range(event.start_at, event.end_at)}"
             where = f" at {event.location[:80]}" if event.location else ""
             return Reply(
                 f"⏰ Still coming to {event.title[:80]}?\n{when}{where}"
@@ -209,7 +210,7 @@ class Notifier:
                 " is worked out from everyone's answers."
             )
             if poll.deadline_at:
-                text += f"\nFill in by {poll.deadline_at:%a %-d %b}."
+                text += f"\nFill in by {display_date(poll.deadline_at)}."
             text += card_link(poll)
             buttons = [[InlineKeyboardButton("🗓 Mark when I'm free", url=url)]] if url else []
         else:

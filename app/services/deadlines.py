@@ -4,6 +4,7 @@ import re
 from datetime import datetime, time, timedelta
 
 from app.bot.messages import clock
+from app.date_display import display_date
 from app.schemas.event import SG, Deadline, DeadlineDraft, Extraction
 from app.services.date_resolution import (
     Clarification,
@@ -75,7 +76,7 @@ def validate_deadline(extraction: Extraction, source: str, reference: datetime) 
             due_time = resolve_time(raw_time)
     due = datetime.combine(day, due_time, SG)
     if due <= reference:
-        raise Clarification(f"{due:%a %-d %b} {clock(due)} has already passed. " + ASK_DATE)
+        raise Clarification(f"{display_date(due)} {clock(due)} has already passed. " + ASK_DATE)
     title = (extraction.title or "Deadline").strip()[:200] or "Deadline"
     return DeadlineDraft(title=title, due_at=due, notes=extraction.notes)
 
@@ -114,7 +115,7 @@ def changed_due(text: str, current: datetime, now: datetime) -> datetime:
         raise
     due = datetime.combine(day, due_time, SG)
     if due <= now:
-        raise Clarification(f"{due:%a %-d %b} {clock(due)} has already passed. " + ASK_DATE)
+        raise Clarification(f"{display_date(due)} {clock(due)} has already passed. " + ASK_DATE)
     return due
 
 
@@ -134,7 +135,7 @@ def when(due: datetime, now: datetime) -> str:
         relative = "tomorrow"
     else:
         relative = f"in {days} days"
-    return f"{due:%a %-d %b}, {clock(due)} ({relative})"
+    return f"{display_date(due)}, {clock(due)} ({relative})"
 
 
 def card_text(
@@ -186,7 +187,7 @@ def on_day(moment: datetime, now: datetime) -> str:
         return "today"
     if day == today + timedelta(days=1):
         return "tomorrow"
-    return f"on {moment:%a %-d %b}"
+    return f"on {display_date(moment)}"
 
 
 def reminder_promise(

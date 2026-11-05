@@ -47,14 +47,16 @@ async def test_weekly_post_asks_one_or_every_week(service_factory, reference):
     assert reply.text.startswith("🔁 Project BHID volunteering")
     assert "every week: Saturdays, 9:30–11:30am" in reply.text
     labels = [b.text for row in reply.keyboard.inline_keyboard for b in row]
-    assert labels == ["Just the next one (Sat 10 Oct)", "Every Saturday", "Neither"]
+    assert labels == ["Just the next one (📅 10/10/2026 (Saturday))", "Every Saturday", "Neither"]
 
 
 async def test_just_the_next_one_makes_a_normal_card(service_factory, reference):
     service, repo = service_factory(BHID)
     offer = (await service.message(1, 1, BHID_POST, reference))[0]
-    card = (await service.callback(1, tap(offer, "Just the next one (Sat 10 Oct)")))[0]
-    assert card.edit and "10 Oct 2026 (Saturday) · 9:30AM–11:30AM" in card.text
+    card = (await service.callback(1, tap(offer, "Just the next one (📅 10/10/2026 (Saturday))")))[
+        0
+    ]
+    assert card.edit and "📅 10/10/2026 (Saturday) · 9:30AM–11:30AM" in card.text
     assert "Add to plans" in [b.text for row in card.keyboard.inline_keyboard for b in row]
     assert not (await repo.ensure_user(1)).pending
 
@@ -127,7 +129,7 @@ async def test_two_weekdays_ask_one_or_every_week(service_factory, reference):
     assert "every week: Tue & Thu, 7–9pm" in reply.text
     labels = [b.text for row in reply.keyboard.inline_keyboard for b in row]
     # Sunday 4 Oct: Tuesday 6 Oct comes first.
-    assert labels == ["Just the next one (Tue 6 Oct)", "Every Tue & Thu", "Neither"]
+    assert labels == ["Just the next one (📅 06/10/2026 (Tuesday))", "Every Tue & Thu", "Neither"]
 
 
 async def test_weekly_hours_listed_in_other_times_still_get_the_offer(service_factory, reference):

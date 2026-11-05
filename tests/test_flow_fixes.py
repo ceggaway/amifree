@@ -62,7 +62,7 @@ async def test_free_accepts_a_typed_day(service_factory, reference):
     service, _ = service_factory()
     await service.command(1, "free")
     reply = (await service.message(1, 5, "15 oct", reference))[0]
-    assert reply.text == "🟢 Thu 15 Oct: nothing booked, free all day."
+    assert reply.text == "📅 <b>15/10/2026 (Thursday)</b>\n\n🟢 <b>No events or blocked times.</b>"
     # Answered: the next message is an ordinary one again.
     assert (await service.repo.ensure_user(1)).pending is None
 
@@ -71,7 +71,7 @@ async def test_free_typed_time(service_factory, reference):
     service, _ = service_factory()
     await service.command(1, "free")
     reply = (await service.message(1, 5, "sat 2-5pm", reference))[0]
-    assert reply.text.startswith("✅ No clashes found · Sat 10 Oct · 2–5pm")
+    assert reply.text.startswith("✅ No clashes found · 📅 10/10/2026 (Saturday) · 2–5pm")
 
 
 # ---------- bug 3: answering "what time does it end?" ----------
@@ -97,7 +97,7 @@ async def test_block_with_one_time_asks_for_the_range(service_factory, reference
     assert ask.text.startswith("What time is this block?")
     preview = (await service.message(1, 6, "18:30-19:00", reference))[0]
     assert preview.text.startswith("Block this time?")
-    assert "Wed 14 Oct" in preview.text or "14 Oct" in preview.text
+    assert "📅 14/10/2026 (Wednesday)" in preview.text
     assert "SGT" in preview.text and "Singapore" not in preview.text
     done = (await service.callback(1, tap(preview, "Save block")))[0]
     assert done.text.startswith("Blocked:")
@@ -116,7 +116,10 @@ async def test_block_over_a_plan_shows_the_clash_now(service_factory, reference)
     card = (await service.message(1, 1, DINNER, reference))[0]
     await service.callback(1, tap(card, "Add to plans"))
     preview = (await service.message(1, 5, "busy fri 8-10pm", reference))[0]
-    assert "⚠️ This clashes with your plans:\n• CCA dinner (Going, Fri 9 Oct 7–9pm)" in preview.text
+    assert (
+        "⚠️ This clashes with your plans:\n• CCA dinner (Going, 📅 09/10/2026 (Friday) 7–9pm)"
+        in preview.text
+    )
     done = (await service.callback(1, tap(preview, "Save block")))[0]
     assert "CCA dinner (Going" in done.text
 
@@ -126,7 +129,7 @@ async def test_weekly_block_clash(service_factory, reference):
     card = (await service.message(1, 1, DINNER, reference))[0]
     await service.callback(1, tap(card, "Add to plans"))
     preview = (await service.message(1, 5, "work every fri 6-8pm", reference))[0]
-    assert "CCA dinner (Going, Fri 9 Oct 7–9pm)" in preview.text
+    assert "CCA dinner (Going, 📅 09/10/2026 (Friday) 7–9pm)" in preview.text
 
 
 # ---------- a weekday after the date ----------
@@ -150,7 +153,7 @@ async def test_weekday_after_the_date(service_factory, reference):
     )
     await onboard(service, reference)
     card = (await service.message(1, 2, POSTER, reference))[0]
-    assert "22 Oct 2026 (Thursday) · 6PM–9PM SGT" in card.text
+    assert "📅 22/10/2026 (Thursday) · 6PM–9PM SGT" in card.text
 
 
 async def test_date_answer_needs_no_ai(service_factory, reference):
@@ -159,7 +162,7 @@ async def test_date_answer_needs_no_ai(service_factory, reference):
     ask = (await service.message(1, 2, "CCA dinner 7-9pm at Vivo", reference))[0]
     assert "date" in ask.text
     card = (await service.message(1, 3, "2026-10-22", reference))[0]
-    assert "22 Oct 2026 (Thursday)" in card.text
+    assert "📅 22/10/2026 (Thursday)" in card.text
     assert len(service.extractor.calls) == 1
 
 

@@ -36,10 +36,12 @@ def nusmods_url(today: date | None = None) -> str:
 
 
 EVERYDAY_HELP = (
-    "📋 <b>My plans</b> · /plans — see upcoming events and deadlines you’ve saved with me.\n\n"
-    "📌 <b>Deadlines</b> · /deadline — save or forward a due date and get reminders before it’s due. "
-    "Try “Report due Fri 11:59pm”.\n\n"
-    "💬 <b>Feedback</b> · /feedback — If you run into any issues or have suggestions, send us feedback using /feedback. You can send it anonymously or with your @handle"
+    "<b>What would you like to do?</b>\n"
+    "📋 <b>My plans</b> · /plans — View saved events and deadlines.\n"
+    "🕒 <b>Am I free?</b> · /free — Check when you’re available.\n"
+    "📌 <b>Deadlines</b> · /deadline — Save a deadline and get reminders.\n"
+    "⚙️ <b>Settings</b> · /settings — Personalise your reminders.\n\n"
+    "To add an event, send its details, forward a message or photo, or send a voice message."
 )
 
 # Short on purpose: one thing to do (try it), and the privacy promise next to the buttons

@@ -44,7 +44,7 @@ async def test_change_the_due_time(service_factory, reference, typed, expected):
     service, repo = service_factory(due())
     await edit(service, repo, reference, "🕒 Due date & time")
     (card,) = await service.message(1, 2, typed, reference)
-    assert card.text.startswith("✏️ Due time changed (was Fri 9 Oct, 11:59pm")
+    assert card.text.startswith("✏️ Due time changed (was 📅 09/10/2026 (Friday), 11:59pm")
     (deadline,) = repo.deadlines.values()
     assert deadline.due_at == expected
 

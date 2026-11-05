@@ -246,7 +246,9 @@ async def test_several_calendars_are_all_checked(with_calendar, reference):
     card = (await service.message(1, 3, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     assert card.text.startswith("⚠️ Overlaps with CCA calendar · 7:30PM–8:30PM SGT")
     free = (await service.command(1, "free", "fri"))[0]
-    assert "Free: 8am–12pm, 1–7:30pm, 8:30–11pm" in free.text  # both calendars
+    assert "12–1pm · Events calendar" in free.text
+    assert "7:30–8:30pm · CCA calendar" in free.text
+    assert "Free:" not in free.text
 
 
 async def test_sending_the_same_link_again_refreshes_instead_of_duplicating(

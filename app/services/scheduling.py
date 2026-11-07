@@ -22,10 +22,10 @@ from app.bot.keyboards import (
     change_keyboard,
     choose_keyboard,
     confirm_keyboard,
+    deadline_edit_keyboard,
     deadline_keyboard,
     feedback_choice_keyboard,
     free_keyboard,
-    menu_keyboard,
     page_keyboard,
     personal_calendars_keyboard,
     personal_change_confirmation,
@@ -33,7 +33,6 @@ from app.bot.keyboards import (
     recurring_keyboard,
     reminder_keyboard,
     remove_block_keyboard,
-    settings_keyboard,
     times_keyboard,
     undo_keyboard,
     with_plans_navigation,
@@ -55,6 +54,7 @@ from app.bot.messages import (
     verdict_line,
 )
 from app.config import Settings
+from app.date_display import display_date
 from app.models.timetable import BlockRule
 from app.models.user import User
 from app.schemas.event import (
@@ -67,6 +67,7 @@ from app.schemas.event import (
     Status,
 )
 from app.services import analytics, calendar_export, giveaway, quick_reminders
+from app.services import personal_reminder_settings as reminder_settings
 from app.services.availability import check_availability
 from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
@@ -81,12 +82,12 @@ from app.services.date_resolution import (
     weekly_weekdays,
 )
 from app.services.deadlines import EXAMPLE as DEADLINE_EXAMPLE
-from app.services.deadlines import card_text, due_line, validate_deadline
+from app.services.deadlines import NO_NOTES, card_text, changed_due, due_line, validate_deadline
 from app.services.deadlines import when as deadline_when
 from app.services.detection import DetectionService
 from app.services.event_extractor import settle_ambiguity, settle_kind
 from app.services.event_updates import match_updates
-from app.services.free_time import RANGE, free_gaps, parse_free, weekend
+from app.services.free_time import RANGE, parse_free, weekend
 from app.services.google_calendar import EMAIL as GOOGLE_EMAIL
 from app.services.google_calendar import GCAL_PREFIX
 from app.services.google_sync import GoogleSyncService
@@ -128,6 +129,25 @@ from app.services.ratelimit import RateLimiter
 from app.services.usual_times import describe as describe_usual
 from app.services.usual_times import parse_usual
 from app.services.voice_reader import VoiceError
+
+# What can be changed on a deadline, and the question asked for each.
+DEADLINE_FIELDS = {
+    "title": "Send the new name.",
+    "due": "Send the new due date, time, or both, like: sat 5pm, tmr, or 20 oct 2359."
+    " Anything you don’t mention stays the same.",
+    "notes": "Send the new notes, or “none” to remove them.",
+}
+
+
+def all_reminders(on: bool) -> dict[str, bool]:
+    """/reminders on|off: every switch in /settings together."""
+    return {
+        "summary_enabled": on,
+        "morning_enabled": on,
+        "deadline_alerts": on,
+        "overview_enabled": on,
+    }
+
 
 log = logging.getLogger(__name__)
 
@@ -193,6 +213,39 @@ BLOCK_TIME = re.compile(
 )
 
 
+# /calendar groups calendars by app, in this order; None is anything else.
+APPS = {
+    "google": "📅 Google Calendar",
+    "apple": "🍎 Apple Calendar",
+    "outlook": "📧 Outlook",
+    None: "🗓 Other calendars",
+}
+
+
+def feed_app(user_agent: str) -> str | None:
+    """The calendar app fetching the AmIFree calendar, from its User-Agent."""
+    agent = user_agent.lower()
+    if any(name in agent for name in OUTLOOK_AGENTS):
+        return "outlook"
+    if "google" in agent:
+        return "google"
+    if any(name in agent for name in ("ios/", "macos/", "dataaccessd", "calendaragent", "darwin")):
+        return "apple"
+    return None
+
+
+def link_app(link: str | None) -> str | None:
+    """Which app a calendar link comes from, by its address."""
+    host = urlparse(link or "").hostname or ""
+    if host.endswith("icloud.com"):
+        return "apple"
+    if host.startswith("outlook.") or host.endswith(("office365.com", "office.com", "live.com")):
+        return "outlook"
+    if host.endswith("google.com"):
+        return "google"
+    return None
+
+
 def synced(user: User) -> str:
     """Where plans go by themselves, as cards name it ("your Google Calendar"); "" for nowhere."""
     places = []
@@ -228,12 +281,42 @@ MENU_COMMANDS = {
 }
 
 
-FEEDBACK_PROMPT = "💬 Type your feedback and I'll pass it to the team. /cancel to stop."
-FEEDBACK_ASK = (
-    "Send this feedback?\n\n"
-    "🕶 Anonymous — just your message.\n"
-    "👤 With your @handle — so the team can reply."
+FEEDBACK_PROMPT = (
+    "💬 <b>Help us improve AmIFree!</b>\n"
+    "Share a suggestion or report an issue for our team to review.\n\n"
+    "/cancel to exit."
 )
+FEEDBACK_ASK = (
+    "You can send 🕶 anonymously or 👤 with your @handle so the team can follow up. "
+    "Choose an option below."
+)
+
+FEATURE_HEADINGS = {
+    "plans": ("📋 My plans", ("Your plans",)),
+    "free": ("🕒 Am I free?", ()),
+    "deadline": ("📌 Deadlines", ()),
+    "deadlines": ("📌 Deadlines", ()),
+    "calendar": ("📅 Calendar", ("📅 Your calendars",)),
+    "settings": ("⚙️ Settings", ("⚙️ Settings",)),
+    "feedback": ("💬 Feedback", ()),
+}
+
+
+def feature_reply(reply: Reply, command: str) -> Reply:
+    """Keep feature screens recognisable, including after pagination and button actions."""
+    heading, old_headings = FEATURE_HEADINGS[command]
+    first_line = f"<b>{heading}</b>"
+    if reply.parse_mode == "HTML" and reply.text.startswith(first_line + "\n"):
+        return reply
+    text = reply.text
+    for old in old_headings:
+        for prefix in (old, f"<b>{old}</b>"):
+            if text.startswith(prefix + "\n"):
+                text = text[len(prefix) :].lstrip("\n")
+                break
+    if reply.parse_mode != "HTML":
+        text = html.escape(text, quote=False)
+    return replace(reply, text=f"{first_line}\n\n{text}", parse_mode="HTML")
 
 
 class SchedulingService:
@@ -368,8 +451,18 @@ class SchedulingService:
         message = text.strip()
         if not message:
             return [Reply("Nothing to send yet. Type your feedback, or /cancel.")]
-        await self.repo.set_pending(user.id, {"stage": "feedback_choose", "text": message[:2000]})
-        return [Reply(FEEDBACK_ASK, feedback_choice_keyboard())]
+        message = message[:2000]
+        await self.repo.set_pending(user.id, {"stage": "feedback_choose", "text": message})
+        return [
+            feature_reply(
+                Reply(
+                    "<b>Your feedback</b>\n“" + html.escape(message) + "”\n\n" + FEEDBACK_ASK,
+                    feedback_choice_keyboard(),
+                    parse_mode="HTML",
+                ),
+                "feedback",
+            )
+        ]
 
     async def submit_feedback(self, user, data: str) -> list[Reply]:
         pending = user.pending
@@ -389,18 +482,24 @@ class SchedulingService:
         return [Reply(f"🙌 Thanks! Sent to the team{how}.", edit=True)]
 
     async def command(self, telegram_id: int, command: str, args: str = "") -> list[Reply]:
+        replies = await self._command(telegram_id, command, args)
+        if replies and command in FEATURE_HEADINGS:
+            replies[0] = feature_reply(replies[0], command)
+        return replies
+
+    async def _command(self, telegram_id: int, command: str, args: str = "") -> list[Reply]:
         user = await self.repo.ensure_user(telegram_id)
+        if (user.pending or {}).get("stage") == "settings_time":
+            await self.repo.set_pending(user.id, None)
+            user = user.model_copy(update={"pending": None})
         if command == "help":
             return [Reply(HELP, parse_mode="HTML")]
         if command == "feedback":
             body = args.strip()
             if body:
-                await self.repo.set_pending(
-                    user.id, {"stage": "feedback_choose", "text": body[:2000]}
-                )
-                return [Reply(FEEDBACK_ASK, feedback_choice_keyboard())]
+                return await self.receive_feedback_text(user, body)
             await self.repo.set_pending(user.id, {"stage": "feedback_text"})
-            return [Reply(FEEDBACK_PROMPT)]
+            return [Reply(FEEDBACK_PROMPT, parse_mode="HTML")]
         if command == "start":
             await self.safe_action(user.id, "start")
             if user.dm_blocked:
@@ -410,22 +509,34 @@ class SchedulingService:
                 return await self.groups.begin_change(user, args)
             if args.startswith("manage_"):
                 return await self.groups.manage_panel(user, args)
+            if args == onboarding.GOOGLE_PHONE_START and self.google_sync.enabled:
+                # Tapped Open sharing settings on a phone: the page sent them back here.
+                [step] = self.google_sync.steps(computer=False)
+                step.text = "📱 You're on your phone, so here are the phone steps.\n\n" + step.text
+                step.edit = False
+                return [step]
             connected = []
             if user.onboarding_status == "READY":
-                connected.append(f"NUSMods ({user.academic_year}, semester {user.semester})")
+                year = (user.academic_year or "").replace("-", "/")
+                connected.append(f"NUSMods · AY {year}, Semester {user.semester}")
             calendars = await self.repo.list_calendars(user.id)
-            if calendars:
-                names = ", ".join(c.label for c in calendars)
-                connected.append(f"your calendar{'s' if len(calendars) > 1 else ''} ({names})")
+            connected.extend(c.label for c in calendars)
+            if user.google_connected and not any(
+                c.label.lower().startswith("google")
+                or (unseal(c.sealed_url, self.link_secret) or "").startswith(GCAL_PREFIX)
+                for c in calendars
+            ):
+                connected.append("Google Calendar")
+            if user.calendar_feed_token and user.calendar_feed_seen_at and not calendars:
+                connected.append("AmIFree calendar subscription")
             if connected:
                 return [
                     Reply(
-                        "You're all set ✅ Forward me a plan, or pick one below."
-                        "\nChecking: "
-                        + html.escape(" and ".join(connected))
-                        + ".\n\n"
+                        "✅ <b>You’re all set!</b>\n\n"
+                        "<b>Connected calendars</b>\n"
+                        + "\n".join("• " + html.escape(name) for name in connected)
+                        + "\n\n"
                         + onboarding.EVERYDAY_HELP,
-                        menu_keyboard(),
                         parse_mode="HTML",
                     )
                 ]
@@ -439,7 +550,7 @@ class SchedulingService:
         if command == "cancel":
             await self.google_sync.discard(user.pending)
             await self.repo.set_pending(user.id, None)
-            return [Reply("Pending action cleared. Forward an event when you're ready.")]
+            return [Reply("Pending action cleared.\n\nUse /start to choose what to do next.")]
         if command in ("delete", "deletemydata"):
             nonce = secrets.token_hex(8)
             await self.repo.set_pending(user.id, {"stage": "delete", "nonce": nonce})
@@ -482,15 +593,10 @@ class SchedulingService:
         if command == "reminders":
             choice = args.lower()
             if choice in ("on", "off"):
-                await self.repo.set_user_flags(user.id, reminders_enabled=choice == "on")
-                return [
-                    Reply(
-                        "Night-before summaries and nudges are on."
-                        if choice == "on"
-                        else "Night-before summaries and nudges are off. Change alerts for plans you saved still arrive."
-                    )
-                ]
-            state = "on" if user.reminders_enabled else "off"
+                await self.repo.set_user_flags(user.id, **all_reminders(choice == "on"))
+                return [Reply(f"Personal reminders are {choice}. Use /settings to customise them.")]
+            on = any(getattr(user, field) for field in all_reminders(True))
+            state = "on" if on else "off"
             return [Reply(f"Reminders are {state}. Send /reminders on or /reminders off.")]
         if command == "block":
             if not args:
@@ -611,7 +717,13 @@ class SchedulingService:
         _, _, kind, fields = found
         if kind == "deadline":
             deadline = await self.repo.create_deadline(user.id, None, DeadlineDraft(**fields))
-            text = card_text(deadline, self.clock(), user.reminders_enabled)
+            text = card_text(
+                deadline,
+                self.clock(),
+                user.deadline_alerts,
+                morning=False,
+                lead_minutes=user.deadline_lead_minutes,
+            )
             return [
                 Reply(
                     "↩️ Restored.\n" + text.rsplit("\n\n", 1)[0],
@@ -651,19 +763,162 @@ class SchedulingService:
         return [Reply("↩️ Restored.\n" + describe(rule), remove_block_keyboard(rule.id), edit=True)]
 
     def settings_panel(self, user: User) -> Reply:
-        on = user.reminders_enabled
-        text = (
-            "⚙️ Settings\n\n"
-            f"Reminders: {'on' if on else 'off'}\n\n"
-            "This toggle controls:\n"
-            "• A summary of tomorrow's plans\n"
-            "• Deadline reminders\n"
-            '• "Still coming?" checks\n'
-            "• Nudges to reply to group plans and polls\n\n"
-            "Even when off, you'll still get updates to plans you've added "
-            "and reminders you set with /remind."
+        return reminder_settings.screen(user)
+
+    async def save_personal_preferences(self, user: User, **flags) -> User:
+        overview_changed = any(
+            key.startswith("overview_") and getattr(user, key) != value
+            for key, value in flags.items()
         )
-        return Reply(text, settings_keyboard(on))
+        if "overview_enabled" in flags or "overview_period" in flags:
+            enabled = flags.get("overview_enabled", user.overview_enabled)
+            period = flags.get("overview_period", user.overview_period)
+            flags.update(
+                summary_enabled=enabled and period == "evening",
+                morning_enabled=enabled and period == "morning",
+            )
+        await self.repo.set_user_flags(user.id, **flags)
+        if overview_changed:
+            await self.repo.retime_pending_overviews(user.id, self.clock())
+        return await self.repo.ensure_user(user.telegram_user_id)
+
+    async def personal_settings_action(
+        self, user: User, action: str, message_id=None, settings_pending=None
+    ) -> list[Reply]:
+        page = "home"
+        if action in ("home", "overview", "deadline", "deadline_timing"):
+            page = action
+        elif action in ("overview:on", "overview:off", "deadline:on", "deadline:off"):
+            kind, value = action.split(":")
+            field = "overview_enabled" if kind == "overview" else "deadline_alerts"
+            user = await self.save_personal_preferences(user, **{field: value == "on"})
+            page = kind
+        elif action in ("period:morning", "period:evening"):
+            page = "overview"
+            if user.overview_enabled:
+                user = await self.save_personal_preferences(
+                    user, overview_period=action.split(":")[1]
+                )
+        elif action in ("overview:time", "deadline:custom"):
+            kind = action.split(":")[0]
+            if not (user.overview_enabled if kind == "overview" else user.deadline_alerts):
+                return [replace(reminder_settings.screen(user, kind), edit=True)]
+            page = "overview_time" if kind == "overview" else "deadline_custom"
+            await self.repo.set_pending(
+                user.id,
+                {
+                    "stage": "settings_time",
+                    "kind": kind,
+                    "period": user.overview_period,
+                    "settings_message_id": message_id,
+                },
+            )
+        elif action == "deadline:timing":
+            page = "deadline_timing" if user.deadline_alerts else "deadline"
+        elif action in ("lead:60", "lead:180", "lead:1440"):
+            if user.deadline_alerts:
+                user = await self.save_personal_preferences(
+                    user, deadline_lead_minutes=int(action.split(":")[1])
+                )
+            page = "deadline"
+        elif action.startswith("confirm:"):
+            proposal = (settings_pending or {}).get("proposal", {})
+            valid = (
+                (settings_pending or {}).get("stage") == "settings_time"
+                and settings_pending.get("kind") == "overview"
+                and settings_pending.get("period") == user.overview_period
+                and user.overview_enabled
+                and proposal.get("nonce") == action.removeprefix("confirm:")
+                and proposal.get("nonce")
+            )
+            if not valid:
+                return [
+                    replace(
+                        reminder_settings.screen(
+                            user,
+                            "overview",
+                            note="That time choice has expired. Please choose your timing again.",
+                        ),
+                        edit=True,
+                    )
+                ]
+            period, minute = proposal["period"], proposal["minute"]
+            user = await self.save_personal_preferences(
+                user, overview_period=period, **{f"overview_{period}_minute": minute}
+            )
+            page = "overview"
+        else:
+            return [Reply("That settings option isn't available. Open /settings again.", edit=True)]
+        if page in ("deadline_timing", "deadline_custom") and not user.deadline_alerts:
+            page = "deadline"
+        return [replace(reminder_settings.screen(user, page), edit=True)]
+
+    async def personal_settings_input(self, user: User, text: str) -> list[Reply]:
+        pending = user.pending
+        kind = pending["kind"]
+        page = "overview_time" if kind == "overview" else "deadline_custom"
+        target = pending.get("settings_message_id")
+        if len(text) > 120:
+            return [
+                replace(
+                    reminder_settings.screen(
+                        user, page, note="Please send just the time or interval."
+                    ),
+                    edit_message_id=target,
+                )
+            ]
+        if not (user.overview_enabled if kind == "overview" else user.deadline_alerts):
+            await self.repo.set_pending(user.id, None)
+            return [replace(reminder_settings.screen(user, kind), edit_message_id=target)]
+        try:
+            if kind == "overview":
+                minute, period = reminder_settings.parse_delivery(text)
+                if period != pending["period"]:
+                    label = reminder_settings.PERIODS[period]
+                    nonce = secrets.token_hex(8)
+                    await self.repo.set_pending(
+                        user.id,
+                        pending
+                        | {"proposal": {"period": period, "minute": minute, "nonce": nonce}},
+                    )
+                    reply = reminder_settings.screen(
+                        user,
+                        page,
+                        note=f"{reminder_settings.time_label(minute)} is for {label.lower()}. "
+                        "Switch and use this time?",
+                    )
+                    reply.keyboard = reminder_settings.keyboard(
+                        [(f"Use {label}", f"confirm:{nonce}")], [("‹ Back", "overview")]
+                    )
+                    return [replace(reply, edit_message_id=target)]
+                if user.overview_period != pending["period"]:
+                    await self.repo.set_pending(user.id, None)
+                    return [
+                        replace(
+                            reminder_settings.screen(
+                                user,
+                                kind,
+                                note="Your timing preference changed. Please choose the time again.",
+                            ),
+                            edit_message_id=target,
+                        )
+                    ]
+                user = await self.save_personal_preferences(
+                    user, **{f"overview_{period}_minute": minute}
+                )
+            else:
+                minutes = reminder_settings.parse_interval(text)
+                user = await self.save_personal_preferences(user, deadline_lead_minutes=minutes)
+        except Clarification as exc:
+            return [
+                replace(reminder_settings.screen(user, page, note=str(exc)), edit_message_id=target)
+            ]
+        await self.repo.set_pending(user.id, None)
+        return [
+            replace(
+                reminder_settings.screen(user, kind, note="Timing updated."), edit_message_id=target
+            )
+        ]
 
     async def usual_command(self, user: User, args: str) -> list[Reply]:
         """/usual tue evenings, sat all day: standing free times that pre-fill poll grids."""
@@ -736,7 +991,7 @@ class SchedulingService:
         return [
             Reply(
                 f"🔁 {draft.title}\nThis happens every week: {when}.\n\nWhat should I add?",
-                recurring_keyboard(nonce, f"{draft.start_at:%a %-d %b}", day_name),
+                recurring_keyboard(nonce, f"{display_date(draft.start_at)}", day_name),
             )
         ]
 
@@ -990,7 +1245,7 @@ class SchedulingService:
         if not hits:
             return ""
         lines = [
-            f"• {e.title[:60]} ({e.status.value.title()}, {e.start_at.astimezone(SG):%a %-d %b} "
+            f"• {e.title[:60]} ({e.status.value.title()}, {display_date(e.start_at.astimezone(SG))} "
             f"{time_range(e.start_at, e.end_at)})"
             for e in hits[:5]
         ]
@@ -1016,7 +1271,12 @@ class SchedulingService:
                 block = min(upcoming, key=lambda b: b.start_at)
                 items.append((block.start_at, "bc", rule.id, "Busy: " + rule.title))
         if not items:
-            return [Reply("Nothing coming up. Forward a plan, or add a deadline with /deadline.")]
+            return [
+                feature_reply(
+                    Reply("Nothing coming up. Forward a plan, or add a deadline with /deadline."),
+                    "plans",
+                )
+            ]
         items.sort(key=lambda item: (item[0], item[1], item[2]))
         pages = (len(items) + PLANS_PAGE - 1) // PLANS_PAGE
         page = max(0, min(page, pages - 1))
@@ -1028,10 +1288,10 @@ class SchedulingService:
                 if not title[31].isspace() and " " in short:
                     short = short.rsplit(" ", 1)[0]
                 title = short.rstrip(" ,.:;·-–—") + "…"
-            buttons.append((f"{when.astimezone(SG):%-d %b} · {title}", kind, item_id))
+            buttons.append((f"{display_date(when.astimezone(SG))} · {title}", kind, item_id))
         return [
             Reply(
-                "<b>Your plans</b>\nSelect a plan below to view its details.\n\n"
+                "<b>📋 My plans</b>\n\nSelect a plan below to view its details.\n\n"
                 f"<i>Page {page + 1} of {pages}</i>",
                 plans_keyboard(buttons, page, pages),
                 parse_mode="HTML",
@@ -1069,7 +1329,13 @@ class SchedulingService:
                 return [Reply("That deadline is gone or already done. Use /deadline.")]
             return [
                 Reply(
-                    card_text(deadline, self.clock(), user.reminders_enabled),
+                    card_text(
+                        deadline,
+                        self.clock(),
+                        user.deadline_alerts,
+                        morning=False,
+                        lead_minutes=user.deadline_lead_minutes,
+                    ),
                     deadline_keyboard(deadline.id),
                 )
             ]
@@ -1147,8 +1413,16 @@ class SchedulingService:
     async def _message(
         self, user: User, telegram_id: int, message_id: int, text: str, reference: datetime
     ) -> list[Reply]:
+        if (user.pending or {}).get("stage") == "settings_time":
+            return await self.personal_settings_input(user, text)
         if user.pending and user.pending.get("stage") == "feedback_text":
             return await self.receive_feedback_text(user, text)
+        if user.pending and user.pending.get("stage") == "deadline_field":
+            return await self.edit_deadline_field(user, user.pending, text)
+        if user.pending and user.pending.get("stage") == "deadline_menu":
+            # A message instead of a button: the edit is dropped and this is read as new.
+            await self.repo.set_pending(user.id, None)
+            user.pending = None
         if len(text) > 8000:
             return [
                 Reply(
@@ -1168,6 +1442,15 @@ class SchedulingService:
             return [Reply(str(exc), onboarding.link_help_keyboard())]
         if calendar_link:
             return await self.connect_calendar(user, calendar_link)
+        first = user.pending if (user.pending or {}).get("stage") == "gcal_email" else None
+        if first and first.get("first") and GOOGLE_EMAIL.fullmatch(text.strip()):
+            # Computer setup asked for the email first: open its settings, don't check yet.
+            email = text.strip().lower()
+            await self.repo.set_pending(user.id, {"stage": "gcal_shared", "email": email})
+            share, photo, keyboard = onboarding.google_share_screen(
+                self.google.email, email, self.settings.app_base_url
+            )
+            return [Reply(share, keyboard, parse_mode="HTML", photo=photo)]
         if self.google_sync.enabled and GOOGLE_EMAIL.fullmatch(text.strip()):
             if not self.calendar_limit.allow(user.id):
                 return [Reply(SLOW_DOWN)]
@@ -1205,6 +1488,8 @@ class SchedulingService:
                 return await self.google_sync.verify(user, pending, text)
             # Anything else is an ordinary message; the code stays valid until it expires.
             pending = None
+        if pending and pending["stage"] == "gcal_shared":
+            pending = None  # an ordinary message; Done still works
         if pending and pending["stage"] in ("times", "recurring"):
             # A new message closes the "I found 2 events" picker or the "every week?"
             # question; their buttons then expire.
@@ -1447,8 +1732,10 @@ class SchedulingService:
                 card_text(
                     deadline,
                     self.clock(),
-                    user.reminders_enabled,
+                    user.deadline_alerts,
                     await self.deadline_calendar_line(user, deadline),
+                    morning=False,
+                    lead_minutes=user.deadline_lead_minutes,
                 ),
                 deadline_keyboard(deadline.id),
             )
@@ -1467,6 +1754,65 @@ class SchedulingService:
             lines.append("📅 It'll show up in your AmIFree calendar at its next refresh.")
         return "\n".join(lines)
 
+    async def begin_deadline_edit(self, user: User, deadline) -> list[Reply]:
+        nonce = secrets.token_hex(8)
+        await self.repo.set_pending(
+            user.id, {"stage": "deadline_menu", "deadline_id": deadline.id, "nonce": nonce}
+        )
+        return [
+            Reply(
+                f"What do you want to change?\n\n📌 {deadline.title}\n"
+                f"Due {deadline_when(deadline.due_at, self.clock())}",
+                deadline_edit_keyboard(nonce),
+            )
+        ]
+
+    async def choose_deadline_field(self, user: User, field: str, nonce: str) -> list[Reply]:
+        pending = user.pending
+        if not pending or pending.get("nonce") != nonce or not pending.get("deadline_id"):
+            return [Reply("That edit expired. Use /deadline and tap Edit again.")]
+        await self.repo.set_pending(user.id, pending | {"stage": "deadline_field", "field": field})
+        return [Reply(DEADLINE_FIELDS[field] + "\n/cancel to keep it unchanged.")]
+
+    async def edit_deadline_field(self, user: User, pending: dict, text: str) -> list[Reply]:
+        """The typed name, due time or notes, applied at once: none of them can clash."""
+        deadline = await self.repo.get_deadline(user.id, pending["deadline_id"])
+        if not deadline or deadline.done:
+            await self.repo.set_pending(user.id, None)
+            return [Reply("That deadline is gone or done. /deadline lists the rest.")]
+        field, value = pending["field"], " ".join(text.split())
+        if field == "due":
+            try:
+                changes = {"due_at": changed_due(value, deadline.due_at, self.clock())}
+            except Clarification as exc:
+                return [Reply(f"{exc}\n/cancel to keep it unchanged.")]
+            note = f"✏️ Due time changed (was {deadline_when(deadline.due_at, self.clock())})."
+        elif field == "notes":
+            notes = None if value.lower() in NO_NOTES else text.strip()[:500]
+            changes, note = {"notes": notes}, "✏️ Notes updated." if notes else "✏️ Notes removed."
+        else:
+            if not value or len(value) > 200:
+                return [Reply("Send the name in one line (up to 200 characters), or /cancel.")]
+            changes, note = {"title": value}, f"✏️ Renamed (was {deadline.title})."
+        updated = await self.repo.update_deadline(user.id, deadline.id, **changes)
+        await self.repo.set_pending(user.id, None)
+        if not updated:
+            return [Reply("That deadline is gone. /deadline lists the rest.")]
+        await self.safe_action(user.id, "deadline_edit", metadata={"field": field})
+        synced_note = (
+            "\n📅 Your calendar will update with it."
+            if user.google_connected or (user.calendar_feed_token and user.calendar_feed_seen_at)
+            else ""
+        )
+        card = card_text(
+            updated,
+            self.clock(),
+            user.deadline_alerts,
+            morning=False,
+            lead_minutes=user.deadline_lead_minutes,
+        )
+        return [Reply(note + synced_note + "\n\n" + card, deadline_keyboard(updated.id))]
+
     async def list_deadlines(self, user: User, page: int = 0) -> list[Reply]:
         """One numbered message: overdue first, then upcoming, with a button per deadline."""
         now = self.clock()
@@ -1475,16 +1821,19 @@ class SchedulingService:
         )
         if not found:
             return [
-                Reply(
-                    "No upcoming deadlines. Forward a message with a due date, or send "
-                    f"/deadline {DEADLINE_EXAMPLE.removeprefix('For example: ')}"
+                feature_reply(
+                    Reply(
+                        "No upcoming deadlines. Forward a message with a due date, or send "
+                        f"/deadline {DEADLINE_EXAMPLE.removeprefix('For example: ')}"
+                    ),
+                    "deadline",
                 )
             ]
         found.sort(key=lambda d: d.due_at)
         pages = (len(found) + AGENDA_PAGE - 1) // AGENDA_PAGE
         page = max(0, min(page, pages - 1))
         shown = found[page * AGENDA_PAGE : (page + 1) * AGENDA_PAGE]
-        lines = ["Deadlines — tap a number to open it."]
+        lines = ["Tap a number to view a deadline."]
         buttons = []
         last = None
         for n, deadline in enumerate(shown, 1):
@@ -1496,7 +1845,12 @@ class SchedulingService:
             buttons.append((str(n), "dc", deadline.id))
         if pages > 1:
             lines.append(f"\nPage {page + 1} of {pages}")
-        return [Reply("\n".join(lines), agenda_keyboard(buttons, page, pages, "deadline"))]
+        return [
+            feature_reply(
+                Reply("\n".join(lines), agenda_keyboard(buttons, page, pages, "deadline")),
+                "deadline",
+            )
+        ]
 
     async def deadline_action(self, user: User, action: str, deadline_id: str) -> list[Reply]:
         try:
@@ -1506,6 +1860,8 @@ class SchedulingService:
         deadline = await self.repo.get_deadline(user.id, deadline_id)
         if not deadline:
             return [Reply("That deadline is already gone. /deadline lists the rest.", edit=True)]
+        if action == "edit":
+            return await self.begin_deadline_edit(user, deadline)
         if action == "rm":
             await self.repo.delete_deadline(user.id, deadline_id)
             token = self.remember_removed(
@@ -1516,7 +1872,10 @@ class SchedulingService:
             return [Reply(f"🗑 Removed: {deadline.title}", undo_keyboard(token), edit=True)]
         await self.repo.finish_deadline(user.id, deadline_id)
         await self.safe_action(user.id, "deadline_done")
-        return [Reply(f"✅ Done: {deadline.title}. No more reminders for it.", edit=True)]
+        # "ok" comes from the Today list: confirm below it rather than replacing the list.
+        return [
+            Reply(f"✅ Done: {deadline.title}. No more reminders for it.", edit=action == "done")
+        ]
 
     async def load_target(self, user: User, pending: dict) -> Event | GroupEvent | None:
         """The plan a pending edit applies to: the user's own event, or a card they organise."""
@@ -1758,7 +2117,8 @@ class SchedulingService:
             await self.repo.set_pending(user.id, {"stage": "free"})
             return [
                 Reply(
-                    "When do you want to check? Tap a day, or type one, like: fri, 20 oct, or sat 2-5pm.",
+                    "Choose an option below, or type another date. To check specific hours, "
+                    "include a time range using AM/PM or 24-hour time.",
                     free_keyboard(),
                 )
             ]
@@ -1773,7 +2133,7 @@ class SchedulingService:
     async def free_slot(self, user: User, query) -> Reply:
         slot = query.slot
         result = await self.availability(user, slot)
-        when = f"{slot.start_at:%a %-d %b} · {time_range(slot.start_at, slot.end_at)}"
+        when = f"{display_date(slot.start_at)} · {time_range(slot.start_at, slot.end_at)}"
         if result.conflicts:
             text = verdict_line(result) + "\n" + when
             if len(result.conflicts) > 1:
@@ -1788,17 +2148,17 @@ class SchedulingService:
             text += " at that time."
         if query.assumed_end:
             text += "\n(No end time given, so I checked 2 hours.)"
-        return Reply(text + "\n\n" + checked_line(result))
+        return feature_reply(Reply(text + "\n\n" + checked_line(result)), "free")
 
     async def free_days(self, user: User, days) -> Reply:
-        """What's booked on each day, then the free gaps between 8am and 11pm."""
+        """List each day's commitments, without a separate list of free gaps."""
         now = self.clock()
         today = now.astimezone(SG).date()
         parts = []
         for day in days:
-            label = f"{day:%a %-d %b}"
+            label = display_date(day, emoji=False)
             if day < today:
-                parts.append(f"{label} has already passed.")
+                parts.append(f"📅 {label} has already passed.")
                 continue
             start = datetime.combine(day, day_time(0), SG)
             end = start + timedelta(days=1)
@@ -1820,35 +2180,27 @@ class SchedulingService:
                 if e.end_at > start
             ]
             busy = [item for item in busy if item[1] > (now if day == today else start)]
-            gaps = free_gaps(day, [(a, b) for a, b, _, decided in busy if decided], now)
             # Deadlines never make you busy; they're listed so the day's picture is complete.
             due = "".join(
-                "\n" + due_line(d)
+                "\n" + html.escape(due_line(d))
                 for d in await self.repo.deadlines_between(max(start, now), end, user.id)
             )
             if not busy:
-                rest = " for the rest of the day" if day == today else " all day"
-                parts.append(f"🟢 {label}: nothing booked, free{rest}.{due}")
+                parts.append(f"📅 <b>{label}</b>\n\n🟢 <b>No events or blocked times.</b>{due}")
                 continue
             busy.sort()
             lines = [
-                f"• {time_range(max(a, start), min(b, end))} {title[:60]}"
+                f"• {time_range(max(a, start), min(b, end))} · {html.escape(title[:60])}"
                 for a, b, title, _ in busy[:8]
             ]
             if len(busy) > 8:
                 lines.append(f"…and {len(busy) - 8} more")
-            head = "Busy:" if any(item[3] for item in busy) else "Nothing confirmed:"
-            if gaps:
-                free = "Free: " + ", ".join(time_range(a, b) for a, b in gaps)
-            elif day == today and now.astimezone(SG).time() >= day_time(22, 30):
-                free = "No free time left today."
-            else:
-                free = "🔴 No free time between 8am and 11pm."
-            parts.append(f"📅 {label}\n{head}\n" + "\n".join(lines) + "\n" + free + due)
+            head = "🔴 <b>Busy:</b>" if any(item[3] for item in busy) else "Nothing confirmed:"
+            parts.append(f"📅 <b>{label}</b>\n\n{head}\n" + "\n".join(lines) + due)
         text = "\n\n".join(parts)
         if len(text) > 3900:  # Telegram refuses anything over 4096 characters
             text = text[:3900].rsplit("\n", 1)[0] + "\n…\nAsk about fewer days to see the rest."
-        return Reply(text)
+        return feature_reply(Reply(text, parse_mode="HTML"), "free")
 
     # ---- subscribed calendar feed (Apple Calendar first) ----
 
@@ -1912,7 +2264,8 @@ class SchedulingService:
         ask = await self.calendar_ask(user, "card")
         if ask not in ("ask", "last"):
             return []
-        text = onboarding.CALENDAR_PROMPT
+        checked = user.onboarding_status == "READY" or await self.repo.list_calendars(user.id)
+        text = onboarding.CALENDAR_PROMPT if checked else onboarding.CALENDAR_PROMPT_UNCHECKED
         if ask == "last":
             text += "\n\n" + onboarding.LAST_CALENDAR_ASK
         return [Reply(text, onboarding.calendar_prompt_keyboard())]
@@ -1925,24 +2278,24 @@ class SchedulingService:
         await self.safe_action(user.id, "calendar_feed_created")
         return token
 
-    async def apple_setup(self, user: User) -> list[Reply]:
+    async def apple_setup(self, user: User, again: bool = False) -> list[Reply]:
         """Apple, part 1 of 2: subscribe to the AmIFree feed. Part 2 is the iCloud link guide,
-        sent by itself once the calendar app first fetches the feed (see calendar_feed)."""
+        sent by itself once the calendar app first fetches the feed (see calendar_feed).
+        again: part 1 on another device, since an iPhone's subscription stays on that iPhone."""
         if not self.settings.app_base_url:
             return self.apple_step(lead=onboarding.APPLE_NO_FEED)
-        if user.calendar_feed_token and user.calendar_feed_seen_at:
-            return self.apple_step(lead=onboarding.APPLE_PART1_DONE)
+        if user.calendar_feed_token and user.calendar_feed_seen_at and not again:
+            return self.apple_step(lead=onboarding.APPLE_PART1_DONE, another=True)
         token = await self.ensure_feed_token(user)
-        text = onboarding.APPLE_PART1
-        if user.google_connected:
-            text += onboarding.APPLE_ALREADY_GOOGLE
+        text, photo = onboarding.apple_part1(google=user.google_connected, again=again)
         add = f"{self.settings.app_base_url.rstrip('/')}/cal/{token}/add"
         return [
             Reply(
                 text,
-                onboarding.apple_part1_keyboard(add),
+                onboarding.apple_part1_keyboard(add, part2=not user.google_connected, again=again),
                 edit=True,
                 parse_mode="HTML",
+                photo=photo,
                 clear_album_group="setup",
             )
         ]
@@ -1969,9 +2322,11 @@ class SchedulingService:
             )
         ]
 
-    def apple_step(self, device: str = "ios", n: int = 1, lead: str = "") -> list[Reply]:
+    def apple_step(
+        self, device: str = "ios", n: int = 1, lead: str = "", another: bool = False
+    ) -> list[Reply]:
         """One step of Apple part 2, as a picture with its instructions under it."""
-        text, photo, keyboard = onboarding.apple_step(device, n, lead)
+        text, photo, keyboard = onboarding.apple_step(device, n, lead, another)
         return [
             Reply(
                 text,
@@ -1995,21 +2350,28 @@ class SchedulingService:
         part 2 of Apple setup if nothing tells me yet when they're busy. Best effort."""
         if not self.send_private:
             return
-        # Part 1 already asked them to set the refresh time; here it's only for anyone who
-        # subscribed some other way.
+        # Part 1 and the manual steps already showed the refresh time, so it isn't repeated.
+        device = onboarding.apple_device(user_agent)
+        note = "\n\n" + onboarding.APPLE_OTHER_DEVICE[device] if device else ""
+        more = onboarding.another_device_keyboard() if device else None
         if user.google_connected:
+            # Google already gives busy times: there's no part 2.
             reply = Reply(
-                "✅ Your AmIFree calendar is subscribed. Your plans now appear in it.\n\n"
-                + onboarding.FEED_REFRESH_TIP
+                "✅ <b>All set</b>: your AmIFree calendar is subscribed, so your plans now "
+                "appear in it." + note,
+                more,
+                parse_mode="HTML",
             )
         elif await self.repo.list_calendars(user.id):
-            reply = Reply(onboarding.APPLE_ALL_SET, parse_mode="HTML")
+            reply = Reply(onboarding.APPLE_ALL_SET + note, more, parse_mode="HTML")
         elif any(name in user_agent.lower() for name in OUTLOOK_AGENTS):
             # Subscribed from Outlook: its part 2 is publishing, not iCloud.
             text, photo, keyboard = onboarding.outlook_step(2, lead=onboarding.OUTLOOK_PART1_DONE)
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
         else:
-            text, photo, keyboard = onboarding.apple_step(lead=onboarding.APPLE_PART1_DONE)
+            text, photo, keyboard = onboarding.apple_step(
+                lead=onboarding.APPLE_PART1_DONE + note, another=True
+            )
             reply = Reply(text, keyboard, parse_mode="HTML", photo=photo)
         try:
             await self.send_private(user.telegram_user_id, reply)
@@ -2025,7 +2387,7 @@ class SchedulingService:
         token = await self.ensure_feed_token(user)
         seen = user.calendar_feed_seen_at if user.calendar_feed_token else None
         status = (
-            f"✅ Connected. Your calendar last synced {seen.astimezone(SG):%-d %b, %-I:%M%p}."
+            f"✅ Connected. Your calendar last synced {display_date(seen)}, {clock(seen)}."
             if seen
             else "Not connected yet."
         )
@@ -2055,72 +2417,101 @@ class SchedulingService:
             or "amifree-development-only"
         )
 
-    def feed_line(self, user: User) -> str:
-        if user.calendar_feed_token and user.calendar_feed_seen_at:
-            seen = user.calendar_feed_seen_at.astimezone(SG)
-            return f"📤 Plans in your phone's calendar: ✅ on, last synced {seen:%-d %b, %-I:%M%p}"
-        return "📤 Plans in your phone's calendar: not set up"
+    def calendar_apps(self, user: User, calendars, google) -> list[str]:
+        """/calendar's entries, one per app: which of its calendars I check for clashes, and
+        whether your plans go into it (straight into Google, or through the AmIFree calendar
+        Apple or Outlook subscribed to)."""
+        feed = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+        groups: dict = {}
+        for c in calendars:
+            ours = bool(google and c.id == google.calendar_id)
+            app = "google" if ours else link_app(unseal(c.sealed_url, self.link_secret))
+            groups.setdefault(app, []).append(c)
+        blocks = []
+        for app, name in APPS.items():
+            checked = groups.get(app, [])
+            via_feed = feed and user.calendar_feed_app == app and app is not None
+            direct = app == "google" and any(google and c.id == google.calendar_id for c in checked)
+            if not checked and not via_feed:
+                continue
+            lines = [name]
+            if checked:
+                # "Google Calendar" under Google Calendar says nothing new.
+                named = [c.label for c in checked if c.label not in name]
+                lines.append("✅ Checks for clashes" + (": " + ", ".join(named) if named else ""))
+            else:
+                lines.append("❌ Doesn't check for clashes")
+            if direct:
+                lines.append("✅ Adds your plans")
+            elif via_feed:
+                lines.append("✅ Adds your plans, through the AmIFree calendar")
+            else:
+                lines.append("❌ Doesn't add your plans")
+            lines += [f"⚠️ {c.label}: {c.error}" for c in checked if c.error]
+            synced = [c.synced_at for c in checked if c.synced_at and not c.error]
+            if synced:
+                last = max(synced)
+                lines.append(f"🔄 Refreshed {clock(last)}, {display_date(last.astimezone(SG))}")
+            elif via_feed and not checked:
+                seen = user.calendar_feed_seen_at
+                lines.append(f"🔄 Last synced {clock(seen)}, {display_date(seen.astimezone(SG))}")
+            elif any(not c.error for c in checked):
+                lines.append("🔄 Connecting…")
+            blocks.append("\n".join(lines))
+        if feed and user.calendar_feed_app is None:
+            # Subscribed before the app was recorded: it's named at its next sync.
+            seen = user.calendar_feed_seen_at
+            blocks.append(
+                "📤 Your calendar app\n❌ Doesn't check for clashes\n"
+                "✅ Adds your plans, through the AmIFree calendar\n"
+                f"🔄 Last synced {clock(seen)}, {display_date(seen.astimezone(SG))}"
+            )
+        return blocks
 
     async def personal_calendar_status(self, user: User, intro: str = "") -> Reply:
+        return feature_reply(await self._personal_calendar_status(user, intro), "calendar")
+
+    async def _personal_calendar_status(self, user: User, intro: str = "") -> Reply:
+        """/calendar: one entry per calendar app, each saying which calendars I check for
+        clashes and whether your plans go into it, then NUSMods."""
         calendars = await self.repo.list_calendars(user.id)
         lead = intro + "\n\n" if intro else ""
         nusmods = (
-            f"📚 NUSMods: {user.academic_year}, semester {user.semester}. "
-            "Paste a new Share/Sync link to update your timetable."
+            f"📚 NUSMods: ✅ linked ({user.academic_year}, semester {user.semester})"
             if user.onboarding_status == "READY"
-            else "📚 Add your classes with a NUSMods Share/Sync link. Tap below for the steps."
+            else "📚 NUSMods: not linked"
         )
-        if not calendars:
-            # Apple part 1 done, part 2 not: one tap back to where they stopped.
-            half_done = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
-            keyboard = onboarding.first_calendar_keyboard(
-                finish_apple=half_done, feed=bool(user.calendar_feed_token)
-            )
-            if half_done:
-                status = "🍎 Apple: ✓ adding plans · ✗ not checking busy times yet"
-            else:
-                status = self.feed_line(user)
-            return Reply(
-                lead + "📅 Your calendars\n\n"
-                "No calendar connected yet. Connect the one you use and its busy times count "
-                "when I check your plans and /free. I keep only start and end times, never "
-                "titles, places or notes.\n\n"
-                f"{nusmods}\n\n"
-                f"{status}\n\n"
-                "Where do you usually add your events?",
-                keyboard,
-            )
-        lines = []
         google = (
             await self.repo.get_google_connection(user.id)
             if self.google_sync.enabled and user.google_connected
             else None
         )
-        for c in calendars:
-            if c.error:
-                lines.append(f"• {c.label}: ⚠️ {c.error}")
-            elif c.synced_at:
-                lines.append(
-                    f"• {c.label} · refreshed {clock(c.synced_at)}, {c.synced_at.astimezone(SG):%-d %b}"
-                )
-            else:
-                lines.append(f"• {c.label} · connecting")
-            if google and c.id == google.calendar_id:
-                lines[-1] += "\n   ✍️ Plans you say Going to are added here"
+        blocks = self.calendar_apps(user, calendars, google)
+        feed = bool(user.calendar_feed_token and user.calendar_feed_seen_at)
+        if not calendars:
+            # Apple part 1 done, part 2 not: one tap back to where they stopped.
+            keyboard = onboarding.first_calendar_keyboard(finish_apple=feed, feed=feed)
+            return Reply(
+                lead
+                + "📅 Your calendars\n\n"
+                + ("\n\n".join(blocks) + "\n\n" if blocks else "No calendar connected yet. ")
+                + "Connect the one you use and its busy times count when I check your plans "
+                "and /free. I keep only start and end times, never titles, places or notes.\n\n"
+                f"{nusmods}\n\n"
+                "Where do you usually add your events?",
+                keyboard,
+            )
         room = MAX_CALENDARS - len(calendars)
         more = (
-            f"Paste another calendar's link to add it ({room} more allowed)."
+            f"➕ Paste another calendar's link to add it ({room} more allowed)."
             if room > 0
             else f"That's the most I check ({MAX_CALENDARS}). Remove one to add another."
         )
         return Reply(
-            lead
-            + "📅 Your calendars\n\nI check these for busy times:\n"
-            + "\n".join(lines)
-            + f"\n\n{nusmods}"
-            + f"\n\n{self.feed_line(user)}\n\n{more} I refresh them every hour and keep only "
-            "when you're busy, never what your events are.",
-            personal_calendars_keyboard(calendars, feed=bool(user.calendar_feed_token)),
+            lead + "📅 Your calendars\n\n" + "\n\n".join(blocks) + f"\n\n{nusmods}\n\n{more}\n"
+            "🔒 I refresh them every hour and keep only when you're busy, never what your "
+            "events are.",
+            personal_calendars_keyboard(calendars, feed=feed),
         )
 
     async def connect_calendar(self, user: User, link: str) -> list[Reply]:
@@ -2193,9 +2584,11 @@ class SchedulingService:
             f"Removed {calendars[calendar_id].label}. I've deleted its link and every busy time I "
             "read from it."
         )
-        replies = [Reply(f"{removed}\n\n{status.text}", status.keyboard, edit=True)]
+        replies = [
+            replace(status, text=f"{html.escape(removed, quote=False)}\n\n{status.text}", edit=True)
+        ]
         if guide:
-            # A new message: the status screen above stays a plain-text edit.
+            # Keep the setup instructions separate from the updated status screen.
             replies.append(Reply(guide, links, parse_mode="HTML"))
         return replies
 
@@ -2328,6 +2721,9 @@ class SchedulingService:
         seen = user.calendar_feed_seen_at
         if not preview and (seen is None or now - seen > FEED_SEEN_EVERY):
             await self.repo.mark_feed_seen(user.id, now)
+            app = feed_app(user_agent)
+            if app and app != user.calendar_feed_app:
+                await self.repo.set_feed_app(user.id, app)
             if seen is None:
                 await self.feed_working(user, user_agent)
         return build_feed(events, deadlines=deadlines, now=now)
@@ -2348,7 +2744,9 @@ class SchedulingService:
             )
         ]
 
-    async def callback(self, telegram_id: int, data: str) -> list[Reply]:
+    async def callback(
+        self, telegram_id: int, data: str, message_id: int | None = None
+    ) -> list[Reply]:
         page = None
         if data.startswith("fp:"):
             parts = data.split(":", 2)
@@ -2362,6 +2760,14 @@ class SchedulingService:
                 return [Reply("That button isn't valid. Use /plans.")]
             page, data = int(parts[1]), parts[2]
         user = await self.repo.ensure_user(telegram_id)
+        settings_pending = user.pending
+        if (user.pending or {}).get("stage") == "settings_time":
+            await self.repo.set_pending(user.id, None)
+            user = user.model_copy(update={"pending": None})
+        if data.startswith("prefs:"):
+            return await self.personal_settings_action(
+                user, data.removeprefix("prefs:"), message_id, settings_pending
+            )
         replies = await self._callback(user, telegram_id, data)
         if page is not None:
             return await self._plans_replies(user, replies, page)
@@ -2393,24 +2799,19 @@ class SchedulingService:
         action = parts[0]
         if action in ("pc", "dc", "bc", "rc") and len(parts) == 2:
             return await self.open_item(user, action, parts[1])
-        if action == "dl" and len(parts) == 3 and parts[1] in ("done", "rm"):
+        if action == "dl" and len(parts) == 3 and parts[1] in ("done", "ok", "rm", "edit"):
             return await self.deadline_action(user, parts[1], parts[2])
+        if action == "dle" and len(parts) == 3 and parts[1] in DEADLINE_FIELDS:
+            return await self.choose_deadline_field(user, parts[1], parts[2])
         if action == "chg" and len(parts) == 3 and parts[1] in ("venue", "time", "title"):
             return await self.choose_field(user, parts[1], parts[2])
         if data.startswith("rec:") and len(parts) == 3 and parts[1] in ("once", "weekly"):
             return await self.choose_recurring(user, parts[1], parts[2])
         if action == "mt" and len(parts) == 3:
             return await self.choose_time(user, parts[1], parts[2])
-        if (
-            action == "set"
-            and len(parts) == 3
-            and parts[1] == "reminders"
-            and parts[2] in ("on", "off")
-        ):
-            await self.repo.set_user_flags(user.id, reminders_enabled=parts[2] == "on")
-            user = await self.repo.ensure_user(telegram_id)
-            panel = self.settings_panel(user)
-            return [Reply(panel.text, panel.keyboard, edit=True)]
+        if action == "set":
+            # Old settings messages lead to the current controls, without changing any switch.
+            return [replace(self.settings_panel(user), edit=True)]
         if action == "rem" and len(parts) == 3 and parts[1] in ("done", "del", "10", "60", "tmr"):
             return await self.reminder_action(user, parts[1], parts[2])
         if action == "undo" and len(parts) == 2:
@@ -2420,23 +2821,39 @@ class SchedulingService:
         if data.startswith("setup:"):
             name = data.removeprefix("setup:")
             if name == "google" and self.google_sync.enabled:
-                return self.google_sync.steps(phone=True)  # sharing; the link is its fallback
+                # Sharing, computer first: the email, then one tap to its settings. The
+                # phone steps are a button away, and the link is the fallback.
+                return await self._callback(user, telegram_id, "gcal:computer")
             if name == "apple":
                 return await self.apple_setup(user)
+            if name == "apple1":
+                return await self.apple_setup(user, again=True)
             if name == "outlook":
                 return await self.outlook_step(user)
             if name in ("apple2", "apple2mac"):
                 return self.apple_step("mac" if name == "apple2mac" else "ios")
             if name == "appleskip":
                 return [Reply(onboarding.APPLE_SKIPPED, edit=True, clear_album_group="setup")]
+            if name == "demo":
+                await self.safe_action(user.id, "demo_tried")
+                text, keyboard = onboarding.demo_screen(self.clock().astimezone(SG).date())
+                return [Reply(text, keyboard, edit=True, parse_mode="HTML")]
+            if name == "demo2":
+                await self.safe_action(user.id, "demo_deadline_tried")
+                text, keyboard = onboarding.deadline_demo_screen(self.clock())
+                return [Reply(text, keyboard, edit=True, parse_mode="HTML")]
             return self.setup_screen(name)
         if action == "gs":
-            steps = onboarding.GOOGLE_STEPS.get(parts[1] if len(parts) == 3 else "")
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            if not steps or parts[2] not in [str(n) for n in range(1, len(steps[1]) + 1)]:
+            if data.startswith("gs:computer:"):
+                # The old computer picture steps, from a message sent before they were
+                # replaced: the computer setup is email first now.
+                return await self._callback(user, telegram_id, "gcal:computer")
+            valid = {f"gs:phone:{n}" for n in range(1, len(onboarding.GOOGLE_STEPS) + 1)}
+            if data not in valid:
                 return [Reply("That button isn't valid. Use /calendar.")]
-            return self.google_sync.steps(parts[1] == "phone", int(parts[2]))
+            return self.google_sync.steps(int(parts[2]))
         if action == "o":
             valid = {
                 f"o:{part}:{n}"
@@ -2463,17 +2880,36 @@ class SchedulingService:
             if user.pending and user.pending.get("stage") == "free":
                 await self.repo.set_pending(user.id, None)
             reply = await self.free_days(user, days)
-            return [Reply(reply.text, edit=True)]
+            return [replace(reply, edit=True)]
         if data in ("fb:anon", "fb:named", "fb:cancel"):
             return await self.submit_feedback(user, data)
         if data == "gcal:start":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            return self.google_sync.steps(phone=True)
+            return self.google_sync.steps()
         if data == "gcal:computer":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
-            return self.google_sync.steps(phone=False)
+            await self.google_sync.discard(user.pending)  # a code from an earlier try
+            await self.repo.set_pending(user.id, {"stage": "gcal_email", "first": True})
+            return [
+                Reply(
+                    onboarding.GOOGLE_EMAIL_FIRST,
+                    onboarding.google_email_first_keyboard(),
+                    edit=True,
+                    parse_mode="HTML",
+                    clear_album_group="setup",
+                )
+            ]
+        if data == "gcal:shared":
+            if not self.google_sync.enabled:
+                return [Reply("Google sharing isn't available right now.")]
+            pending = user.pending or {}
+            if pending.get("stage") != "gcal_shared":
+                return [Reply("Type your Google email to start again, like you@gmail.com.")]
+            if not self.calendar_limit.allow(user.id):
+                return [Reply(SLOW_DOWN)]
+            return await self.google_sync.connect(user, pending["email"])
         if data == "gcal:done":
             if not self.google_sync.enabled:
                 return [Reply("Google sharing isn't available right now.")]
@@ -2488,7 +2924,7 @@ class SchedulingService:
             return [await self.feed_setup(user)]
         if data == "cal:home":
             reply = await self.personal_calendar_status(user)
-            return [Reply(reply.text, reply.keyboard, edit=True)]
+            return [replace(reply, edit=True)]
         if action == "cal" and len(parts) == 2 and parts[1] in ("reset", "off"):
             return await self.calendar_change(user, parts[1])
         if action == "ics" and len(parts) == 2:

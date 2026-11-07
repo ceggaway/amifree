@@ -7,6 +7,7 @@ import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 
+from app.date_display import display_date
 from app.models.timetable import BlockRule, BusyBlock
 from app.schemas.event import SG, Extraction
 from app.services.date_resolution import (
@@ -161,12 +162,12 @@ def expand_blocks(rules: Iterable[BlockRule], start: datetime, end: datetime) ->
 def describe(rule: BlockRule) -> str:
     if rule.kind == "ONCE":
         start, end = rule.start_at.astimezone(SG), rule.end_at.astimezone(SG)
-        return f"{rule.title}\n{start:%a, %d %b %Y · %H:%M} → {end:%H:%M} SGT"
+        return f"{rule.title}\n{display_date(start)} · {start:%H:%M} → {end:%H:%M} SGT"
     text = (
         f"{rule.title}\nEvery {WEEKDAYS[rule.weekday].capitalize()} "
         f"{rule.start_time:%H:%M} → {rule.end_time:%H:%M} SGT\n"
-        f"From {rule.start_date:%d %b %Y}"
+        f"From {display_date(rule.start_date)}"
     )
     if rule.until_date:
-        text += f" until {rule.until_date:%d %b %Y}"
+        text += f" until {display_date(rule.until_date)}"
     return text

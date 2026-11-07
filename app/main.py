@@ -17,7 +17,9 @@ from supabase.lib.client_options import AsyncClientOptions
 from telegram import BotCommand, BotCommandScopeAllGroupChats, MenuButtonCommands, Update
 from telegram.ext import Application
 
+from app import site_pages
 from app.api.routes import build_router
+from app.bot import onboarding
 from app.bot.concurrency import KeyedLocks, PerUserProcessor, update_keys
 from app.bot.delivery import Delivery, webhook_delivery
 from app.bot.handlers import register_handlers
@@ -315,6 +317,38 @@ def create_app(
             raise HTTPException(404, "Not found")
         return Response(
             page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"}
+        )
+
+    def site_page(page: str) -> Response:
+        return Response(
+            page,
+            media_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    @app.get("/")
+    async def home():
+        return site_page(site_pages.home_page(settings.bot_username))
+
+    @app.get("/privacy")
+    async def privacy():
+        return site_page(site_pages.privacy_page(settings.bot_username))
+
+    @app.get("/google23fc7e97f9aa43e9.html")
+    async def google_site_verification():
+        # Proves ownership of this site in Google Search Console. Keep it, or verification lapses.
+        return Response(
+            "google-site-verification: google23fc7e97f9aa43e9.html",
+            media_type="text/html; charset=utf-8",
+        )
+
+    @app.get("/google/share")
+    async def google_share():
+        # The same page for everyone: the email is after the #, read by the page itself.
+        return Response(
+            onboarding.google_share_page(settings.bot_username),
+            media_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "no-store"},
         )
 
     @app.get("/ics/event/{event_id}.ics")

@@ -362,5 +362,49 @@ await check('migration 014: a suggestion records its author, and older rows need
   await db.exec('reset role; set role service_role;');
   await q('delete from event_suggestions where chat_id=-930');
 });
+await check('migration 020 preserves preferences and deduplicates the daily overview', async () => {
+  const upgrade = new PGlite();
+  try {
+    await upgrade.exec('create role anon; create role authenticated; create role service_role bypassrls;');
+    await upgrade.exec(schema);
+    for (let i = 0; i < migrationFiles.length; i++) {
+      if (Number.parseInt(migrationFiles[i], 10) < 20) await upgrade.exec(migrations[i]);
+    }
+    const legacy = (await upgrade.query(`insert into users(telegram_user_id,summary_enabled,morning_enabled,summary_hour,deadline_alerts)
+      values(90201,true,true,22,true),(90202,true,false,20,true),(90203,false,false,null,false)
+      returning *`)).rows;
+    await upgrade.exec(`alter table notification_logs drop constraint notification_logs_kind_check;
+      alter table notification_logs add constraint notification_logs_kind_check
+        check(kind in ('NIGHTLY','TODAY','CHANGE','NUDGE','CONFIRM','DEADLINE','REMIND'));`);
+    await upgrade.query(`insert into notification_logs(user_id,kind,dedupe_key,payload,status,sent_at)
+      values($1,'TODAY','2026-11-06','{"date":"2026-11-06"}','sent',now()),
+            ($1,'NIGHTLY','2026-11-07','{"date":"2026-11-07"}','pending',null)`, [legacy[0].id]);
+    const migration = migrations[migrationFiles.findIndex(f => f.startsWith('020_'))];
+    await upgrade.exec(migration);
+    let users = (await upgrade.query('select * from users order by telegram_user_id')).rows;
+    assert.equal(users[0].overview_period, 'morning');
+    assert.equal(users[0].overview_evening_minute, 1320);
+    assert.equal(users[1].overview_period, 'evening');
+    assert.equal(users[2].overview_enabled, false);
+    assert.equal(users[2].deadline_alerts, false);
+    const delivered = (await upgrade.query(`select * from notification_logs where kind='NIGHTLY'`)).rows;
+    assert.equal(delivered.length, 1);
+    assert.equal(delivered[0].status, 'sent');
+    assert.equal(delivered[0].dedupe_key, '2026-11-06');
+    await upgrade.query(`update users set overview_enabled=false,overview_morning_minute=455,
+      overview_evening_minute=1335,deadline_lead_minutes=150 where id=$1`, [legacy[0].id]);
+    await upgrade.exec(migration);
+    users = (await upgrade.query('select * from users order by telegram_user_id')).rows;
+    assert.equal(users[0].overview_enabled, false);
+    assert.equal(users[0].overview_morning_minute, 455);
+    assert.equal(users[0].overview_evening_minute, 1335);
+    assert.equal(users[0].deadline_lead_minutes, 150);
+    for (const invalid of ['overview_morning_minute=720','overview_evening_minute=1000','deadline_lead_minutes=0']) {
+      await assert.rejects(upgrade.exec(`update users set ${invalid}`));
+    }
+  } finally {
+    await upgrade.close();
+  }
+});
 await db.close();
 console.log(`${count} PostgreSQL schema checks passed.`);

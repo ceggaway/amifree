@@ -58,7 +58,7 @@ async def test_clarification_survives_service_restart(service_factory, reference
     assert not repo.events
     restarted = SchedulingService(repo, service.extractor, service.importer, service.settings)
     card = (await restarted.message(1, 3, "7–9pm", reference + timedelta(days=10)))[0]
-    assert "9 Oct 2026 (Friday)" in card.text
+    assert "📅 09/10/2026 (Fri)" in card.text
     assert "No clashes found" in card.text
     assert len(service.extractor.calls) == 1  # "7–9pm" answers the question without the AI
 
@@ -196,7 +196,7 @@ async def test_clear_draft_and_unknown_message(service_factory, reference):
 
 async def test_new_user_saves_without_nusmods(service_factory, reference):
     service, repo = service_factory(extraction())
-    assert "send me a plan" in (await service.command(1, "start"))[0].text.lower()
+    assert "forward me any message" in (await service.command(1, "start"))[0].text.lower()
     card = (await service.message(1, 2, TEXT, reference))[0]
     assert card.text.startswith("✅ No clashes found")
     assert "Connect your timetable and personal calendar for a fuller clash check." in card.text
@@ -206,7 +206,8 @@ async def test_new_user_saves_without_nusmods(service_factory, reference):
     added = await service.callback(1, add.callback_data)
     assert added[0].edit  # the tapped card is updated in place
     # The first kept plan offers calendar setup once, as its own message.
-    assert len(added) == 2 and added[1].text == onboarding.CALENDAR_PROMPT
+    # Nothing connected: the ask says what this plan wasn't checked against.
+    assert len(added) == 2 and added[1].text == onboarding.CALENDAR_PROMPT_UNCHECKED
     assert "Added to /plans" in added[0].text
     # The card offers adding just this one; adding every plan automatically is only asked
     # once, in the separate prompt, never repeated on the card.

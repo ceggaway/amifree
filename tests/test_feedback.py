@@ -10,8 +10,10 @@ def labels(reply):
 async def test_feedback_with_text_asks_how_to_send(service_factory):
     service, _ = service_factory()
     reply = (await service.command(1, "feedback", "the guide confused me"))[0]
-    assert "Send this feedback?" in reply.text
-    assert labels(reply) == ["🕶 Send anonymously", "👤 Send with my @handle", "Cancel"]
+    assert "<b>Your feedback</b>\n“the guide confused me”" in reply.text
+    assert reply.parse_mode == "HTML"
+    assert labels(reply) == ["🕶 Anonymously", "👤 With @handle", "Cancel"]
+    assert len(reply.keyboard.inline_keyboard) == 1
 
 
 async def test_anonymous_feedback_stores_no_identity(service_factory):
@@ -35,11 +37,13 @@ async def test_named_feedback_attaches_the_handle(service_factory):
 async def test_feedback_typed_as_a_second_message(service_factory, reference):
     service, repo = service_factory()
     prompt = (await service.command(1, "feedback"))[0]
-    assert "Type your feedback" in prompt.text
-    ask = (await service.message(1, 9, "please add a widget", reference))[0]
-    assert "Send this feedback?" in ask.text
+    assert "Share a suggestion or report an issue for our team to review." in prompt.text
+    assert prompt.parse_mode == "HTML"
+    ask = (await service.message(1, 9, "please add <widget> & reminders", reference))[0]
+    assert "“please add &lt;widget&gt; &amp; reminders”" in ask.text
+    assert ask.parse_mode == "HTML"
     await service.callback(1, "fb:anon")
-    assert repo.feedbacks[0]["message"] == "please add a widget"
+    assert repo.feedbacks[0]["message"] == "please add <widget> & reminders"
 
 
 async def test_feedback_cancel_sends_nothing(service_factory):

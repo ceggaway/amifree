@@ -283,7 +283,7 @@ async def test_find_a_time_from_the_app(hub, reference):
     # A reply-by inside the dates is moved back to the night before the first day, so no day
     # asked about is lost before the best times are worked out.
     assert poll.deadline_at == datetime.combine(reference.date(), time(23, 59), SG)
-    assert f"📅 {first:%a %-d %b} –" in posted[0][1].text
+    assert f"📅 {first:%d/%m/%Y (%a)} –" in posted[0][1].text
     # As with /whosfree, asking for the poll counts the organiser in, and nobody else.
     assert await repo.poll_participants(poll.id) == [(await repo.ensure_user(1)).id]
     overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(2))).json()
@@ -462,7 +462,8 @@ async def test_stats_export_and_detection_from_the_group_page(hub, reference):
 async def test_reminders_can_be_switched_from_the_app(hub):
     client, service, repo, posted, members = hub
     off = await client.patch("/api/me", headers=bearer(5), json={"reminders_enabled": False})
-    assert off.json() == {"reminders_enabled": False} and not repo.users[5].reminders_enabled
+    assert off.json() == {"reminders_enabled": False} and not repo.users[5].overview_enabled
+    assert repo.users[5].reminders_enabled  # personal settings never disable group reminders
     me = (await client.get("/api/me", headers=bearer(5))).json()
     assert me["reminders_enabled"] is False
     await client.patch("/api/me", headers=bearer(5), json={"reminders_enabled": True})

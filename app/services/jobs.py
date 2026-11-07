@@ -19,12 +19,14 @@ from app.bot.keyboards import (
     reminder_keyboard,
 )
 from app.bot.messages import Reply, details, event_card, time_range, verdict_line
+from app.date_display import display_date
 from app.schemas.event import SG, Poll, Status
 from app.services.change_alerts import describe_change
 from app.services.chase import card_link, enqueue_auto
 from app.services.deadlines import enqueue_deadline_reminders, reminder_text
+from app.services.personal_reminder_settings import overview_target
 from app.services.quick_reminders import enqueue_reminders, ringing_text
-from app.services.reminders import enqueue_nightly, summary
+from app.services.reminders import enqueue_morning, enqueue_nightly, summary
 from app.services.scheduling import synced
 
 log = logging.getLogger(__name__)
@@ -78,18 +80,32 @@ class Notifier:
             if not reminder or reminder.done or reminder.remind_at > self.scheduling.clock():
                 return None
             return Reply(ringing_text(reminder), reminder_keyboard(reminder.id))
-        if not user.reminders_enabled:
+        if row["kind"] == "TODAY":
+            return None  # Retired: one NIGHTLY outbox key now covers either overview period.
+        if row["kind"] == "DEADLINE" and not user.deadline_alerts:
             return None
         if row["kind"] == "NIGHTLY":
-            start = datetime.combine(date.fromisoformat(payload["date"]), time.min, SG)
-            # Read at send time, so a plan cancelled since queuing is not announced.
+            if not user.overview_enabled:
+                return None
+            now = self.scheduling.clock().astimezone(SG)
+            day = date.fromisoformat(payload["date"])
+            target = overview_target(user, day)
+            if now < target or now.date() != target.date():
+                return None
+            if user.overview_period == "morning" and now.hour >= 12:
+                return None
+            start = datetime.combine(day, time.min, SG)
             events = await self.repo.events_between(
                 start, start + timedelta(days=1), [Status.GOING, Status.SAVED], user.id
             )
-            due = await self.repo.deadlines_between(start, start + timedelta(days=1), user.id)
-            text = summary(start, events, due)
-            html_mode = any(not e.group_event_id and e.status == Status.GOING for e in events)
-            return Reply(text, parse_mode="HTML" if html_mode else None) if text else None
+            events = [
+                e
+                for e in events
+                if (not e.created_at or e.created_at <= target)
+                and (user.overview_period == "evening" or e.end_at > now)
+            ]
+            text = summary(start, events, period=user.overview_period)
+            return Reply(text, parse_mode="HTML") if text else None
         if row["kind"] == "CONFIRM":
             event = await self.repo.get_group_event(payload["id"])
             now = self.scheduling.clock()
@@ -99,12 +115,12 @@ class Notifier:
             # Only people still marked Going are asked; someone who changed their mind is not.
             if not linked or linked.status != Status.GOING:
                 return None
-            when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+            when = f"{display_date(event.start_at)}, {time_range(event.start_at, event.end_at)}"
             where = f" at {event.location[:80]}" if event.location else ""
             return Reply(
                 f"⏰ Still coming to {event.title[:80]}?\n{when}{where}"
                 + card_link(event)
-                + "\n\nThe organiser sees only how many are confirmed. /reminders off stops these.",
+                + "\n\nThe organiser sees only how many are confirmed.",
                 attendance_keyboard(event),
             )
         if row["kind"] == "DEADLINE":
@@ -112,6 +128,16 @@ class Notifier:
             deadline = await self.repo.get_deadline(user.id, payload["id"])
             now = self.scheduling.clock()
             if not deadline or deadline.done or deadline.due_at <= now:
+                return None
+            if (
+                payload.get("lead_minutes", user.deadline_lead_minutes)
+                != user.deadline_lead_minutes
+            ):
+                return None
+            if (
+                payload.get("due_at")
+                and datetime.fromisoformat(payload["due_at"]) != deadline.due_at
+            ):
                 return None
             return Reply(reminder_text(deadline, now), deadline_keyboard(deadline.id))
         if row["kind"] == "NUDGE" and payload["type"] == "event":
@@ -129,16 +155,13 @@ class Notifier:
                 + details(event)
                 + "\n\n"
                 + verdict_line(availability)
-                + card_link(event)
-                + "\n\n/reminders off stops nudges.",
+                + card_link(event),
                 nudge_keyboard(event),
             )
         return None
 
     async def live_poll(self, user, row: dict) -> Poll | None:
         """The poll a nudge is about, if this person still has something to fill in."""
-        if not user.reminders_enabled:
-            return None
         poll = await self.repo.get_poll(row["payload"]["id"])
         # Once results are out, only the organiser has anything left to do.
         if not poll or poll.status != "COLLECTING":
@@ -174,7 +197,7 @@ class Notifier:
                 " is worked out from everyone's answers."
             )
             if poll.deadline_at:
-                text += f"\nFill in by {poll.deadline_at:%a %-d %b}."
+                text += f"\nFill in by {display_date(poll.deadline_at)}."
             text += card_link(poll)
             buttons = [[InlineKeyboardButton("🗓 Mark when I'm free", url=url)]] if url else []
         else:
@@ -197,7 +220,7 @@ class Notifier:
                 if url
             ]
         return Reply(
-            text + "\n\n/reminders off stops these.",
+            text,
             InlineKeyboardMarkup(buttons) if buttons else None,
         )
 
@@ -222,6 +245,17 @@ class Notifier:
         try:
             if not user or user.dm_blocked:
                 reply = None
+            elif (
+                rows[0]["kind"] == "NIGHTLY"
+                and user.overview_enabled
+                and (
+                    target := overview_target(user, date.fromisoformat(rows[0]["payload"]["date"]))
+                )
+                > self.scheduling.clock()
+            ):
+                await self.repo.defer_notification(rows[0]["id"], target)
+                counts["deferred"] = counts.get("deferred", 0) + 1
+                return
             elif rows[0]["kind"] == "NUDGE" and rows[0]["payload"].get("type") == "poll":
                 polls: dict[str, Poll] = {}
                 for row in rows:
@@ -273,6 +307,7 @@ class Notifier:
         extra = await self.group_tick()
         queued += extra.pop("confirmations", 0)
         queued += await enqueue_deadline_reminders(self.repo, self.scheduling.clock())
+        queued += await enqueue_morning(self.repo, self.scheduling.clock())
         queued += await enqueue_reminders(self.repo, self.scheduling.clock())
         try:
             calendars = await self.scheduling.refresh_calendars()

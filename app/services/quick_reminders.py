@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 
 from app.bot.messages import clock
+from app.date_display import display_date
 from app.schemas.event import SG, Reminder
 from app.services.date_resolution import Clarification, resolve_date, resolve_time
 
@@ -98,7 +99,7 @@ def parse_reminder(args: str, reference: datetime) -> ReminderDraft:
         remind_at = datetime.combine(day, at, SG)
         if remind_at <= reference:
             raise Clarification(
-                f"{remind_at:%a %-d %b} {clock(remind_at)} has already passed. " + EXAMPLE
+                f"{display_date(remind_at)} {clock(remind_at)} has already passed. " + EXAMPLE
             )
 
     body = _clean(text)
@@ -112,7 +113,7 @@ def when_text(remind_at: datetime, now: datetime) -> str:
     """'today at 5pm', 'tomorrow at 9am', 'Fri 23 Oct at 5pm'."""
     at, today = remind_at.astimezone(SG), now.astimezone(SG).date()
     days = (at.date() - today).days
-    day = "today" if days == 0 else "tomorrow" if days == 1 else f"{at:%a %-d %b}"
+    day = "today" if days == 0 else "tomorrow" if days == 1 else f"{display_date(at)}"
     return f"{day} at {clock(at)}"
 
 

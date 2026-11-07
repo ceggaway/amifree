@@ -5,6 +5,7 @@ from datetime import timedelta
 from urllib.parse import quote
 
 import httpx
+import pytest
 
 from app.bot import onboarding
 from app.config import Settings
@@ -85,16 +86,21 @@ async def test_google_is_three_steps(service_factory, reference):
     service, repo = service_factory()
     service.google = FakeGoogle()
     await onboard(service, reference)
-    step1 = (await service.callback(1, "setup:google"))[0]
-    assert "Step 1 of 3" in step1.text and "Next ›" in labels(step1)
+    # The Google button starts with the computer steps; the phone steps are a tap away.
+    ask = (await service.callback(1, "setup:google"))[0]
+    assert "What's your Google email?" in ask.text
+    share = (await service.message(1, 4, "me@gmail.com", reference))[0]
+    step1 = (await service.callback(1, tap(share, "📱 Phone steps")))[0]
+    assert "1 of 5 · " in step1.text and "of 3" not in step1.text  # one counter, not two
+    assert "Next ›" in labels(step1)
     last = (await service.callback(1, "gs:phone:5"))[0]
     step2 = (await service.callback(1, tap(last, "✅ Done, I've shared it")))[0]
-    assert "Step 2 of 3" in step2.text and not step2.edit  # the steps stay readable above
+    assert "Almost done" in step2.text and not step2.edit  # the steps stay readable above
     assert repo.users[1].pending == {"stage": "gcal_email"}
     again = (await service.message(1, 5, "me@gmail", reference))[0]
     assert again.text == onboarding.GOOGLE_EMAIL_AGAIN
     step3 = (await service.message(1, 6, "me@gmail.com", reference))[0]
-    assert "Step 3 of 3" in step3.text and "6-digit" in step3.text
+    assert "Last step" in step3.text and "6-digit" in step3.text
     done = (await service.message(1, 7, service.google.code, reference))[0]
     assert "Google Calendar connected" in done.text and repo.users[1].google_connected
 
@@ -126,9 +132,9 @@ async def test_apple_part_one_is_one_tap_to_subscribe(service_factory, reference
     service, repo = service_factory(app_base_url=BASE)
     await onboard(service, reference)
     part1 = (await service.callback(1, "setup:apple"))[0]
-    assert "Part 1 of 2" in part1.text and part1.parse_mode == "HTML"
+    assert "Part 1 of 2" in part1.text and part1.parse_mode == "HTML" and part1.photo
     # The refresh setting is part of part 1, before moving on.
-    assert "Fetch New Data" in part1.text and "Every 5 minutes" in part1.text
+    assert "Auto-refresh" in part1.text and "Every 5 minutes" in part1.text
     token = repo.users[1].calendar_feed_token
     add = part1.keyboard.inline_keyboard[0][0]
     assert add.text == "➕ Add to Calendar ↗" and add.url == f"{BASE}/cal/{token}/add"
@@ -159,6 +165,21 @@ async def test_first_feed_fetch_moves_on_to_part_two(service_factory, reference)
     assert "Part 1 done" in again.text and "Part 2 of 2" in again.text
 
 
+async def test_with_google_apple_is_one_part(service_factory, reference):
+    # Google already gives busy times, so nothing promises a part 2 that never comes.
+    service, repo = service_factory(app_base_url=BASE)
+    service.send_private = sent = Sent()
+    await onboard(service, reference)
+    repo.users[1].google_connected = True
+    part1 = (await service.callback(1, "setup:apple"))[0]
+    assert "Part 1" not in part1.text and "part 2" not in part1.text
+    assert "⏭ Skip to part 2" not in labels(part1) and len(part1.text) <= 1024
+    await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
+    [(_, done)] = sent.messages
+    # Part 1 already showed the refresh setting: it isn't repeated.
+    assert "All set" in done.text and "Auto-refresh" not in done.text
+
+
 async def test_feed_after_a_link_says_all_set(service_factory, reference):
     service, repo = service_factory(app_base_url=BASE)
     service.calendar_reader = FakeReader((), None, {ICLOUD_CCA: "CCA"})
@@ -167,7 +188,52 @@ async def test_feed_after_a_link_says_all_set(service_factory, reference):
     await service.message(1, 5, ICLOUD_CCA, reference)
     await service.callback(1, "setup:apple")
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
-    assert sent.messages[0][1].text == onboarding.APPLE_ALL_SET
+    [(_, done)] = sent.messages
+    # Synced from an iPhone: a reminder that a Mac needs it added once too.
+    assert done.text == onboarding.APPLE_ALL_SET + "\n\n" + onboarding.APPLE_OTHER_DEVICE["iphone"]
+    assert labels(done) == ["➕ Add my plans on another device"]
+
+
+@pytest.mark.parametrize(
+    "agent, device",
+    [
+        ("iOS/18.0 (22A) dataaccessd/1.0", "iphone"),
+        ("macOS/14.5 (23F79) CalendarAgent/988", "mac"),
+        ("Microsoft Office/16.0", None),
+    ],
+)
+async def test_first_sync_reminds_about_the_other_device(service_factory, reference, agent, device):
+    service, repo = service_factory(app_base_url=BASE)
+    service.send_private = sent = Sent()
+    await onboard(service, reference)
+    await service.callback(1, "setup:apple")
+    await service.calendar_feed(repo.users[1].calendar_feed_token, agent)
+    [(_, step)] = sent.messages
+    assert len(step.text) <= 1024
+    if device:
+        assert onboarding.APPLE_OTHER_DEVICE[device] in step.text and "Part 2 of 2" in step.text
+        assert "➕ Add my plans on another device" in labels(step)
+    else:
+        assert not any(note in step.text for note in onboarding.APPLE_OTHER_DEVICE.values())
+
+
+async def test_part_one_again_on_another_device(service_factory, reference):
+    # Subscribed on the iPhone: that stays on the iPhone, so the Mac needs part 1 too.
+    service, repo = service_factory(app_base_url=BASE)
+    await onboard(service, reference)
+    await service.callback(1, "setup:apple")
+    token = repo.users[1].calendar_feed_token
+    await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
+    part2 = (await service.callback(1, "setup:apple"))[0]
+    assert "Part 2 of 2" in part2.text
+    again = (await service.callback(1, tap(part2, "➕ Add my plans on another device")))[0]
+    assert "Another device" in again.text and "Part 1" not in again.text
+    assert again.photo and len(again.text) <= 1024
+    add = again.keyboard.inline_keyboard[0][0]
+    assert add.url == f"{BASE}/cal/{token}/add"  # the same calendar, not a new link
+    assert "⏭ Skip to part 2" not in labels(again)
+    back = (await service.callback(1, tap(again, "« Back")))[0]
+    assert "Part 2 of 2" in back.text
 
 
 async def test_half_done_apple_setup_shows_in_calendar(service_factory, reference):
@@ -176,7 +242,10 @@ async def test_half_done_apple_setup_shows_in_calendar(service_factory, referenc
     await service.callback(1, "setup:apple")
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
     status = (await service.command(1, "calendar"))[0]
-    assert "✓ adding plans · ✗ not checking busy times" in status.text
+    assert (
+        "🍎 Apple Calendar\n❌ Doesn't check for clashes\n"
+        "✅ Adds your plans, through the AmIFree calendar\n🔄 Last synced"
+    ) in status.text
     part2 = (await service.callback(1, tap(status, "🍎 Finish Apple setup")))[0]
     assert "Part 2 of 2" in part2.text
     skipped = (await service.callback(1, tap(part2, "⏭ Skip this part")))[0]
@@ -220,13 +289,22 @@ async def test_outlook_is_one_step_per_screen(service_factory, reference):
     assert (await service.callback(1, tap(manual, "‹ Back")))[0].text == first
     # Part 2 follows part 1 from either step, and its Back returns to the buttons.
     step = (await service.callback(1, tap(manual, "Done: part 2 ›")))[0]
-    assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text
+    assert "Part 2 of 2" in step.text and "Step 1 of 3" in step.text
+    # One tap to Shared calendars in Outlook's settings, instead of finding it by hand.
+    shared = {b.text: b.url for row in step.keyboard.inline_keyboard for b in row if b.url}
+    assert shared == {
+        "🏫 School / work Outlook ↗": (
+            "https://outlook.office.com/calendar/options/calendar/SharedCalendars"
+        ),
+        "📧 Personal Outlook ↗": "https://outlook.live.com/calendar/options/calendar/SharedCalendars",
+    }
+    assert "Publish a calendar" in step.text and "Settings ⚙️" in step.text  # and by hand
     assert (await service.callback(1, tap(step, "‹ Part 1")))[0].text == first
-    for _ in range(3):
+    for _ in range(2):
         step = (await service.callback(1, tap(step, "Next ›")))[0]
     assert "Paste the link into this chat" in step.text and "Next ›" not in labels(step)
     back = (await service.callback(1, tap(step, "‹ Back")))[0]
-    assert "Step 3 of 4" in back.text
+    assert "Step 2 of 3" in back.text
     assert "« Other calendars" in labels(step)
     # The same link every time: subscribing twice never makes a second feed.
     await service.callback(1, "setup:outlook")
@@ -250,7 +328,7 @@ async def test_outlook_without_a_public_address_is_only_publishing(service_facto
     service, _ = service_factory()
     await onboard(service, reference)
     step = (await service.callback(1, "setup:outlook"))[0]
-    assert "isn't available yet" in step.text and "Step 1 of 4" in step.text
+    assert "isn't available yet" in step.text and "Step 1 of 3" in step.text
     assert "Part 1" not in step.text and "‹ Part 1" not in labels(step)
 
 
@@ -262,7 +340,7 @@ async def test_first_fetch_from_outlook_moves_on_to_publishing(service_factory, 
     await service.calendar_feed(repo.users[1].calendar_feed_token, "Microsoft Office/16.0")
     [(_, step)] = sent.messages
     assert step.text.startswith(onboarding.OUTLOOK_PART1_DONE)
-    assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text and step.photo
+    assert "Part 2 of 2" in step.text and "Step 1 of 3" in step.text and step.photo
 
 
 async def test_a_published_outlook_calendar_counts_and_unpublishing_is_explained(

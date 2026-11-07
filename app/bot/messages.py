@@ -6,6 +6,7 @@ from telegram import InlineKeyboardMarkup, LinkPreviewOptions
 
 from app.bot.keyboards import event_keyboard, group_keyboard
 from app.bot.onboarding import LAST_CALENDAR_ASK
+from app.date_display import display_date
 from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
 from app.services.availability import Availability
 
@@ -14,7 +15,7 @@ HELP = """<b>AmIFree</b> — forward me a plan, I'll tell you if you're free and
 <b>How to use me</b>
 📩 Forward or type a plan with a time, like "Dinner Fri 7-9pm at Vivo". I check it, then you tap Add to plans or Skip.
 🎙 Or send a voice note (up to a minute) saying the plan. The card shows what I heard.
-⏰ Forward a deadline, like "report due Fri 11:59pm". I'll remind you the day before.
+⏰ Forward a deadline, like "report due Fri 11:59pm". Choose when to be reminded in /settings.
 📅 Connect a calendar or NUSMods so I can see your classes and busy times (optional).
 
 <i>"No clashes found" only covers what I know about.</i>
@@ -64,6 +65,8 @@ class Reply:
     photo: bytes | None = None
     # Replace the card whose button was tapped instead of sending a new message.
     edit: bool = False
+    # A typed settings answer updates the originating bot message, rather than adding a new one.
+    edit_message_id: int | None = None
     parse_mode: str | None = None
     # When these photos form an album that should replace an earlier album in the same chat,
     # the group name both share; the earlier album's messages are deleted before this is sent.
@@ -75,9 +78,9 @@ class Reply:
 
 
 def details(draft: EventDraft) -> str:
-    result = (
-        f"{draft.title}\n{draft.start_at:%a, %d %b %Y · %H:%M} → {draft.end_at:%d %b %H:%M} SGT"
-    )
+    start, end = draft.start_at.astimezone(SG), draft.end_at.astimezone(SG)
+    end_date = f"{display_date(end)} · " if start.date() != end.date() else ""
+    result = f"{draft.title}\n{display_date(start)} · {start:%H:%M} → {end_date}{end:%H:%M} SGT"
     if draft.location:
         result += "\nLocation: " + draft.location
     if draft.notes:
@@ -212,7 +215,7 @@ def group_card(
     if ended:
         # Without check-ins nobody knows who came: say how many planned to, not that they went.
         count = f"{counts.get('GOING', 0)} said Going" if went is None else f"{went} went"
-        when = f"{event.start_at:%a %-d %b} · {time_range(event.start_at, event.end_at)}"
+        when = f"{display_date(event.start_at)} · {time_range(event.start_at, event.end_at)}"
         return Reply(f"📣 {event.title} · ended\n{when} · {count}")
     if app_url:
         series = "\n🔁 Repeats. Details lets you say Going to every session." * bool(
@@ -223,8 +226,7 @@ def group_card(
         series = "\n🔁 Recurring event. Going to all adds every session." * bool(event.series_id)
         tip = "\nAm I free? shows a private check that only you can see."
     body = (
-        "📅 "
-        + details(event)
+        details(event)
         + series
         + f"\n\nGoing {counts.get('GOING', 0)} · Can't {counts.get('DECLINED', 0)}"
         + tip
@@ -239,16 +241,16 @@ def personal_time(value: datetime) -> str:
 def personal_when(start: datetime, end: datetime) -> str:
     start, end = start.astimezone(SG), end.astimezone(SG)
     if start.date() == end.date():
-        return f"{start:%-d %b %Y (%A)} · {personal_time(start)}–{personal_time(end)} SGT"
+        return f"{display_date(start)} · {personal_time(start)}–{personal_time(end)} SGT"
     return (
-        f"{start:%-d %b %Y (%A)} · {personal_time(start)} – "
-        f"{end:%-d %b %Y (%A)} · {personal_time(end)} SGT"
+        f"{display_date(start)} · {personal_time(start)} – "
+        f"{display_date(end)} · {personal_time(end)} SGT"
     )
 
 
 def personal_details(event: EventDraft, *, compact: bool = False) -> str:
     title = event.title[:80] if compact else event.title
-    text = f"<b>{escape(title)}</b>\n📅 {personal_when(event.start_at, event.end_at)}"
+    text = f"<b>{escape(title)}</b>\n{personal_when(event.start_at, event.end_at)}"
     if event.location:
         text += "\n📍 " + escape(event.location[:80] if compact else event.location)
     if event.assumed_duration:
@@ -334,7 +336,7 @@ def personal_event_card(event: Event, availability: Availability, synced: bool |
 def time_label(event: EventDraft) -> str:
     """A short button label for one time: "Tue 27 Oct, 7pm"."""
     start = event.start_at.astimezone(SG)
-    return f"{start:%a %-d %b}, {personal_time(start)}"
+    return f"{display_date(start)}, {personal_time(start)}"
 
 
 def times_text(
@@ -362,7 +364,7 @@ def times_text(
         if first.location:
             text += "\n📍 " + escape(first.location[:80])
         for n, (event, availability) in pairs:
-            text += f"\n\n{n}. 📅 {personal_when(event.start_at, event.end_at)}"
+            text += f"\n\n{n}. {personal_when(event.start_at, event.end_at)}"
             if event.location and event.location != first.location:
                 text += "\n📍 " + escape(event.location[:80])
             text += "\n" + personal_availability(availability)
@@ -426,7 +428,7 @@ def event_card(event: Event, availability: Availability, synced: bool | str = Fa
     body = verdict_line(availability) + "\n\n" + details(event)
     if availability.conflicts:
         body += "\n\nConflicts:\n" + "\n".join(
-            f"• {b.title[:150]}: {b.start_at:%d %b %H:%M}–{b.end_at:%H:%M}"
+            f"• {b.title[:150]}: {display_date(b.start_at)} {b.start_at:%H:%M}–{b.end_at:%H:%M}"
             for b in availability.conflicts[:5]
         )
         if len(availability.conflicts) > 5:
@@ -486,6 +488,23 @@ async def send_reply(update, reply: Reply):
     if reply.clear_album_group is not None:
         await _clear_guide_album(update, reply.clear_album_group)
     query = getattr(update, "callback_query", None)
+    if reply.edit_message_id is not None and query is None:
+        from telegram.error import BadRequest
+
+        try:
+            await update.get_bot().edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=reply.edit_message_id,
+                text=reply.text,
+                parse_mode=reply.parse_mode,
+                reply_markup=reply.keyboard,
+                **preview_options,
+            )
+            return
+        except BadRequest as exc:
+            if "not modified" in str(exc).lower():
+                return
+            # A deleted or expired settings message can be replaced normally.
     if reply.edit and query is not None and not reply.document:
         from telegram import InputMediaPhoto
         from telegram.error import BadRequest, TelegramError

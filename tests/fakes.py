@@ -383,6 +383,9 @@ class MemoryRepository:
     async def mark_feed_seen(self, user_id, when):
         self.user(user_id).calendar_feed_seen_at = when
 
+    async def set_feed_app(self, user_id, app):
+        self.user(user_id).calendar_feed_app = app
+
     async def set_user_flags(self, user_id, **flags):
         for key, value in flags.items():
             setattr(self.user(user_id), key, value)
@@ -456,6 +459,15 @@ class MemoryRepository:
             n["status"] = "sent"
         else:
             n["status"] = "failed" if permanent or n["attempts"] >= 5 else "pending"
+
+    async def defer_notification(self, notification_id, until):
+        n = next(n for n in self.notifications if n["id"] == notification_id)
+        n.update(status="pending", next_attempt_at=until)
+
+    async def retime_pending_overviews(self, user_id, now):
+        for n in self.notifications:
+            if n["user_id"] == user_id and n["kind"] == "NIGHTLY" and n["status"] == "pending":
+                n["next_attempt_at"] = now
 
     async def create_poll(
         self, user_id, chat_id, message_id, title, minutes, start, end, deadline=None
@@ -853,6 +865,20 @@ class MemoryRepository:
             ),
             key=lambda d: d.due_at,
         )
+
+    async def users_by_ids(self, user_ids):
+        return [u.model_copy(deep=True) for u in self.users.values() if u.id in set(user_ids)]
+
+    async def deadline_owners(self, start, end):
+        return {d.user_id for d in await self.deadlines_between(start, end)}
+
+    async def update_deadline(self, user_id, deadline_id, **fields):
+        d = self.deadlines.get(deadline_id)
+        if not d or d.user_id != user_id:
+            return None
+        for key, value in fields.items():
+            setattr(d, key, value)
+        return d.model_copy(deep=True)
 
     async def finish_deadline(self, user_id, deadline_id):
         d = self.deadlines.get(deadline_id)

@@ -1,62 +1,88 @@
-"""Night-before summary: one message listing tomorrow's Going plans with venues."""
+"""One daily overview of saved plans, either the night before or the same day morning."""
 
 from datetime import datetime, time, timedelta
-from html import escape
 
-from app.bot.messages import clock, personal_details
-from app.schemas.event import SG, Deadline, Event, Status
+from app.bot.messages import personal_details
+from app.date_display import display_date
+from app.schemas.event import SG, Event, Status
+from app.services.personal_reminder_settings import overview_target
 
 
 def tomorrow_window(now: datetime) -> tuple[datetime, datetime]:
-    day = now.astimezone(SG).date() + timedelta(days=1)
-    start = datetime.combine(day, time.min, SG)
+    start = datetime.combine(now.astimezone(SG).date() + timedelta(days=1), time.min, SG)
     return start, start + timedelta(days=1)
 
 
-async def enqueue_nightly(repo, now: datetime, hour: int) -> int:
-    """Queue at most one summary per user per day, from `hour` until midnight Singapore time.
-
-    A run that happens after midnight does nothing: "tomorrow" would be the wrong day.
-    """
-    if now.astimezone(SG).hour < hour:
-        return 0
-    start, end = tomorrow_window(now)
-    users = {e.user_id for e in await repo.events_between(start, end, [Status.GOING])}
+async def enqueue_overviews(repo, now: datetime, period: str) -> int:
+    local = now.astimezone(SG)
+    day = local.date() + timedelta(days=period == "evening")
+    start = datetime.combine(day, time.min, SG)
+    end = start + timedelta(days=1)
+    plans = await repo.events_between(start, end, [Status.GOING, Status.SAVED])
+    owners = {p.user_id for p in plans if p.user_id}
     queued = 0
-    for user_id in sorted(users):
+    for user in await repo.users_by_ids(owners):
+        if not user.overview_enabled or user.overview_period != period or user.dm_blocked:
+            continue
+        target = overview_target(user, day)
+        if not target <= local or (period == "morning" and local.hour >= 12):
+            continue
+        eligible = [
+            p
+            for p in plans
+            if p.user_id == user.id
+            and (not p.created_at or p.created_at <= target)
+            and (period == "evening" or p.end_at > local)
+        ]
+        if not eligible:
+            continue
+        # One key for the plan date, shared by morning and evening: switching cannot duplicate it.
         queued += await repo.enqueue_notification(
-            user_id, "NIGHTLY", start.date().isoformat(), {"date": start.date().isoformat()}
+            user.id,
+            "NIGHTLY",
+            day.isoformat(),
+            {
+                "date": day.isoformat(),
+                "overview": True,
+            },
         )
     return queued
 
 
-def summary(day: datetime, events: list[Event], deadlines: list[Deadline] = ()) -> str | None:
-    going = sorted((e for e in events if e.status == Status.GOING), key=lambda e: e.start_at)
-    if not going:
+async def enqueue_nightly(repo, now: datetime, hour: int = 21) -> int:
+    return await enqueue_overviews(repo, now, "evening")
+
+
+async def enqueue_morning(repo, now: datetime) -> int:
+    return await enqueue_overviews(repo, now, "morning")
+
+
+def summary(
+    day: datetime,
+    events: list[Event],
+    deadlines=(),
+    *,
+    coming_up=(),
+    later=(),
+    now=None,
+    period: str = "evening",
+) -> str | None:
+    # Group attendance reminders are independent. Personal overviews never include deadlines.
+    plans = sorted(
+        (e for e in events if e.status in (Status.GOING, Status.SAVED)), key=lambda e: e.start_at
+    )
+    if not plans:
         return None
+    day_word = "Tomorrow" if period == "evening" else "Today"
+    text = f"🌤 <b>Daily overview</b>\n\n{day_word} · {display_date(day)}\n\n"
+    text += "\n\n".join(personal_details(e, compact=True) for e in plans[:8])
+    if len(plans) > 8:
+        text += f"\n\n+ {len(plans) - 8} more · /plans"
+    # Details are capped and escaped by personal_details; trim only at complete card boundaries.
+    while len(text) > 3700 and "\n\n<b>" in text:
+        text = text.rsplit("\n\n<b>", 1)[0] + "\n\nSee /plans for more."
+    return text + "\n\n/plans for details. /settings to customise reminders."
 
-    html_mode = any(not e.group_event_id for e in going)
-    limit = 10 if html_mode else 15
 
-    def line(e: Event) -> str:
-        if not e.group_event_id:
-            return personal_details(e, compact=True)
-        venue = f" @ {e.location[:80]}" if e.location else ""
-        text = f"• {e.start_at:%H:%M}–{e.end_at:%H:%M} {e.title[:80]}{venue}"
-        return escape(text) if html_mode else text
-
-    separator = "\n\n" if html_mode else "\n"
-    text = f"Tomorrow, {day:%a %-d %b}:\n" + separator.join(line(e) for e in going[:limit])
-    if len(going) > limit:
-        text += f"\n+ {len(going) - limit} more"
-    undecided = [e for e in events if e.status == Status.SAVED]
-    if undecided:
-        text += "\n\nStill undecided: " + ", ".join(
-            (escape(e.title[:40]) if html_mode else e.title[:40]) for e in undecided[:5]
-        )
-    if deadlines:
-        text += "\n\n📌 Due: " + ", ".join(
-            f"{escape(d.title[:40]) if html_mode else d.title[:40]} ({clock(d.due_at)})"
-            for d in deadlines[:5]
-        )
-    return text + "\n\n/plans for details. /reminders off stops these summaries."
+def today_text(deadlines, plans: list[Event], now: datetime) -> str | None:
+    return summary(now, plans, period="morning")

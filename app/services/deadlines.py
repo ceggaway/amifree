@@ -4,6 +4,7 @@ import re
 from datetime import datetime, time, timedelta
 
 from app.bot.messages import clock
+from app.date_display import display_date
 from app.schemas.event import SG, Deadline, DeadlineDraft, Extraction
 from app.services.date_resolution import (
     Clarification,
@@ -14,9 +15,9 @@ from app.services.date_resolution import (
     restore_meridiem,
     written_relative,
 )
+from app.services.personal_reminder_settings import MAX_LEAD, interval_label
 
 END_OF_DAY = time(23, 59)  # "due Fri" means by the end of Friday
-REMIND_AT = time(9)  # the day before, and the morning it's due
 ASK_DATE = "What's the due date? For example fri, 20 oct or 2026-10-23."
 EXAMPLE = "For example: CS3244 report due fri 11:59pm"
 # Any time of day written in a message: 5pm, 11:59, 23.59, 2359, 2359hrs, noon, midnight.
@@ -72,9 +73,47 @@ def validate_deadline(extraction: Extraction, source: str, reference: datetime) 
             due_time = resolve_time(raw_time)
     due = datetime.combine(day, due_time, SG)
     if due <= reference:
-        raise Clarification(f"{due:%a %-d %b} {clock(due)} has already passed. " + ASK_DATE)
+        raise Clarification(f"{display_date(due)} {clock(due)} has already passed. " + ASK_DATE)
     title = (extraction.title or "Deadline").strip()[:200] or "Deadline"
     return DeadlineDraft(title=title, due_at=due, notes=extraction.notes)
+
+
+NO_NOTES = {"none", "no", "-", "clear", "remove", "delete"}
+
+
+def changed_due(text: str, current: datetime, now: datetime) -> datetime:
+    """A new due time typed while editing: "sat 5pm", "tmr", "20 oct", "2359".
+
+    Read with plain rules, never the AI. Whatever isn't mentioned stays: a day keeps the time,
+    a time keeps the day. Raises Clarification for anything unclear or already past.
+    """
+    current = current.astimezone(SG)
+    raw = " ".join(text.split())
+    token = next((m for m in TIME_TOKEN.finditer(raw) if WRITTEN_TIME.search(m.group())), None)
+    due_time = current.timetz().replace(tzinfo=None)
+    rest = raw
+    if re.search(r"\bmidnight\b", raw, re.IGNORECASE):
+        due_time = END_OF_DAY
+        rest = re.sub(r"\bmidnight\b", " ", rest, flags=re.IGNORECASE)
+    elif token:
+        due_time = resolve_time(token.group().strip())
+        rest = raw[: token.start()] + " " + raw[token.end() :]
+    rest = re.sub(r"\b(?:due|by|at|on|before)\b|[,@]", " ", rest, flags=re.IGNORECASE)
+    rest = " ".join(rest.split())
+    if not rest and not token and "midnight" not in raw.lower():
+        raise Clarification("Send the new due date, time, or both, like: sat 5pm, or tmr.")
+    try:
+        day = resolve_date(rest, now) if rest else current.date()
+    except Clarification as exc:
+        if not token and re.search(r"(?<![\d/.:-])\d{1,2}(?![\d/.:-])", rest):
+            raise Clarification("Is that AM or PM? Send, for example: sat 5pm.") from None
+        if "event date" in str(exc):
+            raise Clarification("I couldn't read that day. " + ASK_DATE) from None
+        raise
+    due = datetime.combine(day, due_time, SG)
+    if due <= now:
+        raise Clarification(f"{display_date(due)} {clock(due)} has already passed. " + ASK_DATE)
+    return due
 
 
 def when(due: datetime, now: datetime) -> str:
@@ -93,67 +132,110 @@ def when(due: datetime, now: datetime) -> str:
         relative = "tomorrow"
     else:
         relative = f"in {days} days"
-    return f"{due:%a %-d %b}, {clock(due)} ({relative})"
+    return f"{display_date(due)}, {clock(due)} ({relative})"
 
 
-def card_text(deadline: Deadline, now: datetime, reminders: bool, calendar: str = "") -> str:
-    """calendar: what happened in the student's calendar, said only once it's true."""
+def card_text(
+    deadline: Deadline,
+    now: datetime,
+    reminders: bool,
+    calendar: str = "",
+    *,
+    morning: bool = True,
+    lead_minutes: int = 180,
+) -> str:
+    """Describe the selected deadline alert independently of the saved-plans overview.
+
+    The legacy morning argument is accepted for existing callers; it does not add an alert.
+    """
     text = f"📌 {deadline.title}\nDue {when(deadline.due_at, now)}"
     if deadline.notes:
         text += "\n" + deadline.notes[:300]
     if calendar:
         text += "\n\n" + calendar
     if reminders:
-        text += "\n\nI'll remind you the day before and on the morning it's due."
-        text += " /settings to change reminders."
+        promise = reminder_promise(deadline, now, alert=reminders, lead_minutes=lead_minutes)
+        text += "\n\n" + promise + " /settings to change reminders."
     else:
         text += "\n\nReminders are off (/settings to turn them on)."
     return text + "\n/deadline lists them all."
 
 
-def reminder_moments(deadline: Deadline) -> dict[str, datetime]:
-    """When each reminder is due: 9am the day before, and 9am on the day (if before it's due)."""
-    due = deadline.due_at.astimezone(SG)
-    moments = {"day": datetime.combine(due.date() - timedelta(days=1), REMIND_AT, SG)}
-    morning = datetime.combine(due.date(), REMIND_AT, SG)
-    if morning < due:
-        moments["morning"] = morning
-    return moments
+def reminder_moments(
+    deadline: Deadline, *, morning: bool = True, lead_minutes: int = 180
+) -> dict[str, datetime]:
+    """One personal alert at the selected interval, independent of the plans overview."""
+    return {"final": deadline.due_at.astimezone(SG) - timedelta(minutes=lead_minutes)}
+
+
+def on_day(moment: datetime, now: datetime) -> str:
+    day, today = moment.astimezone(SG).date(), now.astimezone(SG).date()
+    if day == today:
+        return "today"
+    if day == today + timedelta(days=1):
+        return "tomorrow"
+    return f"on {display_date(moment)}"
+
+
+def reminder_promise(
+    deadline: Deadline,
+    now: datetime,
+    *,
+    morning: bool = True,
+    alert: bool = True,
+    lead_minutes: int = 180,
+) -> str:
+    if not alert:
+        return "Deadline alerts are off (/settings to turn them on)."
+    moment = reminder_moments(deadline, lead_minutes=lead_minutes)["final"]
+    if moment <= now:
+        return "Your selected alert time has already passed for this deadline."
+    return (
+        f"I'll remind you {on_day(moment, now)} at {clock(moment)}, "
+        f"{interval_label(lead_minutes)} before."
+    )
 
 
 async def enqueue_deadline_reminders(repo, now: datetime) -> int:
-    """Queue reminders whose moment has come, on that same day, while still before the due time.
-
-    A reminder whose moment was before the deadline was added is skipped: they've just seen it.
-    The (user, kind, key) uniqueness on the outbox stops any repeat.
-    """
     local = now.astimezone(SG)
+    deadlines = await repo.deadlines_between(now, now + timedelta(minutes=MAX_LEAD + 1))
+    users = {u.id: u for u in await repo.users_by_ids({d.user_id for d in deadlines})}
     queued = 0
-    for deadline in await repo.deadlines_between(now, now + timedelta(days=2)):
-        for which, moment in reminder_moments(deadline).items():
-            if not (moment <= local and moment.date() == local.date() and local < deadline.due_at):
-                continue
-            if deadline.created_at and deadline.created_at > moment:
-                continue
-            queued += await repo.enqueue_notification(
-                deadline.user_id, "DEADLINE", f"{deadline.id}:{which}", {"id": deadline.id}
-            )
+    for deadline in deadlines:
+        user = users.get(deadline.user_id)
+        if not user or not user.deadline_alerts or user.dm_blocked:
+            continue
+        moment = reminder_moments(deadline, lead_minutes=user.deadline_lead_minutes)["final"]
+        if not (moment <= local and moment.date() == local.date() and local < deadline.due_at):
+            continue
+        if deadline.created_at and deadline.created_at > moment:
+            continue
+        queued += await repo.enqueue_notification(
+            deadline.user_id,
+            "DEADLINE",
+            f"{deadline.id}:{deadline.due_at.isoformat()}:{user.deadline_lead_minutes}",
+            {
+                "id": deadline.id,
+                "due_at": deadline.due_at.isoformat(),
+                "lead_minutes": user.deadline_lead_minutes,
+            },
+        )
     return queued
 
 
 def reminder_text(deadline: Deadline, now: datetime) -> str:
     due = deadline.due_at.astimezone(SG)
-    today = now.astimezone(SG).date()
-    if due.date() == today:
-        head = f"📌 Due today at {clock(due)}: {deadline.title}"
-    elif due.date() == today + timedelta(days=1):
-        head = f"📌 Due tomorrow ({due:%a %-d %b}, {clock(due)}): {deadline.title}"
-    else:
-        head = f"📌 Due {when(due, now)}: {deadline.title}"
     return (
-        head + "\n\nTap Done once it's handed in. /settings to change reminders."
+        f"⏰ Deadline reminder\n\n📌 {deadline.title}\n"
+        f"Due {display_date(due)} · {clock(due)}"
+        "\n\nTap Done once it's handed in. /settings to customise reminders."
         "\n/deadline lists them all."
     )
+
+
+def hours_left(due: datetime, now: datetime) -> str:
+    hours = int((due - now).total_seconds() // 3600)
+    return f" (in {hours} hr)" if hours >= 1 else " (very soon)"
 
 
 def due_line(deadline: Deadline) -> str:

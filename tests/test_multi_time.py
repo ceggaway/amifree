@@ -6,6 +6,7 @@ from app.services.multi_time import (
     is_multi,
     item_message_id,
     read_times,
+    settle_times,
     split_times,
 )
 from tests.conftest import extraction, tap
@@ -99,6 +100,54 @@ def test_a_new_time_without_a_date_keeps_the_date(reference):
     assert f"{times.drafts[1].start_at:%H:%M}" == "12:00"
 
 
+def test_first_day_borrows_the_shared_month(reference):
+    dinner = extraction(
+        title="Hall dinner",
+        date_text="24 Oct",
+        start_time_text="7pm",
+        end_time_text="10pm",
+        end_date_text="25 Oct",
+        relation="alternatives",
+        other_times=[other(date_text="25 Oct", start_time_text="7pm", end_time_text="10pm")],
+    )
+    times = read_times(dinner, "Hall dinner 24 or 25 Oct, 7pm–10pm", reference)
+    assert [f"{d.start_at:%d %H:%M}" for d in times.drafts] == ["24 19:00", "25 19:00"]
+    assert not times.unread
+
+
+def test_a_range_start_never_takes_another_lines_am_pm(reference):
+    weekly = extraction(
+        title="Training",
+        date_text="Wed",
+        start_time_text="7",
+        end_time_text="9pm",
+        relation="separate",
+        other_times=[other(date_text="Sat", start_time_text="9", end_time_text="11am")],
+    )
+    text = "This week's trainings:\nMon - no training\nWed 7-9pm @ MPSH 5\nSat 9-11am @ field"
+    times = read_times(weekly, text, reference)
+    assert [f"{d.start_at:%a %H:%M}-{d.end_at:%H:%M}" for d in times.drafts] == [
+        "Wed 19:00-21:00",
+        "Sat 09:00-11:00",
+    ]
+
+
+def test_choose_your_slot_is_a_choice():
+    slots = extraction(
+        title="Photoshoot",
+        date_text="20 Oct",
+        start_time_text="2",
+        end_time_text="3pm",
+        relation="one",
+        other_times=[other(date_text="21 Oct", start_time_text="2", end_time_text="3pm")],
+    )
+    text = "Choose ur slot for the photoshoot: Tue 20 Oct 2-3pm / Wed 21 Oct 2-3pm"
+    assert settle_times(slots, text).relation == "alternatives"
+    assert settle_times(slots, "Photoshoot Tue 20 Oct 2-3pm, Wed 21 Oct 2-3pm").relation == (
+        "separate"
+    )
+
+
 def test_at_most_five_times():
     many = trainings().model_copy(update={"other_times": [other(date_text="Thu")] * 9})
     assert len(split_times(many)) == 5
@@ -152,11 +201,16 @@ async def test_separate_events_get_one_picker(service_factory, reference):
     [picker] = await service.message(1, 7, TRAINING, reference)
     assert picker.text.startswith("I found 2 events in that message:")
     assert "1. <b>Training</b>" in picker.text and "2. <b>Training</b>" in picker.text
-    assert "6 Oct 2026 (Tuesday) · 7PM–9PM SGT" in picker.text
-    assert "8 Oct 2026 (Thursday) · 6PM–8PM SGT" in picker.text
+    assert "📅 06/10/2026 (Tue) · 7PM–9PM SGT" in picker.text
+    assert "📅 08/10/2026 (Thu) · 6PM–8PM SGT" in picker.text
     assert picker.text.count("✅ No clashes found") == 2
     labels = [b.text for row in picker.keyboard.inline_keyboard for b in row]
-    assert labels == ["Add both", "Add 1 · Tue 6 Oct", "Add 2 · Thu 8 Oct", "Neither"]
+    assert labels == [
+        "Add both",
+        "Add 1 · 📅 06/10/2026 (Tue)",
+        "Add 2 · 📅 08/10/2026 (Thu)",
+        "Neither",
+    ]
     assert len(repo.events) == 2
     assert {e.status for e in repo.events.values()} == {Status.PREVIEW}
 
@@ -213,7 +267,7 @@ async def test_a_card_ask_counts_for_the_picker_too(service_factory, reference):
     asked = await service.callback(1, tap(card, "Add to plans"))
     assert len(asked) == 2  # the card's own "Set up (1 min)" prompt: ask 1
     [picker] = await service.message(1, 7, TRAINING, reference)
-    [first] = await service.callback(1, tap(picker, "Add 1 · Tue 6 Oct"))
+    [first] = await service.callback(1, tap(picker, "Add 1 · 📅 06/10/2026 (Tue)"))
     [done] = await service.callback(1, tap(first, "Done"))
     # 2 plans, and the next ask waits for 3: no buttons, just where to connect later.
     assert done.keyboard is None
@@ -223,7 +277,7 @@ async def test_a_card_ask_counts_for_the_picker_too(service_factory, reference):
 async def test_done_after_adding_some_offers_the_calendar_buttons(service_factory, reference):
     service, repo = service_factory(trainings())
     [picker] = await service.message(1, 7, TRAINING, reference)
-    [first] = await service.callback(1, tap(picker, "Add 1 · Tue 6 Oct"))
+    [first] = await service.callback(1, tap(picker, "Add 1 · 📅 06/10/2026 (Tue)"))
     replies = await service.callback(1, tap(first, "Done"))
     assert len(replies) == 1
     assert "☑️ <b>Added to /plans.</b>\n📅 Only in AmIFree for now." in replies[0].text
@@ -243,13 +297,13 @@ async def test_an_untitled_extraction_is_named_from_the_message(service_factory,
 async def test_add_one_then_the_other(service_factory, reference):
     service, repo = service_factory(trainings())
     [picker] = await service.message(1, 7, TRAINING, reference)
-    [first] = await service.callback(1, tap(picker, "Add 1 · Tue 6 Oct"))
+    [first] = await service.callback(1, tap(picker, "Add 1 · 📅 06/10/2026 (Tue)"))
     assert first.edit and "☑️ Added to /plans." in first.text
     labels = [b.text for row in first.keyboard.inline_keyboard for b in row]
-    assert labels == ["Add 2 · Thu 8 Oct", "Done"]
+    assert labels == ["Add 2 · 📅 08/10/2026 (Thu)", "Done"]
     statuses = sorted(e.status for e in repo.events.values())
     assert statuses == sorted([Status.GOING, Status.PREVIEW])
-    replies = await service.callback(1, tap(first, "Add 2 · Thu 8 Oct"))
+    replies = await service.callback(1, tap(first, "Add 2 · 📅 08/10/2026 (Thu)"))
     assert "All added to /plans." in replies[0].text
     # No calendar connected: setup is one tap away, in the picker, not in a second message.
     assert len(replies) == 1
@@ -340,13 +394,17 @@ async def test_alternatives_choose_one_time(service_factory, reference):
     service, repo = service_factory(dinners(), default_event_duration_minutes=120)
     [picker] = await service.message(1, 7, DINNER, reference)
     assert picker.text.startswith("🤔 <b>Dinner</b> has 2 possible times.")
-    assert "1. 📅 9 Oct 2026 (Friday) · 7PM–9PM SGT" in picker.text
-    assert "2. 📅 10 Oct 2026 (Saturday) · 6PM–8PM SGT" in picker.text
+    assert "1. 📅 09/10/2026 (Fri) · 7PM–9PM SGT" in picker.text
+    assert "2. 📅 10/10/2026 (Sat) · 6PM–8PM SGT" in picker.text
     assert "End time estimated." in picker.text
     labels = [b.text for row in picker.keyboard.inline_keyboard for b in row]
-    assert labels == ["Fri 9 Oct, 7PM", "Sat 10 Oct, 6PM", "Not decided yet"]
-    [card] = await service.callback(1, tap(picker, "Sat 10 Oct, 6PM"))
-    assert card.edit and "10 Oct 2026 (Saturday)" in card.text
+    assert labels == [
+        "📅 09/10/2026 (Fri), 7PM",
+        "📅 10/10/2026 (Sat), 6PM",
+        "Not decided yet",
+    ]
+    [card] = await service.callback(1, tap(picker, "📅 10/10/2026 (Sat), 6PM"))
+    assert card.edit and "📅 10/10/2026 (Sat)" in card.text
     assert tap(card, "Add to plans")
     # Nothing is added until they tap Add to plans on the chosen time's card.
     assert {e.status for e in repo.events.values()} == {Status.PREVIEW}

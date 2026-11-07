@@ -25,7 +25,7 @@ NUSMods is optional. After Save or Going, the bot offers 📅 Google Calendar (a
 - Anything derived from a person's schedule in a group is returned as a callback alert that only the person who tapped can see. Group cards show counts, never names or reasons. The one exception is **Who's going?**, which lists the names of people who tapped Going (never Can't).
 - Names (`first_name`, `@username`) are kept per group, only for people who tapped something there, so Who's going? and the organiser's attendance export can show them. They are deleted with `/deletemydata` and with the person's record.
 - `/whosfree` reads a schedule only after that member fills in their availabilities (or taps Count me in), and suggests times once two people have joined. With two, each can tell from the counts when the other is free, but never why.
-- Nudges and reminders go only to people who have used AmIFree; `/reminders off` stops summaries and nudges.
+- Nudges and reminders go only to people who have used AmIFree. `/settings` has a switch each for the evening summary (and its time: 8, 9 or 10pm), the 9am morning list, deadline alerts and group check-ins; `/reminders off` turns all four off.
 - `/deletemydata` (alias `/delete`) removes the user's timetable, plans, busy blocks, poll answers, "still coming?" answers, check-ins, names, notification records and analytics. Group cards they organised stay for the other members, with no organiser attached.
 
 ## Local setup
@@ -93,7 +93,7 @@ In disabled mode `/healthz` returns 200 and `/readyz` returns 503. This does not
 
 Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `/deadline`, `/settings`, `/free`, `/calendar`, `/cancel`, `/deletemydata`. Deletion requires a confirmation.
 
-Send `/deadline <text>` to save a deadline, or `/deadline` alone for one numbered list, grouped into **⚠️ Overdue** and **Coming up** with due times and relative dates. Tap a number to open its card with **Done** and **Remove**. Lists have ten items per page; Previous/Next updates the same message. Manage deadline reminders in `/settings`.
+Send `/deadline <text>` to save a deadline, or `/deadline` alone for one numbered list, grouped into **⚠️ Overdue** and **Coming up** with due times and relative dates. Tap a number to open its card with **Done**, **Edit** and **Remove**. **Edit** asks what to change (**Name**, **Due date & time** or **Notes**), then takes the new value as typed or spoken. A new due time is read with plain rules, not the AI: "sat 5pm", "tmr", "20 oct 2359", "6pm". Whatever isn't mentioned stays the same (a day keeps the time, a time keeps the day), and a bare "5" asks AM or PM. Reminders and synced calendars follow the new time. Lists have ten items per page; Previous/Next updates the same message. Manage deadline reminders in `/settings`.
 
 ### Groups
 
@@ -151,7 +151,7 @@ The group page also has **📊 Turnout and attendance** (turnout for your own ev
 4 months or a year, and **Send CSV to my chat**, which sends the attendance file privately, as
 `/export` does), and, for group admins only, a **Spot plans in chat** switch that does what
 `/detect on|off` does, including telling the group. The home page has a **🔔 Reminders** switch,
-the same setting as `/settings` in the bot.
+which turns every reminder switch in `/settings` on or off together.
 
 Telegram doesn't allow Mini App buttons in groups, so these are `t.me/<bot>/<app>?startapp=…`
 links. A link names the group, and anyone can change a link, so the server asks Telegram
@@ -222,7 +222,7 @@ Night-before summaries, change alerts and nudges are rows in `notification_logs`
 curl -fsS -X POST -H "X-Jobs-Secret: $JOBS_SECRET" "$APP_BASE_URL/internal/jobs/run"
 ```
 
-Summaries are sent from `NIGHTLY_HOUR` (default 20, Singapore time) until midnight. A message is marked sent only after Telegram accepts it; failures retry with backoff up to five times.
+Summaries are sent from each person's chosen hour in `/settings` (8, 9 or 10pm; `NIGHTLY_HOUR`, default 20, until they pick one) until midnight, Singapore time. A summary goes to anyone with a plan (Going or still undecided) or a deadline tomorrow. It lists tomorrow's plans, deadlines due tomorrow, and deadlines in the following week ("Coming up"); undecided plans get Going / Not going buttons. On Sunday nights it also lists deadlines due later in the next 30 days ("Later this month"), and goes to anyone with such a deadline even if Monday is empty. Each list shows at most five, then points to /deadline. The **☀️ morning list** goes out at 9am (until noon, if the server slept) on any day with a Going plan or a deadline: the day's plans, then what's due, with a Done button for each deadline. Plans and deadlines added after 9am aren't counted. A **⏰ deadline alert** goes out 3 hours before something is due, except in quiet hours (11pm to 9am) and, for anyone with the morning list on, before noon on the due day, when the 9am list was only a few hours earlier; a deadline due at 1am gets it at 10pm the night before. The day before is the evening summary's "Due tomorrow". A reminder whose time had already passed when the deadline was added is never sent, and the deadline card only promises the ones still to come. A message is marked sent only after Telegram accepts it; failures retry with backoff up to five times.
 
 ## Verification
 

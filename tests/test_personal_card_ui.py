@@ -31,8 +31,7 @@ def rows(card):
 def test_approved_preview():
     card = event_card(plan(), Availability((), personal=True))
     assert card.text == (
-        "✅ No clashes found\n\n<b>Dinner with friends</b>\n"
-        "📅 23 Oct 2026 (Friday) · 7PM–9PM SGT\n📍 Clementi Mall"
+        "✅ No clashes found\n\n<b>Dinner with friends</b>\n📅 23/10/2026 (Fri) · 7PM–9PM SGT\n📍 Clementi Mall"
     )
     assert card.parse_mode == "HTML"
     assert rows(card) == [["Add to plans"], ["Edit details", "Skip"]]
@@ -47,7 +46,7 @@ def test_personal_details_omit_price_and_other_notes(status):
     event = plan(status=status, notes="Price: $2 (For Participants)\nBring your own materials.")
     card = event_card(event, Availability(()))
     assert "<b>Dinner with friends</b>" in card.text
-    assert "23 Oct 2026 (Friday) · 7PM–9PM SGT" in card.text
+    assert "📅 23/10/2026 (Fri) · 7PM–9PM SGT" in card.text
     assert "📍 Clementi Mall" in card.text
     for text in (card.text, personal_details(event), personal_details(event, compact=True)):
         assert "Price:" not in text and "Bring your own" not in text
@@ -107,7 +106,7 @@ def test_minutes_overnight_and_no_venue():
     assert "7:30PM–9:30PM SGT" in event_card(event, Availability(())).text
     overnight = event.model_copy(update={"end_at": datetime(2026, 10, 24, 1, tzinfo=SG)})
     text = event_card(overnight, Availability(())).text
-    assert "23 Oct 2026 (Friday) · 7:30PM – 24 Oct 2026 (Saturday) · 1AM SGT" in text
+    assert "📅 23/10/2026 (Fri) · 7:30PM – 📅 24/10/2026 (Sat) · 1AM SGT" in text
     assert "📍" not in text
 
 
@@ -240,8 +239,8 @@ async def test_details_match_in_plans_edit_and_change_confirmation(service_facto
     expected = personal_details(event)
     agenda = (await service.command(1, "plans"))[0]
     assert agenda.parse_mode == "HTML"
-    assert agenda.keyboard.inline_keyboard[0][0].text == "9 Oct · CCA dinner"
-    opened = (await service.callback(1, tap(agenda, "9 Oct · CCA dinner")))[0]
+    assert agenda.keyboard.inline_keyboard[0][0].text == "📅 09/10/2026 (Fri) · CCA dinner"
+    opened = (await service.callback(1, tap(agenda, "📅 09/10/2026 (Fri) · CCA dinner")))[0]
     assert expected in opened.text and opened.parse_mode == "HTML"
     edit = (await service.callback(1, tap(added, "Edit details")))[0]
     assert expected in edit.text and edit.parse_mode == "HTML"
@@ -262,7 +261,7 @@ async def test_cancellation_confirmation_escapes_and_formats_details(service_fac
     confirmation = (await service.begin_change(user, event, cancel=True))[0]
     assert confirmation.parse_mode == "HTML"
     assert "<b>Dinner &lt;&amp;&gt; friends</b>" in confirmation.text
-    assert "9 Oct 2026 (Friday) · 7PM–9PM SGT" in confirmation.text
+    assert "📅 09/10/2026 (Fri) · 7PM–9PM SGT" in confirmation.text
     cancelled = (await service.callback(1, tap(confirmation, "Confirm cancellation")))[-1]
     assert cancelled.parse_mode == "HTML" and cancelled.keyboard is None
     assert cancelled.text.startswith("Cancelled\n\n<b>Dinner &lt;&amp;&gt; friends</b>")
@@ -278,7 +277,7 @@ def test_personal_summary_reuses_details_and_keeps_group_only_summary():
     assert personal_details(personal, compact=True) in text
     assert "Group &lt;&amp;&gt; meeting" in text
     group_only = summary(group.start_at, [group])
-    assert "• 19:00–21:00 Group <&> meeting @ Clementi Mall" in group_only
+    assert "<b>Group &lt;&amp;&gt; meeting</b>" in group_only
 
 
 async def test_direct_notifications_preserve_html():

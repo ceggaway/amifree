@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 20
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -53,7 +53,9 @@ class SupabaseRepository:
         # Check everything the current code needs (tables, columns and the calendar function),
         # not merely that the host responds. A missing migration fails here, by name, in the log.
         required = {
-            "users": "id,calendar_feed_token,calendar_feed_seen_at,google_connected",
+            "users": "id,calendar_feed_token,calendar_feed_seen_at,calendar_feed_app,google_connected,"
+            "overview_enabled,overview_period,overview_morning_minute,overview_evening_minute,"
+            "deadline_lead_minutes",
             "timetable_blocks": "id",
             "events": "id",
             "event_extractions": "id",
@@ -414,6 +416,34 @@ class SupabaseRepository:
         rows = (await query.order("due_at").limit(500).execute()).data
         return [Deadline.model_validate(row) for row in rows]
 
+    async def deadline_owners(self, start: datetime, end: datetime) -> set[str]:
+        """Users with an open deadline due in [start, end), however many there are."""
+        rows = await self._all(
+            lambda: (
+                self.client.table("deadlines")
+                .select("user_id")
+                .eq("done", False)
+                .gte("due_at", start.isoformat())
+                .lt("due_at", end.isoformat())
+                .order("id")
+            )
+        )
+        return {row["user_id"] for row in rows}
+
+    async def update_deadline(self, user_id: str, deadline_id: str, **fields) -> Deadline | None:
+        """Change a deadline's title, due_at or notes. None if it's gone."""
+        values = DeadlineDraft.model_validate(
+            {"title": "x", "due_at": datetime.now(SG)} | fields
+        ).model_dump(mode="json", include=set(fields))
+        rows = (
+            await self.client.table("deadlines")
+            .update(values)
+            .eq("user_id", user_id)
+            .eq("id", deadline_id)
+            .execute()
+        ).data
+        return Deadline.model_validate(rows[0]) if rows else None
+
     async def finish_deadline(self, user_id: str, deadline_id: str) -> bool:
         result = (
             await self.client.table("deadlines")
@@ -629,11 +659,21 @@ class SupabaseRepository:
         ).execute()
         return GroupEvent.model_validate(result.data[0]) if result.data else None
 
+    async def users_by_ids(self, user_ids) -> list[User]:
+        """These users, in batches small enough for one request each."""
+        ids, users = sorted(set(user_ids)), []
+        for n in range(0, len(ids), 200):
+            rows = (
+                await self.client.table("users").select("*").in_("id", ids[n : n + 200]).execute()
+            ).data
+            users += [User.model_validate(row) for row in rows]
+        return users
+
     async def get_user(self, user_id: str) -> User | None:
         result = await self.client.table("users").select("*").eq("id", user_id).limit(1).execute()
         return User.model_validate(result.data[0]) if result.data else None
 
-    async def set_user_flags(self, user_id: str, **flags: bool):
+    async def set_user_flags(self, user_id: str, **flags: bool | int | str):
         await self.client.table("users").update(flags).eq("id", user_id).execute()
 
     async def list_calendars(self, user_id: str) -> list[PersonalCalendar]:
@@ -840,6 +880,14 @@ class SupabaseRepository:
             .execute()
         )
 
+    async def set_feed_app(self, user_id: str, app: str):
+        await (
+            self.client.table("users")
+            .update({"calendar_feed_app": app})
+            .eq("id", user_id)
+            .execute()
+        )
+
     async def enqueue_notification(self, user_id: str, kind: str, key: str, payload: dict) -> bool:
         result = await self.client.rpc(
             "amifree_enqueue_notification",
@@ -903,6 +951,26 @@ class SupabaseRepository:
             {"p_id": notification_id, "p_ok": ok, "p_permanent": permanent},
         ).execute()
 
+    async def defer_notification(self, notification_id: str, until: datetime):
+        await (
+            self.client.table("notification_logs")
+            .update({"status": "pending", "next_attempt_at": until.isoformat(), "claimed_at": None})
+            .eq("id", notification_id)
+            .eq("status", "sending")
+            .execute()
+        )
+
+    async def retime_pending_overviews(self, user_id: str, now: datetime):
+        """Wake unsent overviews so delivery rechecks a newly selected timing."""
+        await (
+            self.client.table("notification_logs")
+            .update({"next_attempt_at": now.isoformat()})
+            .eq("user_id", user_id)
+            .eq("kind", "NIGHTLY")
+            .eq("status", "pending")
+            .execute()
+        )
+
     async def create_poll(
         self,
         user_id: str,
@@ -926,6 +994,7 @@ class SupabaseRepository:
                 "p_window_end": end.isoformat(),
             },
         ).execute()
+
         poll = Poll.model_validate(result.data[0])
         if deadline and poll.deadline_at is None:
             await (

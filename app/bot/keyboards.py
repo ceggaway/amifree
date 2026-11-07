@@ -1,5 +1,6 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.date_display import display_date
 from app.schemas.event import Event, GroupEvent, Poll, Status
 
 
@@ -210,11 +211,54 @@ def change_keyboard(nonce: str, *, personal: bool = False) -> InlineKeyboardMark
     )
 
 
+def undecided_keyboard(events: list[Event]) -> InlineKeyboardMarkup | None:
+    """Going / Not going for plans still undecided, answered straight from the summary."""
+    rows = [
+        [
+            InlineKeyboardButton(
+                f"✅ Going: {e.title[:24]}", callback_data=f"go:{e.id}:{e.version}"
+            ),
+            InlineKeyboardButton("Not going", callback_data=f"decline:{e.id}:{e.version}"),
+        ]
+        for e in events[:3]
+    ]
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+def today_keyboard(deadlines) -> InlineKeyboardMarkup | None:
+    """Done for each deadline on the Today message. "ok" confirms in a new message, so the
+    list itself stays."""
+    rows = [
+        [InlineKeyboardButton(f"✅ Done: {d.title[:28]}", callback_data=f"dl:ok:{d.id}")]
+        for d in deadlines[:3]
+    ]
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+def deadline_edit_keyboard(nonce: str) -> InlineKeyboardMarkup:
+    """What to change on a deadline: picked here, then typed."""
+
+    def pick(label: str, field: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(label, callback_data=f"dle:{field}:{nonce}")
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                pick("📌 Name", "title"),
+                pick("🕒 Due date & time", "due"),
+                pick("📝 Notes", "notes"),
+            ],
+            [InlineKeyboardButton("Keep unchanged", callback_data=f"dismiss:{nonce}")],
+        ]
+    )
+
+
 def deadline_keyboard(deadline_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("✅ Done", callback_data=f"dl:done:{deadline_id}"),
+                InlineKeyboardButton("✏️ Edit", callback_data=f"dl:edit:{deadline_id}"),
                 InlineKeyboardButton("🗑 Remove", callback_data=f"dl:rm:{deadline_id}"),
             ]
         ]
@@ -278,7 +322,7 @@ def choose_keyboard(events: list[Event]) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    f"{e.title[:35]} · {e.start_at:%d %b %H:%M}",
+                    f"{e.title[:35]} · {display_date(e.start_at)} {e.start_at:%H:%M}",
                     callback_data=f"pick:{e.id}:{e.version}",
                 )
             ]
@@ -383,8 +427,9 @@ def personal_calendars_keyboard(calendars, feed: bool = False) -> InlineKeyboard
 
 
 def calendar_home_rows(feed: bool = False):
-    """Connect a calendar, add classes, and once the AmIFree calendar exists, its link and
-    settings (New link, Turn off). Setting it up is part of Apple setup, not a button here."""
+    """Connect a calendar, add classes, and once a calendar app uses the AmIFree calendar, its
+    link and settings (New link, Turn off). Setting it up is part of Apple setup, not a button
+    here."""
     rows = [
         [InlineKeyboardButton("➕ Add a calendar", callback_data="setup:calendar")],
         [InlineKeyboardButton("📚 Add or update NUSMods", callback_data="setup:nusmods")],
@@ -444,9 +489,11 @@ def feedback_choice_keyboard() -> InlineKeyboardMarkup:
     """Anonymous by default; attaching the handle is an explicit opt-in."""
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🕶 Send anonymously", callback_data="fb:anon")],
-            [InlineKeyboardButton("👤 Send with my @handle", callback_data="fb:named")],
-            [InlineKeyboardButton("Cancel", callback_data="fb:cancel")],
+            [
+                InlineKeyboardButton("🕶 Anonymously", callback_data="fb:anon"),
+                InlineKeyboardButton("👤 With @handle", callback_data="fb:named"),
+                InlineKeyboardButton("Cancel", callback_data="fb:cancel"),
+            ],
         ]
     )
 
@@ -458,13 +505,6 @@ def menu_keyboard() -> InlineKeyboardMarkup:
             [_menu("📋 My plans", "plans"), _menu("🕒 Am I free?", "free")],
             [_menu("📌 Deadlines", "deadlines"), _menu("⚙️ Settings", "settings")],
         ]
-    )
-
-
-def settings_keyboard(reminders_on: bool) -> InlineKeyboardMarkup:
-    label, target = ("Turn off", "off") if reminders_on else ("Turn on", "on")
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(f"🔔 {label} reminders", callback_data=f"set:reminders:{target}")]]
     )
 
 

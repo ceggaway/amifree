@@ -48,6 +48,7 @@ from app.services.date_resolution import Clarification
 from app.services.group_hub import NotFound, Refused
 from app.services.quick_blocks import MAX_RULES, describe, parse_block
 from app.services.ratelimit import RateLimiter
+from app.services.scheduling import all_reminders
 
 PLAN_STATUSES = [Status.SAVED, Status.GOING, Status.MAYBE]
 EDITABLE = ("title", "start_at", "end_at", "location", "notes")
@@ -189,7 +190,7 @@ def build_router(settings: Settings) -> APIRouter:
         calendars = await service_of(request).repo.list_calendars(user.id)
         return {
             "telegram_user_id": user.telegram_user_id,
-            "reminders_enabled": user.reminders_enabled,
+            "reminders_enabled": any(getattr(user, field) for field in all_reminders(True)),
             "nusmods": {
                 "connected": user.onboarding_status == "READY",
                 "academic_year": user.academic_year,
@@ -211,7 +212,8 @@ def build_router(settings: Settings) -> APIRouter:
     @router.patch("/me")
     async def update_settings(body: SettingsPatch, request: Request, user: CurrentUser):
         service = service_of(request)
-        await service.repo.set_user_flags(user.id, reminders_enabled=body.reminders_enabled)
+        # Compatibility switch for personal reminders only; group delivery is independent.
+        await service.repo.set_user_flags(user.id, **all_reminders(body.reminders_enabled))
         return {"reminders_enabled": body.reminders_enabled}
 
     async def plans_between(service, user, start, end):

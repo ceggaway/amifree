@@ -47,7 +47,7 @@ async def test_organiser_nudge_reaches_only_silent_members_once(service_factory)
         assert sorted(telegram_id for telegram_id, _ in outbox.sent) == [3, 4]
         text = outbox.sent[0][1]
         assert "waiting for your answer" in text and "CCA dinner" in text
-        assert "✅ No clashes found" in text and "/reminders off" in text
+        assert "✅ No clashes found" in text and "/reminders off" not in text
         await bot.process_update(
             Update.de_json(group_tap(taps["Nudge"], 1, update_id=9102), bot.bot)
         )
@@ -63,10 +63,10 @@ async def test_organiser_nudge_reaches_only_silent_members_once(service_factory)
     assert len([e for e in repo.events.values() if e.group_event_id]) == 2
 
 
-async def test_nudges_respect_opt_out_and_late_answers(service_factory):
+async def test_nudges_respect_blocked_dms_and_late_answers(service_factory):
     service, repo = service_factory(extraction())
     bot, transport, outbox, taps, event = await card_with_lurkers(service, repo, lurkers=(3, 4, 5))
-    await service.command(3, "reminders", "off")
+    await repo.set_user_flags((await repo.ensure_user(3)).id, dm_blocked=True)
     # Member 4 answers after the nudge is queued but before it is sent.
     # The opted-out member is never attempted, so only two sends fail on the first pass.
     outbox.errors = [TimeoutError(), TimeoutError()]
@@ -89,6 +89,7 @@ async def test_automatic_chase_after_a_day(service_factory, reference):
     stored.created_at = reference
     service.clock = lambda: reference + timedelta(hours=1)
     assert (await service.notifier.run())["queued"] == 0
+
     service.clock = lambda: reference + timedelta(hours=25)
     assert await service.notifier.run() == {"queued": 2, "sent": 2, "failed": 0, "skipped": 0}
     assert await service.notifier.run() == {"queued": 0, "sent": 0, "failed": 0, "skipped": 0}
@@ -97,6 +98,19 @@ async def test_automatic_chase_after_a_day(service_factory, reference):
     repo.notifications.clear()
     service.clock = lambda: reference + timedelta(days=7)
     assert (await service.notifier.run())["queued"] == 0
+
+
+async def test_personal_reminder_preferences_do_not_disable_group_nudges(service_factory):
+    service, repo = service_factory(extraction())
+    bot, transport, outbox, taps, event = await card_with_lurkers(service, repo)
+    await service.command(3, "reminders", "off")
+    # Legacy opt-outs are not a personal setting for group coordination either.
+    await repo.set_user_flags((await repo.ensure_user(4)).id, reminders_enabled=False)
+    async with bot:
+        await bot.process_update(
+            Update.de_json(group_tap(taps["Nudge"], 1, update_id=9299), bot.bot)
+        )
+    assert sorted(telegram_id for telegram_id, _ in outbox.sent) == [3, 4]
 
 
 async def test_poll_nudges_members_who_have_not_filled_in(service_factory, reference):

@@ -63,17 +63,19 @@ def test_change_wording():
     }
     later = before | {"start_at": "2026-10-09T12:00:00+00:00", "end_at": "2026-10-09T14:00:00Z"}
     assert describe_change(before, later) == (
-        "Dinner changed: Fri 9 Oct 7pm–9pm → 8pm–10pm; venue unchanged"
+        "Dinner changed: 📅 09/10/2026 (Fri) 7pm–9pm → 8pm–10pm; venue unchanged"
     )
     moved = before | {
         "start_at": "2026-10-10T19:30:00+08:00",
         "end_at": "2026-10-10T21:00:00+08:00",
     }
-    assert "Fri 9 Oct 7pm–9pm → Sat 10 Oct 7:30pm–9pm" in describe_change(before, moved)
+    assert "📅 09/10/2026 (Fri) 7pm–9pm → 📅 10/10/2026 (Sat) 7:30pm–9pm" in describe_change(
+        before, moved
+    )
     venue = describe_change(before, before | {"location": "Clementi", "title": "Supper"})
     assert venue == "Supper changed: renamed from Dinner; time unchanged; venue Vivo → Clementi"
     assert describe_change(before, before, True) == (
-        "Dinner (Fri 9 Oct 7pm–9pm) was cancelled by the organiser."
+        "Dinner (📅 09/10/2026 (Fri) 7pm–9pm) was cancelled by the organiser."
     )
 
 
@@ -101,7 +103,9 @@ async def test_edit_once_alerts_savers_only_and_once(service_factory, reference)
     told = sorted(telegram_id for telegram_id, _ in outbox.sent)
     assert told == [2, 3]
     text = outbox.sent[0][1]
-    assert text.startswith("CCA dinner changed: Fri 9 Oct 7pm–9pm → 8pm–10pm; venue unchanged")
+    assert text.startswith(
+        "CCA dinner changed: 📅 09/10/2026 (Fri) 7pm–9pm → 8pm–10pm; venue unchanged"
+    )
     assert "✅ No clashes found" in text
     # Every member's own plan moved, and the shared card was re-rendered.
     assert all(e.start_at.hour == 20 for e in repo.events.values() if e.group_event_id)
@@ -160,8 +164,7 @@ async def test_organiser_cancels_for_everyone(service_factory):
     assert outbox.sent == [
         (
             2,
-            "CCA dinner (Fri 9 Oct 7pm–9pm) was cancelled by the organiser."
-            "\n\nIf you added it to your calendar, delete it there too.",
+            "CCA dinner (📅 09/10/2026 (Fri) 7pm–9pm) was cancelled by the organiser.\n\nIf you added it to your calendar, delete it there too.",
         )
     ]
     linked = [e for e in repo.events.values() if e.group_event_id]
@@ -224,6 +227,14 @@ async def two_plans_tomorrow(service_factory, reference, **settings):
     await service.message(1, 4, "Movie Monday 22:00 23:00", reference)
     movie = next(e for e in repo.events.values() if e.title == "Movie")
     await repo.save(movie.user_id, movie)
+    user = await repo.ensure_user(1)
+    await repo.set_user_flags(
+        user.id,
+        overview_period="evening",
+        overview_evening_minute=settings.get("nightly_hour", 20) * 60,
+    )
+    for event in repo.events.values():
+        event.created_at = reference
     return service, repo, outbox
 
 
@@ -238,9 +249,9 @@ async def test_two_plans_tomorrow_make_one_nightly_message(service_factory, refe
     ((telegram_id, text),) = outbox.sent
     assert telegram_id == 1
     assert text.startswith(
-        "Tomorrow, Mon 5 Oct:\n<b>Lunch</b>\n📅 5 Oct 2026 (Monday) · 12PM–1PM SGT\n📍 Vivo"
+        "🌤 <b>Daily overview</b>\n\nTomorrow · 📅 05/10/2026 (Mon)\n\n<b>Lunch</b>\n📅 05/10/2026 (Mon) · 12PM–1PM SGT\n📍 Vivo"
     )
-    assert "Still undecided: Movie" in text
+    assert "<b>Movie</b>" in text
     # Repeating the job the same night, or just after midnight, sends nothing more.
     at(service, 23)
     assert (await service.notifier.run())["sent"] == 0
@@ -263,7 +274,8 @@ async def test_reminder_opt_out_and_cancelled_plans(service_factory, reference):
     assert "Reminders are on" in (await service.command(1, "reminders"))[0].text
     assert "are off" in (await service.command(1, "reminders", "off"))[0].text
     at(service, 18)
-    assert (await service.notifier.run())["skipped"] == 1 and outbox.sent == []
+    # Turned off: nothing is even queued.
+    assert (await service.notifier.run())["queued"] == 0 and outbox.sent == []
     # A second user's only plan is declined after the summary was queued.
     service.extractor.items.append(
         extraction(title="Run", date_text="Monday", start_time_text="07:00", end_time_text="08:00")
@@ -272,6 +284,12 @@ async def test_reminder_opt_out_and_cancelled_plans(service_factory, reference):
     going = await service.callback(2, card.keyboard.inline_keyboard[0][0].callback_data)
     from app.services.reminders import enqueue_nightly
 
+    second_user = await repo.ensure_user(2)
+    await repo.set_user_flags(
+        second_user.id, overview_period="evening", overview_evening_minute=18 * 60
+    )
+    for e in repo.events.values():
+        e.created_at = reference
     assert await enqueue_nightly(repo, service.clock(), 18) == 1
     await service.callback(2, tap(going[0], "Remove from plans"))
     assert (await service.notifier.run())["skipped"] == 1 and outbox.sent == []

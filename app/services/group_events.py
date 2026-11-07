@@ -23,6 +23,7 @@ from app.bot.keyboards import (
     series_keyboard,
 )
 from app.bot.messages import Reply, group_card, private_verdict, time_range
+from app.date_display import display_date
 from app.schemas.event import SG, EventDraft, GroupEvent, Status
 from app.services.app_links import group_link
 from app.services.chase import enqueue_nudges
@@ -215,7 +216,7 @@ class GroupEventService:
         if first_event.message_id:
             return GroupResult()  # a retried delivery
         note = (
-            f"🔁 {len(days)} sessions, every {recurrence.label()} until {days[-1]:%a %-d %b}."
+            f"🔁 {len(days)} sessions, every {recurrence.label()} until {display_date(days[-1])}."
             " Each session's card is posted a few days before it."
         )
         card = await self.render(first_event)
@@ -309,7 +310,7 @@ class GroupEventService:
             await self.summarise_series_change(
                 series.id,
                 keys,
-                f"❌ {event.title}: all sessions after {event.start_at:%a %-d %b} are cancelled."
+                f"❌ {event.title}: all sessions after {display_date(event.start_at)} are cancelled."
                 " If you added them to your calendar, delete them there too.",
             )
             return [Reply(f"Series stopped. {len(keys)} later session(s) cancelled.")]
@@ -363,7 +364,7 @@ class GroupEventService:
         await self.summarise_series_change(
             series.id,
             keys,
-            f"🔔 {event.title} changed from {event.start_at:%a %-d %b} on: now"
+            f"🔔 {event.title} changed from {display_date(event.start_at)} on: now"
             f" {time_range(event.start_at, event.end_at)}{where}. Check /plans for each session.",
         )
         return [
@@ -457,7 +458,7 @@ class GroupEventService:
             return [Reply("That check isn't available any more.")]
         if self.is_ended(event):
             return [Reply(ENDED)]
-        when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+        when = f"{display_date(event.start_at)}, {time_range(event.start_at, event.end_at)}"
         if parts[1] == "y":
             if linked.status != Status.GOING:
                 await self.repo.group_rsvp(user.id, event, Status.GOING)
@@ -648,7 +649,7 @@ class GroupEventService:
 
     async def attendance_panel(self, event: GroupEvent, page: int = 0) -> Reply:
         people, labels, present = await self.people_for(event)
-        when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+        when = f"{display_date(event.start_at)}, {time_range(event.start_at, event.end_at)}"
         if not people:
             return Reply(f"{event.title} · {when}\nNobody has answered or checked in yet.")
         pages = max(1, -(-len(people) // 16))
@@ -735,7 +736,7 @@ class GroupEventService:
         event = await self.repo.get_group_event(event_id) if event_id else None
         if not event or event.creator_user_id != user.id:
             return [Reply("Only the organiser can manage that event.")]
-        when = f"{event.start_at:%a %-d %b}, {time_range(event.start_at, event.end_at)}"
+        when = f"{display_date(event.start_at)}, {time_range(event.start_at, event.end_at)}"
         state = (
             "This event was cancelled." if event.status != "ACTIVE" else "What do you want to do?"
         )
@@ -769,8 +770,8 @@ class GroupEventService:
         if not queued:
             return "Nobody left to nudge. Each member is nudged at most once per card."
         return (
-            f"Nudging {queued} member{'s' if queued != 1 else ''} privately. People who have"
-            " never used AmIFree in this group, or turned reminders off, aren't messaged."
+            f"Nudging {queued} member{'s' if queued != 1 else ''} privately. Only members who"
+            " have used AmIFree in this group and can receive bot messages can be reached."
         )
 
     async def from_private(self, telegram_id: int, data: str) -> list[Reply]:

@@ -1104,3 +1104,96 @@ grant all on public.feedback to service_role;
 insert into public.schema_migrations(version,name) values (16,'feedback')
 on conflict (version) do nothing;
 commit;
+
+-- ===== 017_calendar_feed_app.sql =====
+-- Apply once after 016; safe to reapply. Which calendar app subscribed to the AmIFree calendar
+-- (from its fetches), so /calendar can list it under Apple, Outlook or Google.
+begin;
+alter table public.users add column if not exists calendar_feed_app text
+  check (calendar_feed_app is null or calendar_feed_app in ('apple','outlook','google'));
+
+insert into public.schema_migrations(version,name) values (17,'calendar_feed_app')
+on conflict (version) do nothing;
+commit;
+
+-- ===== 018_reminder_settings.sql =====
+-- Apply once after 017; safe to reapply. Separate switches for the evening summary (and its
+-- hour) and deadline reminders. reminders_enabled now covers group check-ins and nudges only;
+-- anyone who had turned it off keeps everything off.
+begin;
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'users' and column_name = 'deadline_alerts'
+  ) then
+    alter table public.users add column summary_enabled boolean not null default true;
+    alter table public.users add column summary_hour smallint
+      check (summary_hour is null or summary_hour between 18 and 23);
+    alter table public.users add column deadline_alerts boolean not null default true;
+    update public.users set summary_enabled = false, deadline_alerts = false
+      where not reminders_enabled;
+  end if;
+end $$;
+
+insert into public.schema_migrations(version,name) values (18,'reminder_settings')
+on conflict (version) do nothing;
+commit;
+
+-- ===== 019_morning_list.sql =====
+-- Apply once after 018; safe to reapply. Its own switch for the 9am Today list, which now also
+-- lists the day's plans. deadline_alerts keeps the 3-hours-before alert; whoever had deadline
+-- reminders off keeps the morning list off too.
+begin;
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'users' and column_name = 'morning_enabled'
+  ) then
+    alter table public.users add column morning_enabled boolean not null default true;
+    update public.users set morning_enabled = false where not deadline_alerts;
+  end if;
+end $$;
+
+insert into public.schema_migrations(version,name) values (19,'morning_list')
+on conflict (version) do nothing;
+commit;
+
+-- ===== 020_personal_reminder_preferences.sql =====
+-- Apply after 019; safe to reapply. Personal reminder timing preferences.
+-- Apply after 019. Reapplying retains saved preferences and never re-enables a reminder.
+begin;
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='users' and column_name='overview_enabled'
+  ) then
+    alter table public.users
+      add column overview_enabled boolean not null default true,
+      add column overview_period text not null default 'morning'
+        check (overview_period in ('morning','evening')),
+      add column overview_morning_minute smallint not null default 540
+        check (overview_morning_minute between 0 and 719),
+      add column overview_evening_minute smallint not null default 1260
+        check (overview_evening_minute between 1080 and 1439),
+      add column deadline_lead_minutes integer not null default 180
+        check (deadline_lead_minutes between 1 and 43200);
+    update public.users set
+      overview_enabled = summary_enabled or morning_enabled,
+      overview_period = case when morning_enabled then 'morning' else 'evening' end,
+      overview_evening_minute = coalesce(summary_hour * 60, 1260);
+    -- A morning overview already delivered today must not be sent again after switching.
+    insert into public.notification_logs(user_id,kind,dedupe_key,payload,status,sent_at)
+      select user_id,'NIGHTLY',dedupe_key,payload,'sent',sent_at
+      from public.notification_logs where kind='TODAY' and status='sent'
+      on conflict(user_id,kind,dedupe_key) do nothing;
+    -- Retire queued legacy summaries: the scheduler rebuilds them from current preferences.
+    delete from public.notification_logs
+      where kind in ('TODAY','NIGHTLY') and status in ('pending','sending');
+  end if;
+end $$;
+insert into public.schema_migrations(version,name) values (20,'personal_reminder_preferences')
+on conflict(version) do nothing;
+commit;

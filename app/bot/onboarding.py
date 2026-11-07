@@ -5,42 +5,74 @@ Every screen edits the same message, so setup never floods the chat (ux-flows.md
 
 import base64
 import html
+import json
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.site_pages import SITE_CSS
+
 NUSMODS_URL = "https://nusmods.com/timetable"
+# academic-calendar.json's semester keys -> NUSMods' timetable pages.
+NUSMODS_PAGES = {"1": "sem-1", "2": "sem-2", "3": "st-i", "4": "st-ii"}
+
+
+def nusmods_url(today: date | None = None) -> str:
+    """The timetable page of the semester running now (or starting within two weeks), so
+    nobody has to pick it; the plain timetable page when the calendar doesn't know."""
+    from app.schemas.event import SG
+    from app.services.nusmods import CALENDAR
+
+    today = today or datetime.now(SG).date()
+    best = None
+    for year in CALENDAR.values():
+        for key, sem in year.items():
+            start = date(*sem["start"])
+            if start - timedelta(days=14) <= today and (best is None or start > best[0]):
+                best = (start, key)
+    if best is None or best[1] not in NUSMODS_PAGES:
+        return NUSMODS_URL
+    return f"{NUSMODS_URL}/{NUSMODS_PAGES[best[1]]}"
+
 
 EVERYDAY_HELP = (
-    "📋 <b>My plans</b> · /plans — see upcoming events and deadlines you’ve saved with me.\n\n"
-    "📌 <b>Deadlines</b> · /deadline — save or forward a due date and get reminders before it’s due. "
-    "Try “Report due Fri 11:59pm”.\n\n"
-    "💬 <b>Feedback</b> · /feedback — If you run into any issues or have suggestions, send us feedback using /feedback. You can send it anonymously or with your @handle"
+    "<b>What would you like to do?</b>\n"
+    "📋 <b>My plans</b> · /plans — View saved events and deadlines.\n"
+    "🕒 <b>Am I free?</b> · /free — Check when you’re available.\n"
+    "📌 <b>Deadlines</b> · /deadline — Save a deadline and get reminders.\n"
+    "⚙️ <b>Settings</b> · /settings — Personalise your reminders.\n\n"
+    "To add an event, send its details, forward a message or photo, or send a voice message."
 )
 
+# Short on purpose: one thing to do (try it), and the privacy promise next to the buttons
+# that ask for a calendar. Everything else is in /help or shows up when it's relevant.
 WELCOME = (
-    "👋 <b>Hi! I’m AmIFree, your Telegram planning assistant.</b> Send me an event to check "
-    "if you’re free, then save it with me to sync it to your connected personal calendar ✨\n\n"
-    "📅 <b>1. Connect your schedule</b>\n"
-    "Connect your <b>personal calendar</b> so I can check for clashes with existing events. "
-    "If your classes aren’t included, I’ll help you connect your NUSMods timetable separately.\n\n"
-    "📩 <b>2. Send me a plan</b>\n"
-    "Forward an event message or 📸 photo, ✍️ type the details, or 🎙 <b>send a voice note</b> "
-    "like “Dinner Friday 7 to 9pm at Vivo”. I’ll show "
-    "<b>whether you’re free</b> ✅ <b>or have any clashes</b> ⚠️\n\n"
-    "📌 Got a deadline? Forward or type it, like “Report due Fri 11:59pm”, and I’ll "
-    "<b>remind you before it’s due</b>. See them all with /deadline.\n\n"
-    "👆 <b>3. Save with a tap</b>\n"
-    "Tap <b>Add to plans</b> to save the event. With calendar syncing enabled, I’ll "
-    "<b>automatically add it to your personal calendar</b> 🗓\n\n"
-    "💡 See /help for all features and instructions.\n\n"
-    "💬 <b>We’d love to hear from you.</b> Hit a problem, or have an idea to make AmIFree "
-    "more convenient for every student? Tell us with /feedback.\n\n"
-    "🔒 <b>Your privacy matters.</b> I only check your calendar’s busy times, not event "
-    "details. I never read your group chats.\n\n"
-    "👇 Choose <b>Connect personal calendar</b> to include your existing schedule, or "
-    "<b>Skip calendar setup</b> to try the bot first."
+    "👋 <b>Hi! I’m AmIFree.</b> I check if you’re free for plans people send you, and save "
+    "them for you.\n\n"
+    "📩 <b>Try it:</b> forward me any message with a plan, send a 📸 photo or 🎙 voice note, "
+    "or tap <b>Try an example</b> to see what I do.\n\n"
+    "🔒 I only see when you’re busy, never your event names or details. I never read your "
+    "group chats.\n\n"
+    "💡 Everything else I can do: /help"
+)
+
+# The example: a friend's message, and the card it would get against a made-up timetable.
+# People copy it and send it, so it spells out pm: a bare "12 to 1:30" is asked about.
+DEMO_MESSAGE = "Lunch at Fine Food on Wed, 12pm to 1:30pm? 🍜"
+DEMO_OUTRO = (
+    "<i>This example uses a made-up timetable, and nothing was saved.</i>\n\n"
+    "👉 Connect your calendar so I can catch your real clashes, or forward me a message of "
+    "your own."
+)
+# The second example, a deadline. Sent as is, it saves the same deadline (test_onboarding).
+DEADLINE_DEMO_MESSAGE = "CS3244 report due Fri 11:59pm"
+DEADLINE_DEMO_OUTRO = (
+    "⏰ I’ll remind you 3 hours before it’s due. Customise your deadline alerts in /settings.\n\n"
+    "📅 With your calendar connected (Google or Apple), it shows up there too, as "
+    "“Due: CS3244 report”.\n\n"
+    "<i>This is an example, and nothing was saved.</i>"
 )
 
 PICK_CALENDAR = (
@@ -70,6 +102,12 @@ CALENDAR_PROMPT = (
     "📅 Want plans like this on your calendar automatically?\n"
     "I'll also warn you about clashes and help your groups find a free time."
 )
+# The same ask when nothing is connected yet, so it says what that plan wasn't checked against.
+CALENDAR_PROMPT_UNCHECKED = (
+    "📅 I could only check this against plans you've saved with me. Connect your calendar "
+    "and I'll catch clashes with your classes and other events too, and add your plans "
+    "there automatically."
+)
 # Added to the third and final ask, so stopping is said, not silent.
 LAST_CALENDAR_ASK = (
     "This is the last time I'll ask. You can connect a calendar any time in /calendar, "
@@ -98,13 +136,14 @@ GUIDES = {
         "📚 <b>Connect your NUSMods timetable</b>\n"
         "I’ll check for clashes with your classes and exams.\n\n"
         "<b>1. Open your timetable</b>\n"
-        "Tap <b>Open NUSMods</b> below and select the correct semester.\n\n"
-        "<b>2. Check your classes</b>\n"
-        "Make sure you’ve selected all your lectures, tutorials and labs.\n\n"
-        "<b>3. Copy the link</b>\n"
+        "Tap <b>Open NUSMods</b> below. It opens this semester. Check that all your "
+        "lectures, tutorials and labs are there.\n\n"
+        "<b>2. Copy the link</b>\n"
         "Tap <b>Share/Sync</b>, then <b>Copy link</b>.\n\n"
-        "<b>4. Send it here</b>\n"
+        "<b>3. Send it here</b>\n"
         "Paste the link into this chat and send it.\n\n"
+        "📱 Timetable looks empty? NUSMods keeps it in the browser you made it in. Open "
+        "nusmods.com there instead (often Safari or Chrome).\n\n"
         "Timetable changed? Send me the updated link."
     ),
     "ios": (
@@ -122,7 +161,7 @@ GUIDES = {
         "Calendar switch, is from Google or Outlook — use that guide instead.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
         "it here. I keep just your busy times.\n\n"
-        "🗂 Several iCloud calendars (Classes, CCA, Events)? Add each one's link." + PASTE_NEXT
+        "🗂 More than one calendar (Classes, CCA)? Paste each link one by one, up to 5." + PASTE_NEXT
     ),
     "mac": (
         "💻 <b>Mac · iCloud Calendar</b> · about 1 minute\n"
@@ -140,7 +179,7 @@ GUIDES = {
         "Calendar box, is from Google or Outlook — use that guide instead.\n\n"
         "🔒 Anyone with the link can see that calendar, including event names, so only paste "
         "it here. I keep just your busy times.\n\n"
-        "🗂 Several iCloud calendars? Add each one's link." + PASTE_NEXT
+        "🗂 More than one calendar? Paste each link one by one, up to 5." + PASTE_NEXT
     ),
     "google": (
         "📅 <b>Google Calendar · read only</b> · about 1 minute\n"
@@ -168,24 +207,50 @@ OUTLOOK_PART1_DONE = (
     "calendar there."
 )
 
-APPLE_PART1 = (
-    "🍎 <b>Apple Calendar · Part 1 of 2</b>\n"
-    "<b>Add your plans to your calendar automatically</b>\n\n"
-    "Every event you save with me will show up in your calendar by itself, and update if it "
-    "changes. No more adding them by hand.\n\n"
-    "<b>1.</b> Tap <b>Add to Calendar</b> below, then tap <b>Subscribe</b>. A calendar called "
-    "<b>AmIFree</b> appears.\n\n"
-    "<b>2.</b> Make changes show up faster:\n"
-    "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → "
-    "<b>Every 15 Minutes</b> (the fastest an iPhone allows)\n"
-    "• Mac: in Calendar, right-click AmIFree → Get Info → Auto-refresh → "
-    "<b>Every 5 minutes</b>\n\n"
-    "I'll message you here once your calendar has subscribed, then we'll do part 2."
-)
-APPLE_ALREADY_GOOGLE = (
-    "\n\nℹ️ Your plans already go to your Google Calendar. If that's the calendar on your "
-    "iPhone, you don't need this part: they'd show up twice."
-)
+
+def apple_part1(google: bool = False, again: bool = False) -> tuple[str, bytes | None]:
+    """Apple part 1: subscribe, then set the refresh time (the picture shows it on a Mac).
+    With Google connected, Google already gives busy times, so there's no part 2. again: part 1
+    once more, on another device (a subscription made on an iPhone stays on that iPhone)."""
+    if again:
+        header = (
+            "🍎 <b>Apple Calendar · Another device</b>\n<b>Your plans on this device too</b>\n\n"
+            "Open this chat on the device you're adding (like your Mac), then:\n\n"
+        )
+    elif google:
+        header = "🍎 <b>Apple Calendar</b>\n<b>Your plans in your calendar, automatically</b>\n\n"
+    else:
+        header = (
+            "🍎 <b>Apple Calendar · Part 1 of 2</b>\n"
+            "<b>Your plans in your calendar, automatically</b>\n\n"
+        )
+    text = (
+        header + "<b>1.</b> Tap <b>Add to Calendar</b> below, then <b>Subscribe</b>.\n\n"
+        "<b>2.</b> Remember to set <b>Auto-refresh</b> to <b>Every 5 minutes</b>.\n\n"
+    )
+    if again:
+        text += (
+            "ℹ️ Subscribed on a Mac with <b>Location: iCloud</b>? It's already on your iPhone "
+            "and iPad, so don't add it there twice."
+        )
+    elif google:
+        text += (
+            "I'll message you once it's subscribed. That's all: Google already tells me when "
+            "you're busy.\n\n"
+            "ℹ️ If Google is the calendar on your iPhone, skip this. Your plans are already "
+            "there, and they'd show up twice."
+        )
+    else:
+        text += "I'll message you once it's subscribed, then we'll do part 2."
+    try:
+        photo = (
+            Path(__file__).resolve().parent.parent / "assets" / "ios" / "mac_refresh.png"
+        ).read_bytes()
+    except OSError:
+        photo = None
+    return text, photo
+
+
 APPLE_NO_FEED = (
     "🍎 <b>Apple Calendar</b>\n\n"
     "Adding plans to your calendar by themselves isn't available yet, so tap 🍎 on a plan to "
@@ -204,6 +269,35 @@ FEED_REFRESH_TIP = (
     "• iPhone: Settings → Apps → Calendar → Calendar Accounts → Fetch New Data → Every 15 "
     "Minutes (the fastest an iPhone allows)"
 )
+# After the first sync, by the device that synced: a subscription made on an iPhone stays on
+# that iPhone, and one made on a Mac reaches the iPhone only if it was saved to iCloud.
+APPLE_OTHER_DEVICE = {
+    "iphone": (
+        "📱 It's on this iPhone. Use a Mac too? Add it there once: open this chat on your Mac "
+        "and tap <b>➕ Add my plans on another device</b>."
+    ),
+    "mac": (
+        "💻 It's on your Mac. Saved it to <b>iCloud</b>? It's on your iPhone too. Chose "
+        "<b>On My Mac</b>? Add it on your iPhone too: tap <b>➕ Add my plans on another "
+        "device</b> there."
+    ),
+}
+
+
+def apple_device(user_agent: str) -> str | None:
+    """ "iphone" or "mac": which Apple device fetched the AmIFree calendar."""
+    agent = user_agent.lower()
+    if "ios/" in agent or "iphone" in agent or "ipad" in agent:
+        return "iphone"
+    if "macos/" in agent or "mac os x" in agent or "calendaragent" in agent:
+        return "mac"
+    return None
+
+
+def another_device_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[_button("➕ Add my plans on another device", "apple1")]])
+
+
 APPLE_ALL_SET = (
     "✅ <b>All set</b>\n"
     "• Your plans appear in your AmIFree calendar\n"
@@ -235,8 +329,8 @@ APPLE_STEPS = {
         (
             "ios_step4.png",
             "Tap <b>Share Link…</b>, then <b>Copy</b>.\n\n"
-            "👇 <b>Paste the link here.</b> It starts with <code>webcal://</code>.\n"
-            "Several iCloud calendars (Classes, CCA)? Send each one's link.",
+            "👇 <b>Paste the link here.</b> It starts with <code>webcal://</code>.\n\n"
+            "🗂 More than one calendar (Classes, CCA)? Paste each link one by one, up to 5.",
         ),
     ),
     "mac": (
@@ -253,7 +347,8 @@ APPLE_STEPS = {
             "<b>Done</b>.\n\n"
             "👇 <b>Paste the link here.</b> It starts with <code>webcal://</code>.\n"
             "🔒 Anyone with the link can see that calendar, so only paste it here. I keep just "
-            "your busy times.",
+            "your busy times.\n\n"
+            "🗂 More than one calendar (Classes, CCA)? Paste each link one by one, up to 5.",
         ),
     ),
 }
@@ -261,9 +356,10 @@ GOOGLE_HINT = {("ios", 2), ("mac", 1)}
 
 
 def apple_step(
-    device: str = "ios", n: int = 1, lead: str = ""
+    device: str = "ios", n: int = 1, lead: str = "", another: bool = False
 ) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
-    """One step of Apple part 2: its text, its picture (None if it can't be read), buttons."""
+    """One step of Apple part 2: its text, its picture (None if it can't be read), buttons.
+    another: part 1 is done on some device, so offer it on another one (step 1 only)."""
     steps = APPLE_STEPS[device]
     picture, body = steps[n - 1]
     where = "On a Mac · " if device == "mac" else ""
@@ -291,6 +387,8 @@ def apple_step(
         )
     if (device, n) in GOOGLE_HINT:
         rows.append([_button("📅 Mine's Google", "google")])
+    if another and n == 1:
+        rows.append([_button("➕ Add my plans on another device", "apple1")])
     rows.append([_button("⏭ Skip this part", "appleskip")])
     return text, photo, InlineKeyboardMarkup(rows)
 
@@ -397,12 +495,65 @@ def _button(label: str, screen: str) -> InlineKeyboardButton:
 def welcome_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [
-                _button("📅 Connect personal calendar", "calendar"),
-                _button("Skip calendar setup", "skip"),
-            ],
+            [_button("▶️ Try an example", "demo"), _button("📅 Connect calendar", "calendar")],
         ]
     )
+
+
+def demo_screen(today: date) -> tuple[str, InlineKeyboardMarkup]:
+    """The example card for the coming Wednesday, clashing with a made-up lecture.
+
+    Built from the real card parts so it looks like what people will get, but it's never
+    stored: no event, no plan, no buttons that act on one."""
+    from app.bot.messages import personal_availability, personal_details
+    from app.models.timetable import BusyBlock
+    from app.schemas.event import SG, EventDraft
+    from app.services.availability import Availability
+
+    day = today + timedelta(days=(2 - today.weekday()) % 7 or 7)
+
+    def at(hour: int, minute: int = 0) -> datetime:
+        return datetime.combine(day, time(hour, minute), SG)
+
+    plan = EventDraft(title="Lunch", start_at=at(12), end_at=at(13, 30), location="Fine Food")
+    lecture = BusyBlock(title="CS1231S Lecture", start_at=at(10), end_at=at(12, 30))
+    card = personal_availability(Availability(conflicts=(lecture,), candidate=plan))
+    card += "\n\n" + personal_details(plan)
+    text = (
+        "▶️ <b>Example</b>\n\nSay a friend sends you this:\n"
+        f"<blockquote>{html.escape(DEMO_MESSAGE)}</blockquote>\n\n"
+        f"I’d reply:\n\n{card}\n\n{DEMO_OUTRO}"
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [_button("📌 Next: a deadline", "demo2")],
+            [_button("📅 Connect calendar", "calendar")],
+            [_button("📩 Try my own message", "skip"), _button("« Back", "home")],
+        ]
+    )
+    return text, keyboard
+
+
+def deadline_demo_screen(now: datetime) -> tuple[str, InlineKeyboardMarkup]:
+    """The second example: a deadline due the coming Friday, as its card would show it."""
+    from app.schemas.event import SG
+    from app.services.deadlines import when
+
+    today = now.astimezone(SG).date()
+    day = today + timedelta(days=(4 - today.weekday()) % 7 or 7)
+    due = datetime.combine(day, time(23, 59), SG)
+    text = (
+        "📌 <b>Example 2: a deadline</b>\n\nSay your prof posts:\n"
+        f"<blockquote>{html.escape(DEADLINE_DEMO_MESSAGE)}</blockquote>\n\n"
+        f"I’d save it:\n\n📌 <b>CS3244 report</b>\nDue {when(due, now)}\n\n" + DEADLINE_DEMO_OUTRO
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [_button("📅 Connect calendar", "calendar")],
+            [_button("📩 Try my own message", "skip"), _button("« Back", "demo")],
+        ]
+    )
+    return text, keyboard
 
 
 def classes_keyboard() -> InlineKeyboardMarkup:
@@ -488,18 +639,20 @@ OUTLOOK_STEPS = {
         "🔒 Keep the link private: anyone with it can see your plans.",
     ),
     2: (
-        "In Outlook on the web, click <b>Settings ⚙️</b> at the top right.\n\n"
-        "Then go to <b>Calendar</b> → <b>Shared calendars</b>.",
-        "Under <b>Publish a calendar</b>, pick your calendar.\n\n"
-        "Next to it, choose <b>Can view when I'm busy</b>. That shares only when you're busy, "
-        "never titles or places, and it's all I need.\n\n"
+        "👇 <b>Tap your Outlook below.</b> It opens <b>Shared calendars</b> in Outlook's "
+        "settings. Sign in if asked.\n\n"
+        "Under <b>Publish a calendar</b>, pick your calendar. Next to it, choose <b>Can view "
+        "when I'm busy</b>. That shares only when you're busy, never titles or places, and "
+        "it's all I need.\n\n"
+        "Button didn't open it? In Outlook on the web: <b>Settings ⚙️</b> → <b>Calendar</b> → "
+        "<b>Shared calendars</b>.\n\n"
         "⚠️ No <b>Publish a calendar</b> section? Your school or company has turned it off, so "
         "I can't read that calendar yet.",
         "Click <b>Publish</b>. Two links appear: <b>HTML</b> and <b>ICS</b>.\n\n"
         "Click the <b>ICS</b> link, then <b>Copy link</b>.",
         "👇 <b>Paste the link into this chat.</b>\n\n"
         "✅ You'll know it's right: it ends in <code>.ics</code>.\n\n"
-        "🗂 Several calendars (Class, CCA)? Repeat steps 2 to 4 for each one and send each "
+        "🗂 Several calendars (Class, CCA)? Repeat steps 1 to 3 for each one and send each "
         "link.\n\n"
         "Stuck? Setup is optional — forward me a plan any time.",
     ),
@@ -510,9 +663,8 @@ OUTLOOK_STEPS = {
 OUTLOOK_PICTURES = {
     (1, 1): "subscribe_import.png",
     (1, 2): "add_by_hand.png",
-    (2, 1): "shared_calendars.png",
-    (2, 2): "publish_busy.png",
-    (2, 3): "publish_ics.png",
+    (2, 1): "publish_busy.png",
+    (2, 2): "publish_ics.png",
 }
 
 
@@ -558,13 +710,29 @@ def outlook_step(
             nav.append(InlineKeyboardButton("Next ›", callback_data=f"o:{part}:{n + 1}"))
         elif part == 1:
             nav.append(InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"))
-        rows = [nav]
+        # Part 2 starts with one tap to Shared calendars, like part 1's subscribe buttons.
+        rows = [*outlook_shared_rows(), nav] if (part, n) == (2, 1) else [nav]
     return text, photo, InlineKeyboardMarkup([*rows, [_button("« Other calendars", "calendar")]])
 
 
 # Outlook on the web's own "Subscribe from web" screen, with the link and name filled in.
 # (The older owa/?path=...&rru=addsubscription link fails with an error for NUS accounts.)
 OUTLOOK_SUBSCRIBE = "https://outlook.{host}.com/calendar/0/addfromweb?url={url}&name=AmIFree"
+
+
+# Outlook on the web's Settings → Calendar → Shared calendars, where Publish a calendar is.
+OUTLOOK_SHARED = "https://outlook.{host}.com/calendar/options/calendar/SharedCalendars"
+
+
+def outlook_shared_rows() -> list[list[InlineKeyboardButton]]:
+    return [
+        [
+            InlineKeyboardButton(
+                "🏫 School / work Outlook ↗", url=OUTLOOK_SHARED.format(host="office")
+            )
+        ],
+        [InlineKeyboardButton("📧 Personal Outlook ↗", url=OUTLOOK_SHARED.format(host="live"))],
+    ]
 
 
 def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
@@ -585,15 +753,17 @@ def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
     ]
 
 
-def apple_part1_keyboard(add_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
-            [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
-            [_button("⏭ Skip to part 2", "apple2")],
-            [_button("« Other calendars", "calendar")],
-        ]
-    )
+def apple_part1_keyboard(
+    add_url: str, part2: bool = True, again: bool = False
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
+        [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
+    ]
+    if part2 and not again:
+        rows.append([_button("⏭ Skip to part 2", "apple2")])
+    rows.append([_button("« Back", "apple") if again else _button("« Other calendars", "calendar")])
+    return InlineKeyboardMarkup(rows)
 
 
 def first_calendar_keyboard(finish_apple: bool = False, feed: bool = False) -> InlineKeyboardMarkup:
@@ -638,123 +808,99 @@ def screen_photos(name: str) -> tuple[bytes, ...]:
 # Google step 1 (sharing), one small part per message, each with the picture of that
 # screen: (picture, short title, what to do). {email} is AmIFree's Google account, in <code>
 # so a tap copies it.
-GOOGLE_STEPS = {
-    "phone": (
-        "google_phone",
-        (
-            (
-                "gphone_step1.png",
-                "Open the menu",
-                "Open the <b>Google Calendar</b> app on your phone and tap <b>☰</b> (top left).",
-            ),
-            ("gphone_step2.png", "Open Settings", "Scroll down and tap <b>Settings</b>."),
-            (
-                "gphone_step3.png",
-                "Choose your calendar",
-                "Tap your calendar (usually <b>My calendar</b>), then tap <b>Shared with</b>.",
-            ),
-            (
-                "gphone_step4.png",
-                "Add AmIFree",
-                "Tap <b>Add people or groups</b> and paste this email (tap it to copy):\n\n"
-                "<code>{email}</code>",
-            ),
-            (
-                "gphone_step5.png",
-                "Let AmIFree add your plans",
-                "Tap the permission under AmIFree and choose\n"
-                "<b>Make changes (see private events as free/busy)</b>\n\n"
-                "Then tap <b>Save</b> (top right).",
-            ),
-        ),
+# Sharing from the Google Calendar phone app, one picture per step (assets/google_phone).
+# On a computer the email comes first instead (google_share_screen).
+GOOGLE_STEPS = (
+    (
+        "gphone_step1.png",
+        "Open the menu",
+        "Open the <b>Google Calendar</b> app on your phone and tap <b>☰</b> (top left).",
     ),
-    "computer": (
-        "google",
-        (
-            (
-                "step1_gear.png",
-                "Open settings",
-                "On a computer, go to <b>calendar.google.com</b> and click the <b>⚙️ gear</b> "
-                "(top right).",
-            ),
-            ("step2_settings.png", "Open Settings", "Click <b>Settings</b>."),
-            (
-                "step3_calendar.png",
-                "Choose your calendar",
-                "Under <b>Settings for my calendars</b> on the left, click your calendar.",
-            ),
-            (
-                "step4_add.png",
-                "Start sharing",
-                "Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.",
-            ),
-            (
-                "step5_dialog.png",
-                "Add AmIFree",
-                "In the box that opens:\n\n"
-                "<b>①</b> Paste this email (tap it to copy):\n<code>{email}</code>\n\n"
-                "<b>②</b> Permission: <b>Make changes (see private events as free/busy)</b>\n\n"
-                "<b>③</b> Click <b>Send</b>.",
-            ),
-        ),
+    ("gphone_step2.png", "Open Settings", "Scroll down and tap <b>Settings</b>."),
+    (
+        "gphone_step3.png",
+        "Choose your calendar",
+        "Tap your calendar (usually <b>My calendar</b>), then tap <b>Shared with</b>.",
     ),
-}
-GOOGLE_STEP1 = "📅 <b>Google Calendar · Step 1 of 3</b>\n<b>Share your calendar with me</b>\n\n"
+    (
+        "gphone_step4.png",
+        "Add AmIFree",
+        "Tap <b>Add people or groups</b> and paste this email (tap it to copy):\n\n"
+        "<code>{email}</code>",
+    ),
+    (
+        "gphone_step5.png",
+        "Let AmIFree add your plans",
+        "Tap the permission under AmIFree and choose\n"
+        "<b>Make changes (see private events as free/busy)</b>\n\n"
+        "Then tap <b>Save</b> (top right).",
+    ),
+)
+# Sharing is the long part, so it alone is counted ("1 of 5"); the email and code that
+# follow say "Almost done" and "Last step" instead of a second count.
+GOOGLE_STEP1 = "📅 <b>Google Calendar · Share your calendar with me</b>\n\n"
 
 
 def google_step(
-    email: str, device: str = "phone", n: int = 1
+    email: str, n: int = 1, computer: bool = True
 ) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
-    """One part of Google step 1: its text, its picture (None if it can't be read), buttons."""
-    folder, steps = GOOGLE_STEPS[device]
-    picture, title, body = steps[n - 1]
+    """One part of sharing on a phone: its text, its picture (None if it can't be read), buttons.
+    computer=False drops "On a computer instead?" when they're known to be on a phone."""
+    picture, title, body = GOOGLE_STEPS[n - 1]
     text = (
         GOOGLE_STEP1
-        + f"<b>{n} of {len(steps)} · {title}</b>\n"
+        + f"<b>{n} of {len(GOOGLE_STEPS)} · {title}</b>\n"
         + body.format(email=html.escape(email))
     )
-    if n == len(steps):
+    if n == len(GOOGLE_STEPS):
         text += (
             "\n\nThen tap <b>Done</b> below.\n\n"
             "🔒 I only read your busy times, and only change events I add."
         )
     try:
-        photo = (Path(__file__).resolve().parent.parent / "assets" / folder / picture).read_bytes()
+        photo = (
+            Path(__file__).resolve().parent.parent / "assets" / "google_phone" / picture
+        ).read_bytes()
     except OSError:
         photo = None
     nav = []
     if n > 1:
-        nav.append(InlineKeyboardButton("‹ Back", callback_data=f"gs:{device}:{n - 1}"))
-    if n < len(steps):
-        nav.append(InlineKeyboardButton("Next ›", callback_data=f"gs:{device}:{n + 1}"))
+        nav.append(InlineKeyboardButton("‹ Back", callback_data=f"gs:phone:{n - 1}"))
+    if n < len(GOOGLE_STEPS):
+        nav.append(InlineKeyboardButton("Next ›", callback_data=f"gs:phone:{n + 1}"))
     rows = [nav] if nav else []
-    if n == len(steps):
+    if n == len(GOOGLE_STEPS):
         rows.insert(0, [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")])
     if n == 1:
-        # Each button opens what its text says. Telegram buttons only take web links, so the
-        # phone one is Google's address, which phones hand to the app when it's installed.
-        label = (
-            "📅 Open Google Calendar app ↗" if device == "phone" else "Open calendar.google.com ↗"
-        )
-        rows.append([InlineKeyboardButton(label, url=GOOGLE_CALENDAR_URL)])
+        # Telegram buttons only take web links, so this is Google's address, which phones
+        # hand to the app when it's installed.
         rows.append(
-            [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
-            if device == "phone"
-            else [InlineKeyboardButton("📱 On my phone instead?", callback_data="gcal:start")]
+            [InlineKeyboardButton("📅 Open Google Calendar app ↗", url=GOOGLE_CALENDAR_URL)]
         )
+        if computer:
+            rows.append(
+                [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
+            )
         rows.append([_button("« Other calendars", "calendar")])
     return text, photo, InlineKeyboardMarkup(rows)
 
 
 GOOGLE_CALENDAR_URL = "https://calendar.google.com"
 GOOGLE_EMAIL_ASK = (
-    "📅 <b>Google Calendar · Step 2 of 3</b>\n<b>What's your Google email?</b>\n\n"
+    "📅 <b>Google Calendar · Almost done</b>\n<b>What's your Google email?</b>\n\n"
     "The one that owns the calendar you just shared. Just type it here, like "
     "<code>you@gmail.com</code>.\n\n/cancel to stop."
 )
 GOOGLE_EMAIL_AGAIN = (
-    "That doesn't look like an email. Type the Google email of the calendar you shared, like "
+    "That doesn't look like an email. Type the Google email your calendar is on, like "
     "you@gmail.com. /cancel to stop."
+)
+# On a computer the email comes first, so the next step can open that calendar's own
+# settings page: no gear, no Settings, no picking the calendar.
+GOOGLE_EMAIL_FIRST = (
+    "📅 <b>Google Calendar</b>\n<b>What's your Google email?</b>\n\n"
+    "The account your calendar is on. Just type it here, like <code>you@gmail.com</code>, "
+    "and I'll open that calendar's sharing settings for you.\n\n/cancel to stop."
 )
 GOOGLE_SHARING_BLOCKED = (
     "\n\nSome school and work accounts block sharing with outside accounts. If that's yours, "
@@ -762,9 +908,53 @@ GOOGLE_SHARING_BLOCKED = (
 )
 
 
+def google_email_first_keyboard() -> InlineKeyboardMarkup:
+    # No phone button here: the email is needed either way, and the next screen offers the
+    # phone steps (and sends a phone there by itself).
+    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
+
+
+def google_share_screen(
+    bot_email: str, email: str, base_url: str = ""
+) -> tuple[str, bytes | None, InlineKeyboardMarkup]:
+    """Computer step 2 of 3: one screen, with a button straight to that calendar's settings."""
+    text = (
+        "📅 <b>Google Calendar · Share your calendar with me</b>\n\n"
+        "<b>1.</b> Tap <b>Open sharing settings</b> below. It opens the calendar for "
+        f"{html.escape(email)}.\n\n"
+        "<b>2.</b> Scroll to <b>Shared with</b> and click <b>Add people and groups</b>.\n\n"
+        "<b>3.</b> Paste this email (tap it to copy):\n"
+        f"<code>{html.escape(bot_email)}</code>\n\n"
+        "<b>4.</b> Permission: <b>Make changes (see private events as free/busy)</b>\n\n"
+        "<b>5.</b> Click <b>Send</b>.\n\n"
+        "Then tap <b>Done</b> below.\n\n"
+        "🔒 I only read your busy times, and only change events I add."
+    )
+    try:
+        photo = (
+            Path(__file__).resolve().parent.parent / "assets" / "google" / "step5_dialog.png"
+        ).read_bytes()
+    except OSError:
+        photo = None
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📅 Open sharing settings ↗", url=google_share_link(email, base_url)
+                )
+            ],
+            [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:shared")],
+            [InlineKeyboardButton("📱 Phone steps", callback_data="gcal:start")],
+            [InlineKeyboardButton("✏️ Different email", callback_data="gcal:computer")],
+            [_button("« Other calendars", "calendar")],
+        ]
+    )
+    return text, photo, keyboard
+
+
 def google_code_ask(email: str) -> str:
     return (
-        "📅 <b>Google Calendar · Step 3 of 3</b>\n<b>Show me it's yours</b>\n\n"
+        "📅 <b>Google Calendar · Last step</b>\n<b>Show me it's yours</b>\n\n"
         f'I\'ve put an event called "AmIFree code" in the calendar for {html.escape(email)} '
         "today. Open Google Calendar and send me the 6-digit number in it. I'll delete the "
         "event after.\n\n/cancel to stop."
@@ -779,6 +969,87 @@ def google_calendar_settings(email: str) -> str:
     its owner's email, and Google puts the id in the address base64-encoded."""
     calendar = base64.b64encode(email.encode()).decode().rstrip("=")
     return f"{GOOGLE_SETTINGS}/calendar/{calendar}"
+
+
+def google_share_link(email: str, base_url: str = "") -> str:
+    """That calendar's settings, opened in the right account when the browser has several.
+
+    With our own address, the button goes through google_share_page first: phones hand
+    Google's links to the Google Calendar app, which can't open settings. The email goes after
+    the #, which browsers never send, so it stays out of our server's logs."""
+    if base_url:
+        return f"{base_url.rstrip('/')}/google/share#{quote(email, safe='@')}"
+    return f"{google_calendar_settings(email)}?authuser={quote(email, safe='@')}"
+
+
+# The /start parameter the share page sends a phone back with: the bot answers with the
+# phone steps.
+GOOGLE_PHONE_START = "gphone"
+
+
+def google_share_page(bot_username: str = "") -> str:
+    """The page behind Open sharing settings. It never moves on by itself: it says what
+    AmIFree is and why it asks, and the person taps through to Google. A page that silently
+    forwards to a Google account page with an email filled in looks like phishing to Google
+    Safe Browsing, which flagged the site for it. On a phone or tablet, where Google would only
+    open its app, the main button goes back to the bot's chat, which then shows the phone
+    steps. Google's address is built here from the email, so the page can't send anyone
+    elsewhere."""
+    handle = bot_username.lstrip("@")
+    back = f"https://t.me/{quote(handle)}?start={GOOGLE_PHONE_START}" if handle else ""
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>AmIFree · Share your Google Calendar</title>
+<style>{SITE_CSS}
+#phone{{display:none}}
+</style></head><body><main>
+<p class="brand">📅 AmIFree</p>
+<h1>Share your Google Calendar with AmIFree</h1>
+<p>AmIFree is a Telegram bot that tells you when you're free and reminds you about plans and
+deadlines. To check your Google Calendar too, it needs you to share your calendar with it.</p>
+<div id="computer">
+<p>The button below opens <b>your own Google Calendar settings</b> on calendar.google.com.
+There, under <b>Share with specific people</b>, add the bot's email address with the
+permission shown in the Telegram chat.</p>
+<a class="button" id="open" href="{GOOGLE_SETTINGS}" rel="noopener">Open Google Calendar settings</a>
+</div>
+<div id="phone">
+<p>Google only opens its sharing settings on a computer. On a phone, the bot shows you
+where to tap in the Google Calendar app instead.</p>
+<a class="button" id="back" href="#">Show me the phone steps in Telegram</a>
+<p class="small"><a id="anyway" href="{GOOGLE_SETTINGS}" rel="noopener">Open Google's settings
+page here anyway</a></p>
+</div>
+<p class="small">AmIFree never asks for your Google password. Google asks you to sign in on
+its own site only. You can stop sharing anytime in the same settings, and /deletemydata in
+the bot removes everything AmIFree keeps about you.
+<a href="/privacy">Privacy</a> · <a href="/">About AmIFree</a></p>
+</main>
+<script>
+var email = decodeURIComponent(location.hash.slice(1));
+var url = {json.dumps(GOOGLE_SETTINGS)};
+if (/^[^@\\s]+@[^@\\s]+$/.test(email)) {{
+  url += "/calendar/" + btoa(email).replace(/=+$/, "") + "?authuser=" + encodeURIComponent(email);
+}}
+document.getElementById("open").href = url;
+document.getElementById("anyway").href = url;
+var back = {json.dumps(back)};
+var ua = navigator.userAgent;
+var phone = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+  (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+if (phone) {{
+  document.getElementById("computer").style.display = "none";
+  document.getElementById("phone").style.display = "block";
+  if (back) {{
+    document.getElementById("back").href = back;
+  }} else {{
+    document.getElementById("back").style.display = "none";
+  }}
+}}
+</script>
+</body></html>"""
 
 
 def unlink_guide(
@@ -870,14 +1141,14 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     if screen == "nusmods":
         return InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("Open NUSMods ↗", url=NUSMODS_URL)],
+                [InlineKeyboardButton("Open NUSMods ↗", url=nusmods_url())],
                 [_button("‹ Back", "classes")],
             ]
         )
     if screen == "nusmodspick":
         return InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("Open NUSMods ↗", url=NUSMODS_URL)],
+                [InlineKeyboardButton("Open NUSMods ↗", url=nusmods_url())],
                 [_button("« Other calendars", "calendar")],
             ]
         )
@@ -914,6 +1185,7 @@ HTML_SCREENS = frozenset(
         "classes",
         "skip",
         "sendplan",
+        "demo",
     }
 )
 

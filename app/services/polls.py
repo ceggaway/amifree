@@ -17,6 +17,7 @@ from telegram.error import TelegramError
 
 from app.bot.keyboards import links_keyboard, poll_keyboard
 from app.bot.messages import Reply, clock
+from app.date_display import display_date
 from app.schemas.event import SG, EventDraft, Poll, Status
 from app.services.app_links import group_link
 from app.services.date_resolution import Clarification, resolve_date
@@ -222,16 +223,16 @@ def poll_card(
             first.date(), DAY_END, SG
         ):
             first = datetime.combine(first.date() + timedelta(days=1), DAY_START, SG)
-        days = f"{first:%a %-d %b}"
+        days = f"{display_date(first)}"
         if first.time() > DAY_START:
             days += f" (from {clock(first)})"
         if first.date() < last.date():
-            days += f" – {last:%a %-d %b}"
-        lines = [head, f"📅 {days}"]
+            days += f" – {display_date(last)}"
+        lines = [head, days]
         closed = bool(now and poll.deadline_at and poll.deadline_at <= now)
         if poll.deadline_at and not closed:
             lines.append(
-                f"⏰ Reply by {poll.deadline_at:%a %-d %b}, {clock(poll.deadline_at)}."
+                f"⏰ Reply by {display_date(poll.deadline_at)}, {clock(poll.deadline_at)}."
                 " Then the organiser picks a time."
             )
         lines.append("")
@@ -294,7 +295,7 @@ def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Rep
         start = datetime.fromisoformat(slot["start_at"]).astimezone(SG)
         end = datetime.fromisoformat(slot["end_at"]).astimezone(SG)
         lines.append(
-            f"{index + 1}. {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M} "
+            f"{index + 1}. {display_date(start)}, {start:%H:%M}–{end:%H:%M} "
             f"({slot['free']} of {slot.get('of', joined)} available)"
         )
     unknown = max((s.get("unknown", 0) for s in poll.slots), default=0)
@@ -332,7 +333,7 @@ def announcement(event, free: int, of: int) -> Reply:
     lines = [
         f"✅ <b>{html.escape(event.title)} is confirmed</b>",
         "",
-        f"📅 {start:%a, %-d %b %Y}",
+        f"{display_date(start)}",
         f"🕑 {start:%H:%M}–{end:%H:%M}",
     ]
     if event.location:
@@ -611,7 +612,7 @@ class PollService:
         return GroupResult(
             alert="Confirmed. The meeting time has been announced.",
             card=Reply(
-                f"Results for {poll.title}: confirmed for {start:%a %-d %b}, "
+                f"Results for {poll.title}: confirmed for {display_date(start)}, "
                 f"{start:%H:%M}–{end:%H:%M}."
             ),
         )
@@ -639,7 +640,7 @@ class PollService:
         start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
         return [
             Reply(
-                f"Confirmed: {event.title} is set for {start:%a %-d %b}, {start:%H:%M}–{end:%H:%M}."
+                f"Confirmed: {event.title} is set for {display_date(start)}, {start:%H:%M}–{end:%H:%M}."
                 " The time has been posted in the group.",
                 edit=True,
             )

@@ -73,7 +73,7 @@ async def test_bulk_series_changes_send_one_message_per_member(service_factory, 
     await service.callback(1, f"ser:stop:{first.id}")
     stops = outbox.sent[sent_before:]
     assert len(stops) == 1 and stops[0][0] == 2
-    assert "all sessions after Tue 6 Oct are cancelled" in stops[0][1]
+    assert "all sessions after 📅 06/10/2026 (Tue) are cancelled" in stops[0][1]
     assert not [n for n in repo.notifications if n["status"] == "pending"]
 
 

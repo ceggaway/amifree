@@ -86,7 +86,7 @@ async def test_a_voice_note_about_a_deadline_saves_a_deadline(chat):
         await feed(bot, voice_payload(7))
     card = transport.sent[-1]["text"]
     assert card.startswith(f"🎙 I heard: “{said}”\n\n📌 Project report")
-    assert "Due Mon 5 Oct, 11:59pm (tomorrow)" in card
+    assert "Due 📅 05/10/2026 (Mon), 11:59pm (tomorrow)" in card
     assert len(repo.deadlines) == 1 and not repo.events
 
 

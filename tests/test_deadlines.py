@@ -1,12 +1,13 @@
 """Personal deadlines: saved from a forward or /deadline, listed, never busy, reminded twice."""
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
 from app.schemas.event import SG, DeadlineDraft
 from app.services.date_resolution import Clarification
-from app.services.deadlines import validate_deadline
+from app.services.deadlines import reminder_promise, validate_deadline
 from app.services.jobs import Notifier
 from tests.conftest import extraction, tap
 
@@ -115,8 +116,8 @@ def test_missing_or_past_dates_are_asked(reference):
 async def test_forwarded_deadline_is_saved(service_factory, reference):
     service, repo = service_factory(due(), due())
     card = (await service.message(1, 1, REPORT, reference))[0]
-    assert card.text.startswith("📌 CS3244 report\nDue Fri 9 Oct, 11:59pm (in 5 days)")
-    assert "remind you the day before" in card.text
+    assert card.text.startswith("📌 CS3244 report\nDue 📅 09/10/2026 (Fri), 11:59pm (in 5 days)")
+    assert "remind you on 📅 09/10/2026 (Fri) at 8:59pm, 3 hours before" in card.text
     assert tap(card, "✅ Done") and tap(card, "🗑 Remove")
     assert len(repo.deadlines) == 1 and not repo.events
     await service.message(1, 1, REPORT, reference)  # the same message again
@@ -128,7 +129,7 @@ async def test_missing_date_is_asked_then_answered(service_factory, reference):
     ask = (await service.message(1, 1, "CS3244 report due soon", reference))[0]
     assert ask.text.startswith("What's the due date?")
     card = (await service.message(1, 2, "20 oct", reference))[0]
-    assert "Due Tue 20 Oct, 11:59pm" in card.text
+    assert "Due 📅 20/10/2026 (Tue), 11:59pm" in card.text
     assert len(service.extractor.calls) == 1 and len(repo.deadlines) == 1
 
 
@@ -137,13 +138,13 @@ async def test_deadline_command_overrides_the_ai(service_factory, reference):
         due(kind="new"), due(kind="new", title="Pay hall fees", start_time_text=None)
     )
     card = (await service.command(1, "deadline", REPORT))[0]
-    assert card.text.startswith("📌 CS3244 report")
+    assert card.text.startswith("<b>📌 Deadlines</b>\n\n📌 CS3244 report")
     # With no text, /deadline shows the list (and leaves nothing pending).
     listed = (await service.command(1, "deadline"))[0]
-    assert "1. CS3244 report · Due Fri 9 Oct, 11:59pm (in 5 days)" in listed.text
+    assert "1. CS3244 report · Due 📅 09/10/2026 (Fri), 11:59pm (in 5 days)" in listed.text
     assert (await repo.ensure_user(1)).pending is None
     card = (await service.command(1, "deadline", "Pay hall fees by Fri"))[0]
-    assert card.text.startswith("📌 Pay hall fees")
+    assert card.text.startswith("<b>📌 Deadlines</b>\n\n📌 Pay hall fees")
     assert len(repo.deadlines) == 2 and not repo.events
 
 
@@ -180,7 +181,10 @@ async def test_a_deadline_never_makes_you_busy(service_factory, reference):
     service, _ = service_factory(due(), extraction(start_time_text="11pm", end_time_text="11:59pm"))
     await service.message(1, 1, REPORT, reference)
     free = (await service.command(1, "free", "fri"))[0]
-    assert free.text == "🟢 Fri 9 Oct: nothing booked, free all day.\n📌 Due 11:59pm: CS3244 report"
+    assert (
+        free.text
+        == "<b>🕒 Am I free?</b>\n\n📅 <b>09/10/2026 (Fri)</b>\n\n🟢 <b>No events or blocked times.</b>\n📌 Due 11:59pm: CS3244 report"
+    )
     card = (await service.message(1, 2, "Supper Friday 11pm-11:59pm", reference))[0]
     assert "No clashes found" in card.text
 
@@ -199,20 +203,28 @@ async def reminders_at(service, repo, now):
     return sent
 
 
-async def test_reminded_the_day_before_and_that_morning(service_factory, reference):
+async def test_deadline_alert_is_separate_from_the_daily_overview(service_factory, reference):
     service, repo = service_factory(due())
     await service.message(1, 1, REPORT, reference)
     for d in repo.deadlines.values():
         d.created_at = reference
-    assert await reminders_at(service, repo, at(8, 8, 59)) == []
-    day = await reminders_at(service, repo, at(8, 9, 5))
-    assert [r.text.split("\n")[0] for r in day] == [
-        "📌 Due tomorrow (Fri 9 Oct, 11:59pm): CS3244 report"
-    ]
-    assert await reminders_at(service, repo, at(8, 18)) == []  # once only
-    morning = await reminders_at(service, repo, at(9, 9))
-    assert morning[0].text.startswith("📌 Due today at 11:59pm: CS3244 report")
-    assert tap(morning[0], "✅ Done")
+    assert await reminders_at(service, repo, at(9, 9, 5)) == []
+    assert await reminders_at(service, repo, at(9, 20, 58)) == []
+    (final,) = await reminders_at(service, repo, at(9, 20, 59))
+    assert "Deadline reminder" in final.text and "11:59pm" in final.text
+    assert tap(final, "✅ Done")
+    assert await reminders_at(service, repo, at(9, 21)) == []
+
+
+async def test_done_from_the_deadline_alert_stops_further_notifications(service_factory, reference):
+    service, repo = service_factory(due())
+    await service.message(1, 1, REPORT, reference)
+    for d in repo.deadlines.values():
+        d.created_at = reference
+    (alert,) = await reminders_at(service, repo, at(9, 20, 59))
+    (done,) = await service.callback(1, tap(alert, "✅ Done"))
+    assert "Done" in done.text
+    assert await reminders_at(service, repo, at(9, 21)) == []
 
 
 async def test_no_reminder_once_done_or_with_reminders_off(service_factory, reference):
@@ -239,15 +251,17 @@ async def test_no_reminder_for_a_deadline_added_after_its_moment(service_factory
     assert await reminders_at(service, repo, at(5, 11)) == []
 
 
-async def test_nightly_summary_mentions_tomorrows_deadlines(service_factory, reference):
+async def test_daily_overview_contains_saved_plans_without_deadlines(service_factory, reference):
     service, repo = service_factory(extraction(), due())
     card = (await service.message(1, 1, "CCA dinner Friday 7–9pm at Vivo", reference))[0]
     await service.callback(1, tap(card, "Add to plans"))
     await service.message(1, 2, REPORT, reference)
-    hour = service.settings.nightly_hour
-    sent = await reminders_at(service, repo, at(8, hour) + timedelta(minutes=5))
-    nightly = [r for r in sent if r.text.startswith("Tomorrow")]
-    assert "📌 Due: CS3244 report (11:59pm)" in nightly[0].text
+    user = await repo.ensure_user(1)
+    await repo.set_user_flags(user.id, overview_period="evening")
+    for e in repo.events.values():
+        e.created_at = reference
+    (sent,) = await reminders_at(service, repo, at(8, 21))
+    assert "CCA dinner" in sent.text and "CS3244 report" not in sent.text
 
 
 async def test_list_shows_overdue_first_and_days_left(service_factory, reference):
@@ -260,9 +274,7 @@ async def test_list_shows_overdue_first_and_days_left(service_factory, reference
     listed = await service.command(1, "deadline")
     assert len(listed) == 1
     assert listed[0].text == (
-        "Deadlines — tap a number to open it.\n\n⚠️ Overdue\n"
-        "1. Pay hall fees · Due Fri 2 Oct, 11:59pm (2 days overdue)\n\nComing up\n"
-        "2. CS3244 report · Due Fri 9 Oct, 11:59pm (in 5 days)"
+        "<b>📌 Deadlines</b>\n\nTap a number to view a deadline.\n\n⚠️ Overdue\n1. Pay hall fees · Due 📅 02/10/2026 (Fri), 11:59pm (2 days overdue)\n\nComing up\n2. CS3244 report · Due 📅 09/10/2026 (Fri), 11:59pm (in 5 days)"
     )
     # Overdue items still have Done / Remove, and Done clears them.
     card = (await service.callback(1, tap(listed[0], "1")))[0]
@@ -277,7 +289,8 @@ async def test_bare_deadline_with_none_saved_explains_how_to_add(service_factory
     service, _ = service_factory()
     reply = (await service.command(1, "deadline"))[0]
     assert (
-        reply.text.startswith("No upcoming deadlines") and "/deadline CS3244 report" in reply.text
+        reply.text.startswith("<b>📌 Deadlines</b>\n\nNo upcoming deadlines")
+        and "/deadline CS3244 report" in reply.text
     )
 
 
@@ -328,7 +341,9 @@ async def test_deadline_buttons_handle_completed_removed_and_other_users_items(
     open_button = tap(listed, "1")
     # A copied callback cannot reveal another user's deadline.
     assert "/deadline" in (await service.callback(2, open_button))[0].text
-    assert (await service.command(2, "deadline"))[0].text.startswith("No upcoming deadlines")
+    assert (await service.command(2, "deadline"))[0].text.startswith(
+        "<b>📌 Deadlines</b>\n\nNo upcoming deadlines"
+    )
     await service.callback(1, tap(card, "✅ Done"))
     assert "already done" in (await service.callback(1, open_button))[0].text
     await service.callback(1, tap(card, "🗑 Remove"))
@@ -341,16 +356,39 @@ async def test_deadline_buttons_handle_completed_removed_and_other_users_items(
 async def test_deadline_cards_and_reminders_point_to_current_commands(service_factory, reference):
     service, repo = service_factory(due())
     (enabled,) = await service.command(1, "deadline", REPORT)
-    (panel,) = await service.command(1, "settings")
-    await service.callback(1, tap(panel, "🔔 Turn off reminders"))
-    (listed,) = await service.command(1, "deadline")
-    (disabled,) = await service.callback(1, tap(listed, "1"))
+    home = (await service.command(1, "settings"))[0]
+    panel = (await service.callback(1, tap(home, "⏰ Deadline alerts")))[0]
+    await service.callback(1, tap(panel, "Turn off"))
+    listed = (await service.command(1, "deadline"))[0]
+    disabled = (await service.callback(1, tap(listed, "1")))[0]
     assert "Reminders are off" in disabled.text
-    (panel,) = await service.command(1, "settings")
-    await service.callback(1, tap(panel, "🔔 Turn on reminders"))
+    panel = (await service.callback(1, "prefs:deadline"))[0]
+    await service.callback(1, tap(panel, "Turn on"))
     for deadline in repo.deadlines.values():
         deadline.created_at = reference
-    (reminder,) = await reminders_at(service, repo, at(8, 9))
+    (reminder,) = await reminders_at(service, repo, at(9, 21))
     for reply in (enabled, disabled, reminder):
         assert "/settings" in reply.text and "/deadline lists them all" in reply.text
         assert "/reminders" not in reply.text and "/deadlines" not in reply.text
+
+
+# ---------- what the card promises ----------
+
+
+@pytest.mark.parametrize(
+    "now,due_at,promise",
+    [
+        ((10, 12, 15), (10, 16, 23, 59), "on 📅 16/10/2026 (Fri) at 8:59pm, 3 hours before"),
+        ((10, 12, 15), (10, 13, 23, 59), "tomorrow at 8:59pm, 3 hours before"),
+        ((10, 12, 8), (10, 12, 23, 59), "today at 8:59pm, 3 hours before"),
+        ((10, 12, 15), (10, 13, 11, 0), "tomorrow at 8am, 3 hours before"),
+        ((10, 12, 15), (10, 14, 1, 0), "tomorrow at 10pm, 3 hours before"),
+        ((10, 12, 21), (10, 12, 23, 59), "selected alert time has already passed"),
+    ],
+)
+def test_the_card_only_promises_reminders_that_will_be_sent(now, due_at, promise):
+    month, day, hour = now
+    deadline = SimpleNamespace(due_at=datetime(2026, *due_at, tzinfo=SG))
+    text = reminder_promise(deadline, datetime(2026, month, day, hour, tzinfo=SG))
+    assert promise in text
+    assert "evening summary" not in text and "and again" not in text

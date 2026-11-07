@@ -14,7 +14,9 @@ from app.services.date_resolution import Clarification, repeats_weekly, validate
 
 MAX_TIMES = 5
 _CHOICE = re.compile(
-    r"\bor\b|\beither\b|\bwhichever\b|\bpick one\b|\bwhich (?:one|day|time)\b", re.I
+    r"\bor\b|\beither\b|\bwhichever\b|\bpick (?:one|a|ur|your)\b|\bchoose\b|"
+    r"\b(?:ur|your|a) slot\b|\bwhich (?:one|day|time|slot|session)\b",
+    re.I,
 )
 # What the model writes as "ambiguity" about the times it already listed, not a question.
 _LISTED = re.compile(
@@ -30,7 +32,8 @@ def settle_times(extraction: Extraction, text: str) -> Extraction:
     """Deterministic guards on the model's other_times, shared by the bot and the eval.
 
     - Times listed with relation "one" (gpt-4o-mini does this often) are still listed: "or",
-      "either" or "whichever" in the message makes them choices, anything else separate events.
+      "either", "whichever" or "choose your slot" in the message makes them choices,
+      anything else separate events.
     - An ambiguity that only describes those listed times ("alternatives") is dropped.
     """
     if not extraction.other_times:

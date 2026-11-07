@@ -9,6 +9,8 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from app.config import Settings
+from app.main import create_app
 from app.models.timetable import BusyBlock  # noqa: F401  (documents what /free reads)
 from app.schemas.event import SG, Event, Status
 from app.services.google_calendar import (
@@ -311,8 +313,8 @@ class FakeGoogle:
 
 @pytest.fixture
 def with_google(service_factory):
-    def make(*items, access=Access.WRITE):
-        service, repo = service_factory(*items)
+    def make(*items, access=Access.WRITE, **settings):
+        service, repo = service_factory(*items, **settings)
         service.google = FakeGoogle(access)
         return service, repo, service.google
 
@@ -353,9 +355,10 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     link_only = (await service.callback(1, "setup:google"))[0]
     assert "gcal:start" not in str(link_only.keyboard)
     service.google = FakeGoogle()
-    # With it, Google goes straight to sharing: read and write in one setup.
+    # With it, Google goes straight to sharing, computer first: it asks for the email.
     share = (await service.callback(1, "setup:google"))[0]
-    assert "Step 1 of 3" in share.text and share.photo and "Next ›" in labels(share)
+    assert "What's your Google email?" in share.text
+    assert labels(share) == ["« Other calendars"]
     assert "googlelink" not in str(share.keyboard)
     link = (await service.callback(1, "setup:googlelink"))[0]
     assert "Secret address" in link.text or "link" in link.text.lower()
@@ -368,7 +371,8 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     part = (await service.callback(1, "gcal:start"))[0]
     pictures = set()
     for n in range(1, 6):
-        assert "Step 1 of 3" in part.text and f"<b>{n} of 5 · " in part.text
+        assert "Share your calendar" in part.text and f"<b>{n} of 5 · " in part.text
+        assert "of 3" not in part.text  # one counter, not two
         assert "</b>\n\n<b>" in part.text  # a blank line between the title and the part
         assert part.edit and part.parse_mode == "HTML" and part.photo.startswith(b"\x89PNG")
         assert len(part.text) <= 1024  # Telegram's caption limit
@@ -384,19 +388,128 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
     [app] = [b for row in first.keyboard.inline_keyboard for b in row if b.url]
     assert app.text == "📅 Open Google Calendar app ↗" and app.url == "https://calendar.google.com"
     computer = (await service.callback(1, tap(first, "💻 On a computer instead?")))[0]
-    assert "calendar.google.com" in computer.text and "📱 On my phone instead?" in labels(computer)
-    [link] = [b for row in computer.keyboard.inline_keyboard for b in row if b.url]
-    assert link.text == "Open calendar.google.com ↗" and link.url == "https://calendar.google.com"
-    for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone"):
+    assert "What's your Google email?" in computer.text and computer.edit
+    for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone", "gs:phone:1:2"):
         assert "isn't valid" in (await service.callback(1, bad))[0].text
+
+
+async def test_on_a_computer_the_email_comes_first_and_opens_its_settings(with_google, reference):
+    service, repo, google = with_google(extraction(kind="unknown"))
+    await onboard(service, reference)
+    ask = (await service.callback(1, "gcal:computer"))[0]
+    assert "What's your Google email?" in ask.text and "of 3" not in ask.text
+    # The email isn't checked yet: nothing is shared at this point.
+    share = (await service.message(1, 2, "Me@Gmail.com", reference))[0]
+    assert google.calls == [] and "Share your calendar with me" in share.text
+    assert f"<code>{BOT}</code>" in share.text and "Make changes" in share.text
+    assert share.parse_mode == "HTML" and share.photo and len(share.text) <= 1024
+    [link] = [b for row in share.keyboard.inline_keyboard for b in row if b.url]
+    calendar = base64.b64encode(b"me@gmail.com").decode().rstrip("=")
+    assert link.text == "📅 Open sharing settings ↗" and link.url == (
+        f"https://calendar.google.com/calendar/r/settings/calendar/{calendar}?authuser=me@gmail.com"
+    )
+    # An ordinary message in between doesn't break it; Done then checks and sends the code.
+    await service.message(1, 3, "hello", reference)
+    code = (await service.callback(1, tap(share, "✅ Done, I've shared it")))[0]
+    assert "Last step" in code.text and google.calls == [("code", "me@gmail.com")]
+    assert repo.users[1].pending["stage"] == "gcal_code"
+    # Different email starts over.
+    again = (await service.callback(1, tap(share, "✏️ Different email")))[0]
+    assert "What's your Google email?" in again.text
+    # Changed their mind about the computer: the phone steps are one tap away.
+    phone = (await service.callback(1, tap(share, "📱 Phone steps")))[0]
+    assert "1 of 5" in phone.text
+
+
+async def test_the_sharing_button_goes_through_our_page(with_google, reference):
+    # Phones hand Google's links to its app, which can't open settings, so the button opens
+    # our page, which sends computers on to Google. The email is after the #, never sent to us.
+    service, _, _ = with_google(app_base_url="https://amifree.example/")
+    await onboard(service, reference)
+    await service.callback(1, "gcal:computer")
+    share = (await service.message(1, 2, "me+cal@gmail.com", reference))[0]
+    [link] = [b for row in share.keyboard.inline_keyboard for b in row if b.url]
+    assert link.url == "https://amifree.example/google/share#me%2Bcal@gmail.com"
+
+
+async def test_google_share_page_route():
+    app = create_app(Settings(_env_file=None, bot_mode="disabled", bot_username="@amifree_bot"))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client,
+    ):
+        page = await client.get("/google/share")
+    assert page.status_code == 200 and page.headers["content-type"].startswith("text/html")
+    # It builds Google's address itself, so it can't be used to send anyone elsewhere.
+    assert '"https://calendar.google.com/calendar/r/settings"' in page.text
+    # It never forwards by itself: Safe Browsing flags a page that silently sends people on to
+    # a Google account page as phishing. It says who we are and the person taps through.
+    assert "location.replace" not in page.text and "location.href" not in page.text
+    assert "AmIFree" in page.text and "never asks for your Google password" in page.text
+    assert "phone steps" in page.text and 'href="/privacy"' in page.text
+    # On a phone, the button goes back to the chat, which then shows the phone steps.
+    assert '"https://t.me/amifree_bot?start=gphone"' in page.text
+
+
+async def test_home_privacy_and_verification_pages():
+    app = create_app(Settings(_env_file=None, bot_mode="disabled", bot_username="@amifree_bot"))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client,
+    ):
+        home = await client.get("/")
+        privacy = await client.get("/privacy")
+        verify = await client.get("/google23fc7e97f9aa43e9.html")
+    assert home.status_code == 200 and "AmIFree" in home.text
+    assert 'href="https://t.me/amifree_bot"' in home.text and 'href="/privacy"' in home.text
+    assert privacy.status_code == 200 and "/deletemydata" in privacy.text
+    assert verify.text == "google-site-verification: google23fc7e97f9aa43e9.html"
+
+
+async def test_back_from_the_share_page_on_a_phone_shows_the_phone_steps(with_google, reference):
+    service, _, _ = with_google()
+    await onboard(service, reference)
+    [step] = await service.command(1, "start", "gphone")
+    assert step.text.startswith("📱 You're on your phone") and "1 of 5" in step.text
+    assert step.photo and not step.edit and len(step.text) <= 1024
+    # Known to be on a phone: no "On a computer instead?".
+    assert "💻 On a computer instead?" not in labels(step)
+    assert "💻 On a computer instead?" in labels((await service.callback(1, "gcal:start"))[0])
+
+
+async def test_done_without_an_email_asks_for_it(with_google, reference):
+    service, _, google = with_google()
+    await onboard(service, reference)
+    reply = (await service.callback(1, "gcal:shared"))[0]
+    assert "Type your Google email" in reply.text and google.calls == []
+
+
+async def test_not_shared_yet_on_a_computer_lets_done_be_tapped_again(with_google, reference):
+    service, repo, _ = with_google(access=Access.NONE)
+    await onboard(service, reference)
+    await service.callback(1, "gcal:computer")
+    await service.message(1, 2, "me@gmail.com", reference)
+    reply = (await service.callback(1, "gcal:shared"))[0]
+    assert "can't see that calendar yet" in reply.text
+    assert repo.users[1].pending == {"stage": "gcal_shared", "email": "me@gmail.com"}
 
 
 async def test_the_steps_show_the_bots_google_email(with_google, reference):
     service, _, _ = with_google()
     await onboard(service, reference)
-    for data in ("gs:phone:4", "gs:computer:5"):  # the part where it is pasted
-        part = (await service.callback(1, data))[0]
-        assert f"<code>{BOT}</code>" in part.text and part.parse_mode == "HTML" and part.edit
+    part = (await service.callback(1, "gs:phone:4"))[0]  # the part where it is pasted
+    assert f"<code>{BOT}</code>" in part.text and part.parse_mode == "HTML" and part.edit
+
+
+async def test_old_computer_step_buttons_open_the_new_computer_setup(with_google, reference):
+    """The five computer pictures were replaced by email first; buttons in old messages
+    still lead somewhere useful."""
+    service, repo, _ = with_google()
+    await onboard(service, reference)
+    for data in ("gs:computer:1", "gs:computer:5"):
+        reply = (await service.callback(1, data))[0]
+        assert "What's your Google email?" in reply.text
+        assert repo.users[1].pending == {"stage": "gcal_email", "first": True}
 
 
 async def test_connecting_adds_current_plans_and_counts_busy_time(with_google, reference):
@@ -531,7 +644,8 @@ async def test_deadline_card_says_nothing_about_calendars_nobody_connected(
     service.google = FakeGoogle()
     await onboard(service, reference)
     card = (await service.command(1, "deadline", "project report due fri 11:59pm"))[0]
-    assert "📅" not in card.text and not service.google.calls
+    assert "📅 09/10/2026 (Fri)" in card.text
+    assert "Google Calendar" not in card.text and not service.google.calls
 
 
 async def test_deadline_card_mentions_the_amifree_calendar_once_it_is_subscribed(
@@ -656,7 +770,7 @@ async def test_removing_the_google_calendar_disconnects_it(with_google, referenc
     await onboard(service, reference)
     await connect(service, 1, "me@gmail.com", reference)
     status = (await service.command(1, "calendar"))[0]
-    assert "Plans you say Going to are added here" in status.text
+    assert ("📅 Google Calendar\n✅ Checks for clashes\n✅ Adds your plans\n") in status.text
 
     gone, unshare = await service.callback(1, tap(status, "Remove Google Calendar"))
 

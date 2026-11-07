@@ -28,25 +28,22 @@ from app.db.supabase import SupabaseRepository
 from app.main import configure_logging
 
 # Recorded per user once sent; a new announcement needs a new name.
-NAME = "multi-time-2026-10"
+NAME = "voice-notes-2026-11"
 ACTION = f"announcement:{NAME}"
 
-TEXT = """✨ New in AmIFree
+TEXT = """✨ New in AmIFree: voice notes 🎙
 
-You can now send me a message with more than one time 👇
+Don't feel like typing? Hold the mic button and just tell me your plan 👇
 
-🗓 "Training Tue 7-9pm and Thu 6-8pm"
-→ I'll list both. Tap Add both, or just the one you want
+🍜 "Dinner with Mei Friday 7 to 9pm at Vivo"
+→ I'll check if you're free and show the event card
 
-🤔 "Dinner Fri 7pm or Sat 6pm"
-→ I'll show which time you're free for, you pick
+📌 "CS2103T report due tmr"
+→ saved as a deadline for 11:59pm, and I'll remind you before it's due
 
-🔁 "Badminton Tuesdays and Thursdays 7-9pm"
-→ add just the next one, or every Tue & Thu
+The card shows what I heard, so you can fix anything I got wrong before saving. Keep it under a minute. I don't keep the recording.
 
-Everything you add goes to /plans. Connect Google or Apple Calendar in /calendar to see your plans there too 📅
-
-Try it: forward any plan with a few times 👀"""
+Try it now: hold 🎙 and say a plan you have this week 👀"""
 
 # For people who started the bot but never added their timetable.
 SETUP_TIP = """

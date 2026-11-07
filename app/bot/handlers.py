@@ -693,6 +693,7 @@ def register_handlers(application: Application, service):
                 "settings",
                 "reminders",
                 "calendar",
+                "giveaway",
                 "usual",
                 "refund",
                 "free",

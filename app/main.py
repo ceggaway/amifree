@@ -318,6 +318,14 @@ def create_app(
             page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"}
         )
 
+    @app.get("/google23fc7e97f9aa43e9.html")
+    async def google_site_verification():
+        # Proves ownership of this site in Google Search Console. Keep it, or verification lapses.
+        return Response(
+            "google-site-verification: google23fc7e97f9aa43e9.html",
+            media_type="text/html; charset=utf-8",
+        )
+
     @app.get("/google/share")
     async def google_share():
         # The same page for everyone: the email is after the #, read by the page itself.

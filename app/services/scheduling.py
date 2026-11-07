@@ -66,7 +66,7 @@ from app.schemas.event import (
     GroupEvent,
     Status,
 )
-from app.services import analytics, calendar_export, quick_reminders
+from app.services import analytics, calendar_export, giveaway, quick_reminders
 from app.services.availability import check_availability
 from app.services.calendar_export import build_feed, build_ics, ics_filename
 from app.services.date_resolution import (
@@ -526,6 +526,14 @@ class SchedulingService:
             return await self.list_deadlines(user)
         if command == "calendar":
             return await self.calendar_setup(user)
+        if command == "giveaway":
+            handle, _ = telegram_profile.get()
+            if not handle:
+                return [Reply(giveaway.NO_HANDLE)]
+            labels = [c.label for c in await self.repo.list_calendars(user.id) if not c.error]
+            if not labels and user.google_connected:
+                labels = ["Google Calendar"]
+            return [Reply(giveaway.giveaway_reply(handle, labels, self.clock(), self.link_secret))]
         if command == "app":
             # Everything personal happens here in the chat; the app is only for groups.
             return [

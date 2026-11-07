@@ -442,9 +442,28 @@ async def test_google_share_page_route():
     assert page.status_code == 200 and page.headers["content-type"].startswith("text/html")
     # It builds Google's address itself, so it can't be used to send anyone elsewhere.
     assert '"https://calendar.google.com/calendar/r/settings"' in page.text
-    assert "location.replace(url)" in page.text and "Phone steps" in page.text
-    # A phone goes back to the chat, which then shows the phone steps.
+    # It never forwards by itself: Safe Browsing flags a page that silently sends people on to
+    # a Google account page as phishing. It says who we are and the person taps through.
+    assert "location.replace" not in page.text and "location.href" not in page.text
+    assert "AmIFree" in page.text and "never asks for your Google password" in page.text
+    assert "phone steps" in page.text and 'href="/privacy"' in page.text
+    # On a phone, the button goes back to the chat, which then shows the phone steps.
     assert '"https://t.me/amifree_bot?start=gphone"' in page.text
+
+
+async def test_home_privacy_and_verification_pages():
+    app = create_app(Settings(_env_file=None, bot_mode="disabled", bot_username="@amifree_bot"))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client,
+    ):
+        home = await client.get("/")
+        privacy = await client.get("/privacy")
+        verify = await client.get("/google23fc7e97f9aa43e9.html")
+    assert home.status_code == 200 and "AmIFree" in home.text
+    assert 'href="https://t.me/amifree_bot"' in home.text and 'href="/privacy"' in home.text
+    assert privacy.status_code == 200 and "/deletemydata" in privacy.text
+    assert verify.text == "google-site-verification: google23fc7e97f9aa43e9.html"
 
 
 async def test_back_from_the_share_page_on_a_phone_shows_the_phone_steps(with_google, reference):

@@ -12,6 +12,8 @@ from urllib.parse import quote
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.site_pages import SITE_CSS
+
 NUSMODS_URL = "https://nusmods.com/timetable"
 # academic-calendar.json's semester keys -> NUSMods' timetable pages.
 NUSMODS_PAGES = {"1": "sem-1", "2": "sem-2", "3": "st-i", "4": "st-ii"}
@@ -986,57 +988,65 @@ GOOGLE_PHONE_START = "gphone"
 
 
 def google_share_page(bot_username: str = "") -> str:
-    """The page behind Open sharing settings. A computer goes straight on to Google. A phone
-    or tablet, where Google would only open its app, goes back to the bot's chat, which then
-    shows the phone steps. The address is built here from the email, so the page can't send
-    anyone elsewhere."""
-    back = f"https://t.me/{quote(bot_username.lstrip('@'))}?start={GOOGLE_PHONE_START}"
-    back = back if bot_username else ""
+    """The page behind Open sharing settings. It never moves on by itself: it says what
+    AmIFree is and why it asks, and the person taps through to Google. A page that silently
+    forwards to a Google account page with an email filled in looks like phishing to Google
+    Safe Browsing, which flagged the site for it. On a phone or tablet, where Google would only
+    open its app, the main button goes back to the bot's chat, which then shows the phone
+    steps. Google's address is built here from the email, so the page can't send anyone
+    elsewhere."""
+    handle = bot_username.lstrip("@")
+    back = f"https://t.me/{quote(handle)}?start={GOOGLE_PHONE_START}" if handle else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Google Calendar sharing</title>
-<style>
-body{{font:17px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:24px 16px;
-background:#fff;color:#111;max-width:480px;margin:auto}}
+<title>AmIFree · Share your Google Calendar</title>
+<style>{SITE_CSS}
 #phone{{display:none}}
-a.back{{display:block;text-align:center;background:#0a7cff;color:#fff;padding:14px;
-border-radius:12px;text-decoration:none;font-weight:600;margin:20px 0}}
-a.anyway{{color:#0a7cff}}
-@media (prefers-color-scheme: dark){{body{{background:#111;color:#eee}}a.anyway{{color:#5aa9ff}}}}
-</style></head><body>
-<p id="wait">Opening Google Calendar…</p>
-<div id="phone">
-<h1>📱 You're on a phone</h1>
-<p>Google opens its sharing settings only on a computer. On a phone, I'll show you where to
-tap in the Google Calendar app instead.</p>
-<a class="back" id="back" href="#">Show me the phone steps</a>
-<p>Nothing happened? Go back to Telegram and tap <b>📱 Phone steps</b> under my message.</p>
-<p><a class="anyway" id="anyway" href="#">Open Google's page here anyway</a></p>
+</style></head><body><main>
+<p class="brand">📅 AmIFree</p>
+<h1>Share your Google Calendar with AmIFree</h1>
+<p>AmIFree is a Telegram bot that tells you when you're free and reminds you about plans and
+deadlines. To check your Google Calendar too, it needs you to share your calendar with it.</p>
+<div id="computer">
+<p>The button below opens <b>your own Google Calendar settings</b> on calendar.google.com.
+There, under <b>Share with specific people</b>, add the bot's email address with the
+permission shown in the Telegram chat.</p>
+<a class="button" id="open" href="{GOOGLE_SETTINGS}" rel="noopener">Open Google Calendar settings</a>
 </div>
+<div id="phone">
+<p>Google only opens its sharing settings on a computer. On a phone, the bot shows you
+where to tap in the Google Calendar app instead.</p>
+<a class="button" id="back" href="#">Show me the phone steps in Telegram</a>
+<p class="small"><a id="anyway" href="{GOOGLE_SETTINGS}" rel="noopener">Open Google's settings
+page here anyway</a></p>
+</div>
+<p class="small">AmIFree never asks for your Google password. Google asks you to sign in on
+its own site only. You can stop sharing anytime in the same settings, and /deletemydata in
+the bot removes everything AmIFree keeps about you.
+<a href="/privacy">Privacy</a> · <a href="/">About AmIFree</a></p>
+</main>
 <script>
 var email = decodeURIComponent(location.hash.slice(1));
 var url = {json.dumps(GOOGLE_SETTINGS)};
 if (/^[^@\\s]+@[^@\\s]+$/.test(email)) {{
   url += "/calendar/" + btoa(email).replace(/=+$/, "") + "?authuser=" + encodeURIComponent(email);
 }}
+document.getElementById("open").href = url;
+document.getElementById("anyway").href = url;
 var back = {json.dumps(back)};
 var ua = navigator.userAgent;
 var phone = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
   (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 if (phone) {{
-  document.getElementById("wait").style.display = "none";
+  document.getElementById("computer").style.display = "none";
   document.getElementById("phone").style.display = "block";
-  document.getElementById("anyway").href = url;
   if (back) {{
     document.getElementById("back").href = back;
-    location.replace(back);
   }} else {{
     document.getElementById("back").style.display = "none";
   }}
-}} else {{
-  location.replace(url);
 }}
 </script>
 </body></html>"""

@@ -17,6 +17,7 @@ from supabase.lib.client_options import AsyncClientOptions
 from telegram import BotCommand, BotCommandScopeAllGroupChats, MenuButtonCommands, Update
 from telegram.ext import Application
 
+from app import site_pages
 from app.api.routes import build_router
 from app.bot import onboarding
 from app.bot.concurrency import KeyedLocks, PerUserProcessor, update_keys
@@ -317,6 +318,21 @@ def create_app(
         return Response(
             page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"}
         )
+
+    def site_page(page: str) -> Response:
+        return Response(
+            page,
+            media_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    @app.get("/")
+    async def home():
+        return site_page(site_pages.home_page(settings.bot_username))
+
+    @app.get("/privacy")
+    async def privacy():
+        return site_page(site_pages.privacy_page(settings.bot_username))
 
     @app.get("/google23fc7e97f9aa43e9.html")
     async def google_site_verification():

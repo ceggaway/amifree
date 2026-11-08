@@ -165,6 +165,7 @@ def create_app(
                     BotCommand("calendar", "Connect a calendar so I check it too"),
                     BotCommand("settings", "Reminders and privacy"),
                     BotCommand("feedback", "Tell the team what you think"),
+                    BotCommand("giveaway", "Check your Starbucks giveaway entry"),
                     BotCommand("help", "How AmIFree works"),
                     BotCommand("cancel", "Clear a pending action"),
                     BotCommand("deletemydata", "Delete everything about me"),

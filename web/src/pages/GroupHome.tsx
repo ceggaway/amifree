@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { confirm, haptic } from "../telegram";
 import { Link, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
@@ -21,13 +21,12 @@ export function GroupHome() {
     <>
       <Intro />
       {pending.length > 0 && (
-        <section aria-labelledby="pending-action-heading">
-          <h2 id="pending-action-heading">Needs you</h2>
+        <section className="pending-actions" aria-labelledby="pending-action-heading">
+          <h2 id="pending-action-heading">Pending action</h2>
           {pending.map((poll) => <PollRow key={poll.id} poll={poll} onCancelled={reload} />)}
         </section>
       )}
-      <nav className="group-actions" aria-labelledby="plan-heading">
-        <p className="plan-question" id="plan-heading">Plan something</p>
+      <nav className="group-actions" aria-label="Group planning">
         <Link className="card link group-action" to={`/g/${code}/new`}>
           <span className="icon-tile emoji" aria-hidden="true">📅</span>
           <div>
@@ -36,9 +35,9 @@ export function GroupHome() {
           <Icon name="arrow" size={18} />
         </Link>
         <Link className="card link group-action" to={`/g/${code}/find`}>
-          <span className="icon-tile emoji" aria-hidden="true">🗳️</span>
+          <span className="icon-tile emoji" aria-hidden="true">🕒</span>
           <div>
-            <h2>Find a time that works</h2>
+            <h2>Find a time</h2>
           </div>
           <Icon name="arrow" size={18} />
         </Link>
@@ -151,9 +150,10 @@ function PollRow({ poll, onCancelled }: { poll: GroupPoll; onCancelled: () => vo
   );
 }
 
-const INTRO_KEY = "amifree.group-intro-seen";
+const INTRO_KEY = "amifree.group-guide-hidden";
+const INTRO_VISIT_KEY = "amifree.group-guide-dismissed";
 
-function seenIntro(): boolean {
+function guidePreference(): boolean {
   try {
     return localStorage.getItem(INTRO_KEY) === "1";
   } catch {
@@ -161,28 +161,98 @@ function seenIntro(): boolean {
   }
 }
 
-/** A one-time "how it works" for people opening a group for the first time. */
+function showGuide(): boolean {
+  if (guidePreference()) return false;
+  try {
+    return sessionStorage.getItem(INTRO_VISIT_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+
+/** A dismissible welcome guide, available again from the group home page. */
 function Intro() {
-  const [hidden, setHidden] = useState(seenIntro);
-  if (hidden) return null;
+  const [open, setOpen] = useState(showGuide);
+  const [hideForever, setHideForever] = useState(guidePreference);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (!open) {
+      if (typeof dialog.close === "function") dialog.close();
+      else dialog.removeAttribute("open");
+      return;
+    }
+    if (!dialog.open) {
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else dialog.setAttribute("open", "");
+    }
+    dialog.querySelector("button")?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
   function dismiss() {
     try {
-      localStorage.setItem(INTRO_KEY, "1");
+      if (hideForever) localStorage.setItem(INTRO_KEY, "1");
+      else localStorage.removeItem(INTRO_KEY);
     } catch {
-      // Private mode: it just shows again next time.
+      // The guide can still be closed when browser storage is unavailable.
     }
-    setHidden(true);
+    try {
+      sessionStorage.setItem(INTRO_VISIT_KEY, "1");
+    } catch {
+      // Keep the in-memory dismissal even if this visit cannot be remembered.
+    }
+    setOpen(false);
   }
+
   return (
-    <section className="card intro" aria-labelledby="intro-heading">
-      <h2 id="intro-heading">How it works</h2>
-      <ol>
-        <li>Plan something below.</li>
-        <li>Everyone answers in one tap.</li>
-        <li>AmIFree reminds them for you.</li>
-      </ol>
-      <button type="button" className="on" onClick={dismiss}>Got it</button>
-    </section>
+    <>
+      <div className="group-guide-link">
+        <button type="button" className="guide-trigger" onClick={() => {
+          setHideForever(guidePreference());
+          setOpen(true);
+        }}>
+          <Icon name="info" size={18} /> Quick guide
+        </button>
+      </div>
+      <dialog
+        ref={dialogRef}
+        className="group-guide"
+        aria-labelledby="group-guide-heading"
+        onCancel={(event) => {
+          event.preventDefault();
+          dismiss();
+        }}
+      >
+        <h2 id="group-guide-heading">Welcome to the AmIFree Mini App</h2>
+        <div className="guide-feature">
+          <Icon name="calendar" size={24} />
+          <p>
+            <strong>Time already set?</strong><br />
+            Choose <strong>Schedule an event</strong> to set the details and collect RSVPs.
+          </p>
+        </div>
+        <div className="guide-feature">
+          <Icon name="clock" size={24} />
+          <p>
+            <strong>Time undecided?</strong><br />
+            Choose <strong>Find a time</strong> to collect availability,
+            pick a slot and create your event.
+          </p>
+        </div>
+        <label className="check guide-preference">
+          <input type="checkbox" checked={hideForever} onChange={(event) => setHideForever(event.target.checked)} />
+          Don’t show this again
+        </label>
+        <button type="button" className="on big guide-dismiss" onClick={dismiss}>Got it</button>
+      </dialog>
+    </>
   );
 }
 

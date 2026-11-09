@@ -4,7 +4,7 @@ import { api, refusal } from "../api";
 import { ClashBanner } from "../components/ClashBanner";
 import { at, shiftKey, todayKey } from "../format";
 import { haptic } from "../telegram";
-import { forget } from "../useLoad";
+import { forget, useLoad } from "../useLoad";
 import type { Availability } from "../types";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -16,6 +16,8 @@ const weekday = (key: string) => (new Date(`${key}T12:00:00+08:00`).getUTCDay() 
 export function NewEvent() {
   const { code = "" } = useParams();
   const navigate = useNavigate();
+  const { data: me } = useLoad(() => api.me());
+  const scheduleConnected = Boolean(me && (me.nusmods.connected || me.outside_calendars_connected));
   // One id per form: a double tap or a retry posts one card, not two.
   const [requestId] = useState(() => crypto.randomUUID());
   const [form, setForm] = useState({
@@ -40,12 +42,19 @@ export function NewEvent() {
 
   // Your own clash check for the chosen time, as the card's Am I free? would show it.
   useEffect(() => {
-    if (!form.date || !form.start || !form.end) return;
+    setMine(null);
+    if (!scheduleConnected || !form.date || !form.start || !form.end) return;
+    let current = true;
     const timer = setTimeout(() => {
-      api.availability(new Date(start), new Date(end)).then(setMine).catch(() => setMine(null));
+      api.availability(new Date(start), new Date(end))
+        .then((result) => { if (current) setMine(result); })
+        .catch(() => { if (current) setMine(null); });
     }, 400);
-    return () => clearTimeout(timer);
-  }, [start, end, form.date, form.start, form.end]);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [scheduleConnected, start, end, form.date, form.start, form.end]);
 
   function toggleDay(index: number) {
     set({ weekdays: form.weekdays.includes(index) ? form.weekdays.filter((d) => d !== index) : [...form.weekdays, index] });
@@ -80,9 +89,9 @@ export function NewEvent() {
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>Schedule an event</h1>
+      <h1 className="feature-heading"><span className="feature-heading-icon" aria-hidden="true">📅</span><span>Schedule an event</span></h1>
       <label>
-        What
+        Name of event
         <input value={form.title} maxLength={200} required placeholder="Dinner" onChange={(e) => set({ title: e.target.value })} />
       </label>
       <label>
@@ -136,14 +145,19 @@ export function NewEvent() {
           <p className="hint">Each week gets its own card.</p>
         </div>
       )}
-      {mine && (
+      {scheduleConnected && mine && (
         <section>
-          <ClashBanner availability={mine} />
+          <ClashBanner availability={mine} freeText="No clashes with your schedule." />
         </section>
+      )}
+      {me && !scheduleConnected && (
+        <p className="hint">
+          <em>Connect your personal calendar or add your NUSMods timetable to check this event against your schedule automatically.</em>
+        </p>
       )}
       {error && <p className="error">{error}</p>}
       <button type="submit" className="on big" disabled={busy}>
-        {busy ? "Posting…" : "Post to the group"}
+        {busy ? "Posting…" : "Post to group"}
       </button>
     </form>
   );

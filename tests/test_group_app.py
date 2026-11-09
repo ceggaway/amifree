@@ -279,11 +279,11 @@ async def test_find_a_time_from_the_app(hub, reference):
     created = await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)
     assert created.status_code == 200
     poll = repo.polls[created.json()["id"]]
-    assert poll.message_id == 701 and "Who's free? Project meeting (2 hours)" in posted[0][1].text
+    assert poll.message_id == 701 and "Find a time · Project meeting (2 hours)" in posted[0][1].text
     # A reply-by inside the dates is moved back to the night before the first day, so no day
     # asked about is lost before the best times are worked out.
     assert poll.deadline_at == datetime.combine(reference.date(), time(23, 59), SG)
-    assert f"📅 {first:%d/%m/%Y (%a)} –" in posted[0][1].text
+    assert f"📅 {first.day} {first:%b (%a)} –" in posted[0][1].text
     # As with /whosfree, asking for the poll counts the organiser in, and nobody else.
     assert await repo.poll_participants(poll.id) == [(await repo.ensure_user(1)).id]
     overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(2))).json()
@@ -370,7 +370,7 @@ async def test_running_a_poll_from_its_page(hub, reference):
     event = repo.group_events[picked.json()["event_id"]]
     assert event.start_at.isoformat() == opened["slots"][1]["start_at"]
     # The group gets the announcement, with buttons to add it to a calendar.
-    assert posted[-1][1].text.startswith("✅ <b>Sync is confirmed</b>")
+    assert posted[-1][1].text.startswith("✅ <b>Sync confirmed</b>")
     assert repo.polls[poll_id].status == "CLOSED"
     again = await client.post(f"{page}/pick", headers=bearer(1), json={"slot": 0})
     assert again.status_code == 409 and len(repo.group_events) == 1
@@ -551,7 +551,7 @@ async def test_organiser_picks_any_time_through_the_api(hub, reference):
     assert picked.status_code == 200
     event = repo.group_events[picked.json()["event_id"]]
     assert event.start_at.isoformat() == start and repo.polls[poll_id].status == "CLOSED"
-    assert posted[-1][1].text.startswith("✅ <b>Sync is confirmed</b>")
+    assert posted[-1][1].text.startswith("✅ <b>Sync confirmed</b>")
 
 
 async def test_organiser_sees_who_has_filled_in_a_poll(hub, reference):
@@ -610,3 +610,73 @@ async def test_organiser_cancels_a_poll(hub, reference):
     overview = (await client.get(f"/api/groups/{CODE}", headers=bearer(1))).json()
     assert overview["polls"] == []
     assert (await client.get(f"/api/polls/{poll_id}", headers=bearer(1))).status_code == 404
+
+
+async def test_selected_poll_dates_drive_grids_suggestions_and_final_choice(hub, reference):
+    client, service, repo, posted, members = hub
+    await with_schedule(repo, 1, 2)
+    first = reference.date() + timedelta(days=2)
+    last = first + timedelta(days=2)
+    omitted = first + timedelta(days=1)
+    form = {
+        "request_id": str(uuid.uuid4()),
+        "title": "Consultation",
+        "minutes": 60,
+        "first": str(first),
+        "last": str(last),
+        "selected_dates": [str(last), str(first), str(first)],
+    }
+    created = await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)
+    assert created.status_code == 200
+    poll_id = created.json()["id"]
+    poll = await repo.get_poll(poll_id)
+    assert poll.selected_dates == [first, last]
+    assert f"{omitted:%d/%m/%Y}" not in posted[0][1].text
+    owner = await repo.ensure_user(1)
+    member = await repo.ensure_user(2)
+    await repo.poll_join(poll_id, member.id)
+    grid = await service.polls.my_grid(owner.id, poll_id)
+    assert [day["date"] for day in grid["days"]] == [str(first), str(last)]
+    for user in [owner, member]:
+        await service.polls.save_grid(
+            user.id,
+            poll_id,
+            [cell["start_at"] for day in grid["days"] for cell in day["cells"]]
+            + [datetime.combine(omitted, time(10), SG).isoformat()],
+        )
+        saved = await repo.get_availability(poll_id, user.id)
+        assert not any(start.startswith(str(omitted)) for start in saved)
+    heatmap = await service.polls.heatmap(owner.id, poll_id)
+    assert [day["date"] for day in heatmap["days"]] == [str(first), str(last)]
+    opened, _ = await service.polls.suggest(poll)
+    assert opened is not None
+    assert all(
+        datetime.fromisoformat(slot["start_at"]).date() in [first, last] for slot in opened.slots
+    )
+    forged = await client.post(
+        f"/api/polls/{poll_id}/pick-time",
+        headers=bearer(1),
+        json={"start_at": datetime.combine(omitted, time(10), SG).isoformat()},
+    )
+    assert forged.status_code == 409
+    # Retry is idempotent, and cannot replace the originally saved dates.
+    retry = await client.post(f"/api/groups/{CODE}/polls", headers=bearer(1), json=form)
+    assert retry.json()["id"] == poll_id
+    assert (await repo.get_poll(poll_id)).selected_dates == [first, last]
+
+
+async def test_selected_poll_dates_reject_empty_past_and_wide_windows(hub, reference):
+    client, service, repo, posted, members = hub
+    first = reference.date() + timedelta(days=1)
+    form = {"title": "Consultation", "minutes": 60, "first": str(first), "last": str(first)}
+    for dates, status in [
+        ([], 422),
+        ([str(reference.date() - timedelta(days=1))], 409),
+        ([str(first), str(first + timedelta(days=14))], 409),
+    ]:
+        result = await client.post(
+            f"/api/groups/{CODE}/polls",
+            headers=bearer(1),
+            json=form | {"request_id": str(uuid.uuid4()), "selected_dates": dates},
+        )
+        assert result.status_code == status

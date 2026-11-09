@@ -80,6 +80,7 @@ def suggest_slots(
     busy: dict[str, list[tuple[datetime, datetime]]],
     now: datetime,
     unknown: int = 0,
+    selected_dates: list[date] | None = None,
 ) -> list[dict]:
     """The three non-overlapping slots where most participants have no known clash.
 
@@ -92,7 +93,11 @@ def suggest_slots(
         slot = datetime.combine(day, DAY_START, SG)
         last = datetime.combine(day, DAY_END, SG) - length
         while slot <= last:
-            if slot >= max(start, now) and slot + length <= end:
+            if (
+                (selected_dates is None or day in selected_dates)
+                and slot >= max(start, now)
+                and slot + length <= end
+            ):
                 free = sum(not clashes(spans, slot, slot + length) for spans in busy.values())
                 candidates.append((-free, slot))
             slot += STEP
@@ -169,6 +174,7 @@ def heatmap_cells(
     busy: dict[str, list[tuple[datetime, datetime]]],
     now: datetime,
     max_days: int = 14,
+    selected_dates: list[date] | None = None,
 ) -> list[dict]:
     """Per day, the number of people with no known clash in each 30-minute cell.
 
@@ -182,7 +188,11 @@ def heatmap_cells(
         stop = datetime.combine(day, DAY_END, SG)
         while slot < stop:
             nxt = slot + STEP
-            if slot >= max(start, now) and nxt <= end:
+            if (
+                (selected_dates is None or day in selected_dates)
+                and slot >= max(start, now)
+                and nxt <= end
+            ):
                 free = sum(not clashes(spans, slot, nxt) for spans in busy.values())
                 cells.append({"start_at": slot.isoformat(), "free": free})
             slot = nxt
@@ -208,11 +218,51 @@ def poll_card(
     tally: dict[tuple[int, str], int],
     app_url: str | None = None,
     now: datetime | None = None,
+    responses: int | None = None,
+    total_members: int | None = None,
 ) -> Reply:
     title = poll.title[:1].upper() + poll.title[1:]
     head = f"🗳 Who's free? {title} ({length_words(poll.duration_minutes)})"
     if poll.status == "CLOSED":
         return Reply(head + "\n✅ The organiser chose a time. It's posted in the group below.")
+    if poll.status == "COLLECTING" and app_url:
+        # Only this group invitation uses compact dates; other bot messages keep their format.
+        def short_date(value: date | datetime) -> str:
+            if isinstance(value, datetime):
+                value = value.astimezone(SG)
+            return f"{value.day} {value:%b (%a)}"
+
+        if poll.selected_dates:
+            dates = ", ".join(short_date(day) for day in poll.selected_dates)
+        else:
+            first = poll.window_start.astimezone(SG).date()
+            last = (poll.window_end - timedelta(microseconds=1)).astimezone(SG).date()
+            dates = short_date(first)
+            if first != last:
+                dates += f" – {short_date(last)}"
+        lines = [
+            f"🕒 <b>Find a time · {html.escape(title)} ({length_words(poll.duration_minutes)})</b>",
+            "",
+            f"📅 {dates}",
+        ]
+        if poll.deadline_at:
+            deadline = poll.deadline_at.astimezone(SG)
+            clock_text = deadline.strftime("%I:%M%p").lstrip("0")
+            lines.append(f"⏰ <b>Reply by:</b> {short_date(deadline)} · {clock_text} SGT")
+        lines += ["", "Click the button below to fill in your availability.", ""]
+        answered = joined if responses is None else responses
+        count = (
+            f"{answered}/{total_members}"
+            if total_members is not None and total_members >= answered
+            else str(answered)
+        )
+        lines += [
+            f"👥 <b>{count} responses</b>",
+            "🔒 Your schedule stays private. The group only sees availability counts.",
+        ]
+        if now and poll.deadline_at and poll.deadline_at <= now:
+            lines += ["", "Replies have closed. You can still submit your availability."]
+        return Reply("\n".join(lines), poll_keyboard(poll, app_url), parse_mode="HTML")
     if poll.status == "COLLECTING":
         # Short lines, the one thing to do first: people skim a group card.
         last = poll.window_end - timedelta(days=1)
@@ -228,6 +278,10 @@ def poll_card(
             days += f" (from {clock(first)})"
         if first.date() < last.date():
             days += f" – {display_date(last)}"
+        if poll.selected_dates:
+            days = ", ".join(
+                display_date(datetime.combine(day, DAY_START, SG)) for day in poll.selected_dates
+            )
         lines = [head, days]
         closed = bool(now and poll.deadline_at and poll.deadline_at <= now)
         if poll.deadline_at and not closed:
@@ -326,25 +380,28 @@ def organiser_report(poll: Poll, joined: int, app_url: str | None = None) -> Rep
     return Reply(text, InlineKeyboardMarkup(rows))
 
 
-def announcement(event, free: int, of: int) -> Reply:
-    """The public message once the organiser chooses: when it is. No buttons: everyone who
-    submitted their availability is already added, and can change their answer in /plans."""
+def announcement(event, app_url: str) -> Reply:
+    """One confirmation with a direct link to each member's own RSVP in the Mini App."""
     start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
+    title = event.title[:1].upper() + event.title[1:]
+    date_text = f"{start.day} {start:%b (%a)}"
+    if start.date() != end.date():
+        date_text += f" – {end.day} {end:%b (%a)}"
     lines = [
-        f"✅ <b>{html.escape(event.title)} is confirmed</b>",
+        f"✅ <b>{html.escape(title)} confirmed</b>",
         "",
-        f"{display_date(start)}",
-        f"🕑 {start:%H:%M}–{end:%H:%M}",
+        f"📅 {date_text}",
+        f"🕒 {clock(start).upper()}–{clock(end).upper()} SGT",
     ]
     if event.location:
         lines.append(f"📍 {html.escape(event.location)}")
     lines += [
-        f"👥 {free} of {of} who filled in are free",
         "",
-        "Everyone who's free then is added as Going, and to their calendar if connected."
-        " Can't make it after all? Update it in /plans.",
+        "Marked free? You’re added as <b>Going</b>, with calendar syncing if connected.",
+        "",
+        "Check or change your response below.",
     ]
-    return Reply("\n".join(lines), parse_mode="HTML")
+    return Reply("\n".join(lines), links_keyboard([("View event", app_url)]), parse_mode="HTML")
 
 
 class PollService:
@@ -357,15 +414,28 @@ class PollService:
     async def render(self, poll: Poll) -> Reply:
         joined = len(await self.repo.poll_participants(poll.id))
         s = self.scheduling.settings
+        app_url = (
+            s.availability_link(poll.id) if poll.status == "COLLECTING" else s.heatmap_link(poll.id)
+        )
+        responses, total_members = None, None
+        if poll.status == "COLLECTING" and app_url:
+            # Joining or having a calendar is not a response: count submitted grids, even empty ones.
+            responses = len(await self.repo.poll_availability(poll.id))
+            count_members = getattr(self.scheduling, "group_member_count", None)
+            if count_members:
+                try:
+                    total_members = await count_members(poll.chat_id)
+                except Exception as exc:
+                    # Never invent a denominator if Telegram is temporarily unavailable.
+                    log.warning("poll_member_count_failed error_type=%s", type(exc).__name__)
         return poll_card(
             poll,
             joined,
             await self.repo.poll_tally(poll.id),
-            # While collecting, the button goes straight to the member's own grid.
-            s.availability_link(poll.id)
-            if poll.status == "COLLECTING"
-            else s.heatmap_link(poll.id),
+            app_url,
             self.scheduling.clock(),
+            responses=responses,
+            total_members=total_members,
         )
 
     async def create(
@@ -430,7 +500,13 @@ class PollService:
 
     @staticmethod
     def cells(poll: Poll) -> list[datetime]:
-        days = heatmap_cells(poll.window_start, poll.window_end, {}, poll.window_start)
+        days = heatmap_cells(
+            poll.window_start,
+            poll.window_end,
+            {},
+            poll.window_start,
+            selected_dates=poll.selected_dates,
+        )
         return [datetime.fromisoformat(c["start_at"]) for d in days for c in d["cells"]]
 
     async def schedule_spans(
@@ -476,6 +552,7 @@ class PollService:
             busy,
             self.scheduling.clock(),
             unknown=len(people) - len(busy),
+            selected_dates=poll.selected_dates,
         )
         if not slots:
             return None, "There is no time left in that window. Start a new poll."
@@ -519,7 +596,11 @@ class PollService:
             raise Refused("Choose a time on the hour or half hour.")
         if start < self.scheduling.clock():
             raise Refused("That time has already passed.")
-        if start < poll.window_start or end > poll.window_end:
+        if (
+            start < poll.window_start
+            or end > poll.window_end
+            or (poll.selected_dates is not None and start.date() not in poll.selected_dates)
+        ):
             raise Refused("That time is outside the days this poll checks.")
         if start.time() < DAY_START or end > datetime.combine(start.date(), DAY_END, SG):
             raise Refused(
@@ -565,7 +646,7 @@ class PollService:
             details_url = settings.event_link(event.id)
             hub = self.scheduling.hub
             if details_url:
-                await hub.post(poll.chat_id, announcement(event, free, of))
+                await hub.post(poll.chat_id, announcement(event, details_url))
             else:
                 # Without the app there is no page for Going: post the usual card instead.
                 posted = await hub.post(poll.chat_id, await self.scheduling.groups.render(event))
@@ -594,6 +675,8 @@ class PollService:
         if poll.creator_user_id != user.id:
             return GroupResult(alert="Only the organiser can confirm the meeting time.")
         if poll.status == "CLOSED":
+            if self.scheduling.settings.heatmap_link(poll.id):
+                return GroupResult(alert="A time has already been confirmed.", delete_message=True)
             # Chosen already (here or in the app): take the stale buttons off the results.
             return GroupResult(
                 alert="A time has already been confirmed.",
@@ -608,6 +691,8 @@ class PollService:
             return GroupResult(alert=str(exc))
         if not event:
             return GroupResult(alert="A time has already been confirmed.")
+        if self.scheduling.settings.event_link(event.id):
+            return GroupResult(alert="Confirmed.", delete_message=True)
         start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
         return GroupResult(
             alert="Confirmed. The meeting time has been announced.",
@@ -675,11 +760,22 @@ class PollService:
         if not poll or not await self.may_answer(poll, user_id):
             return None
         spans = await self.schedule_spans(poll, user_id)
+        user = await self.repo.get_user(user_id)
+        calendars = await self.repo.list_calendars(user_id)
+        schedule_connected = bool(user and user.coverage_start) or any(
+            calendar.synced_at for calendar in calendars
+        )
         submitted = await self.repo.get_availability(poll.id, user_id)
         usual = await self.repo.get_usual(user_id) if submitted is None else []
         ticked = set(submitted or [])
         now = self.scheduling.clock()
-        days = heatmap_cells(poll.window_start, poll.window_end, {}, max(first_time(poll), now))
+        days = heatmap_cells(
+            poll.window_start,
+            poll.window_end,
+            {},
+            max(first_time(poll), now),
+            selected_dates=poll.selected_dates,
+        )
         for day in days:
             for cell in day["cells"]:
                 start = datetime.fromisoformat(cell["start_at"])
@@ -703,6 +799,7 @@ class PollService:
             "closed": poll.status == "CLOSED",
             "deadline_at": poll.deadline_at.isoformat() if poll.deadline_at else None,
             "known": spans is not None or bool(usual),
+            "schedule_connected": schedule_connected,
             "submitted": submitted is not None,
             "from_usual": bool(usual),
             "days": days,
@@ -758,7 +855,13 @@ class PollService:
         }
         if len(busy) < MIN_PARTICIPANTS:
             return base | {"ready": False, "days": [], "max_free": 0}
-        days = heatmap_cells(poll.window_start, poll.window_end, busy, self.scheduling.clock())
+        days = heatmap_cells(
+            poll.window_start,
+            poll.window_end,
+            busy,
+            self.scheduling.clock(),
+            selected_dates=poll.selected_dates,
+        )
         return base | {"ready": True, "days": days, "max_free": len(busy)}
 
     async def choose(self, poll: Poll, user_id: str, index: int | None) -> int | None:

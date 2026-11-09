@@ -367,6 +367,7 @@ class SchedulingService:
         self.check_chat_member = None
         self.check_chat_admin = None
         self.chat_title = None
+        self.group_member_count = None
         # Set by the bot layer: a private message or file to one person (the app's CSV export).
         self.send_private = None
         # Set at startup: the outbox worker that sends reminders, alerts and nudges.

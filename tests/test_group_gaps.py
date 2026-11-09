@@ -48,6 +48,7 @@ async def test_grid_prefills_from_the_schedule_and_never_says_why(service_factor
     assert cells["09:00"] == cells["09:30"] == "busy"
     assert cells["08:00"] == cells["10:00"] == "free"
     assert grid["known"] is True and grid["submitted"] is False
+    assert grid["schedule_connected"] is True
     # Only a state per cell: no title, no reason.
     assert set(grid["days"][0]["cells"][0]) == {"start_at", "state"}
     assert "block" not in json.dumps(grid).lower()
@@ -60,6 +61,7 @@ async def test_unknown_schedule_starts_empty_not_free(service_factory):
     repo.members.add((CHAT, stranger))
     grid = await service.polls.my_grid(stranger, poll.id)
     assert grid["known"] is False and set(states(grid).values()) == {"off"}
+    assert grid["schedule_connected"] is False
 
 
 async def test_saved_cells_drive_the_heatmap_and_suggestions(service_factory):

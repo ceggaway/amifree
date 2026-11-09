@@ -406,5 +406,23 @@ await check('migration 020 preserves preferences and deduplicates the daily over
     await upgrade.close();
   }
 });
+await check('migration 021 persists selected dates atomically and preserves retries', async () => {
+  const owner = await one('select * from amifree_ensure_user($1)',[909021]);
+  const args = [owner.id,-21021,1,'Consultation',60,'2026-11-11T00:00:00+08:00','2026-11-16T00:00:00+08:00'];
+  const dates = ['2026-11-15','2026-11-11','2026-11-13','2026-11-11'];
+  const created = await one('select * from amifree_create_poll($1,$2,$3,$4,$5,$6,$7,$8::date[])',[...args,dates]);
+  const saved = await one('select to_json(selected_dates) dates from polls where id=$1',[created.id]);
+  assert.deepEqual(saved.dates,['2026-11-11','2026-11-13','2026-11-15']);
+  const again = await one('select * from amifree_create_poll($1,$2,$3,$4,$5,$6,$7,$8::date[])',[...args,['2026-11-12']]);
+  assert.equal(again.id,created.id);
+  assert.deepEqual((await one('select to_json(selected_dates) dates from polls where id=$1',[again.id])).dates,saved.dates);
+  for (const invalid of [[],['2026-11-16'],[null]]) {
+    await assert.rejects(q('select * from amifree_create_poll($1,$2,$3,$4,$5,$6,$7,$8::date[])',[...args,invalid]));
+  }
+  await db.exec('reset role');
+  await db.exec(migrations[migrationFiles.findIndex(f=>f.startsWith('021_'))]);
+  await db.exec('set role service_role');
+  assert.deepEqual((await one('select to_json(selected_dates) dates from polls where id=$1',[created.id])).dates,saved.dates);
+});
 await db.close();
 console.log(`${count} PostgreSQL schema checks passed.`);

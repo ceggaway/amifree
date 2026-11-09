@@ -70,12 +70,14 @@ describe("MyTimes", () => {
   it("shows the capitalised event name and clear legend without extra controls", async () => {
     show({ ...grid, title: "dinner with friends", submitted: true });
     expect(await screen.findByRole("heading", { level: 1, name: "Dinner with friends" })).toBeTruthy();
-    for (const label of ["Free", "Not free", "Busy (calendar)"]) {
+    for (const label of ["Free", "Not free", "Busy (calendar / timetable)"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
-    expect(screen.getByRole("button", { name: "Submit availabilities" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Submit" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Drag to select|^all$|^none$/ })).toBeNull();
     expect(screen.queryByText(/half hours marked free/)).toBeNull();
+    expect(screen.queryByText(/hrs? free|None marked/)).toBeNull();
+    expect(screen.getByText("13 Oct (Tue)")).toBeTruthy();
     expect(screen.queryByText(/The group only sees/)).toBeNull();
   });
 
@@ -86,7 +88,7 @@ describe("MyTimes", () => {
     expect(busy.disabled).toBe(true);
     fireEvent.click(screen.getByLabelText(/09:00: free/));
     expect(screen.getByLabelText(/09:00: not free/).getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(screen.getByText("Submit availabilities"));
+    fireEvent.click(screen.getByText("Submit"));
     await waitFor(() => expect(saved).toEqual([["2026-10-13T08:00:00+08:00"]]));
     // Saving counts the member in and returns to the poll.
     expect(await screen.findByText("Poll page")).toBeTruthy();
@@ -167,7 +169,8 @@ describe("MyTimes", () => {
 
   it("asks people with no schedule to tap the times they are free", async () => {
     show({ ...grid, known: false, days: [{ date: grid.days[0].date, cells: [{ start_at: "2026-10-13T08:00:00+08:00", state: "off" }] }] });
-    expect(await screen.findByText(/Tap or drag over the times/)).toBeTruthy();
+    expect(await screen.findByText("Tap or drag to mark when you’re free.")).toBeTruthy();
+    expect(screen.getByText("Connect your personal calendar or add your NUSMods timetable to block busy times automatically.")).toBeTruthy();
     fireEvent.click(screen.getByLabelText(/08:00: not free/));
     expect(screen.getByLabelText(/08:00: free/).getAttribute("aria-pressed")).toBe("true");
   });
@@ -178,6 +181,16 @@ describe("MyTimes", () => {
     cleanup();
     show(new Error("Not found"));
     expect(await screen.findByText("This poll isn't available to you.")).toBeTruthy();
+  });
+
+  it("uses actual calendar connections rather than saved plans or usual availability for the setup remark", async () => {
+    show({ ...grid, known: true, schedule_connected: false, from_usual: true, submitted: true });
+    expect(await screen.findByText("Tap or drag to mark when you’re free.")).toBeTruthy();
+    expect(screen.getByText(/Connect your personal calendar or add your NUSMods timetable/)).toBeTruthy();
+    cleanup();
+    show({ ...grid, schedule_connected: true });
+    expect(await screen.findByText(/Busy times from your calendar and timetable are blocked automatically/)).toBeTruthy();
+    expect(screen.queryByText(/Connect your personal calendar or add your NUSMods timetable/)).toBeNull();
   });
 });
 
@@ -196,19 +209,22 @@ describe("MyTimes guidance", () => {
     ],
   };
 
-  it("keeps a running total of free time, with no per-day buttons", async () => {
+  it("lets members mark free times without showing a total or per-day buttons", async () => {
     show(empty);
-    expect(await screen.findByText("None marked")).toBeTruthy();
+    await screen.findByRole("button", { name: "Submit" });
+    expect(screen.queryByText(/hrs? free|None marked/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Free all day|Clear/ })).toBeNull();
     fireEvent.click(screen.getByLabelText(/08:00: not free/));
     fireEvent.click(screen.getByLabelText(/09:00: not free/));
-    expect(screen.getByText("1 hr free")).toBeTruthy();
+    expect(screen.getByLabelText(/08:00: free/).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByLabelText(/09:00: free/).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByText(/hrs? free|None marked/)).toBeNull();
   });
 
   it("checks before submitting no free times at all", async () => {
     const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
     show(empty);
-    fireEvent.click(await screen.findByText("Submit availabilities"));
+    fireEvent.click(await screen.findByText("Submit"));
     await waitFor(() => expect(ask).toHaveBeenCalled());
     expect(saved).toEqual([]);
     ask.mockRestore();

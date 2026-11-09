@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupOverview, GroupPoll } from "../types";
 
 const state: { group: GroupOverview } = { group: {} as GroupOverview };
@@ -33,11 +33,18 @@ function show(group: GroupOverview) {
 }
 
 afterEach(cleanup);
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
 
 describe("group page", () => {
   it("shows a capitalised pending title and deadline with a direct availability action", async () => {
     show({ ...base, polls: [{ id: "dinner", title: "dinner with friends", status: "COLLECTING", duration_minutes: 60, joined: 12, joined_by_me: false, organiser: false, availability_submitted: false, deadline_at: "2026-10-26T23:59:00+08:00", min_joined: 3 }] });
     const card = await screen.findByRole("article", { name: "Dinner with friends" });
+    const pending = screen.getByRole("region", { name: "Pending action" });
+    const actions = screen.getByRole("navigation", { name: "Group planning" });
+    expect(pending.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(card).getByText("Reply by Mon, 26 Oct")).toBeTruthy();
     expect(within(card).queryByText(/joined/)).toBeNull();
     expect(within(card).getByRole("link", { name: "Fill in my availabilities for Dinner with friends" }).getAttribute("href")).toBe("/poll/dinner/mine");
@@ -63,7 +70,7 @@ describe("group page", () => {
       { ...poll, id: "answered", title: "Already answered", joined_by_me: true, availability_submitted: true },
       { ...poll, id: "results", title: "Results ready", status: "OPEN" },
     ] });
-    expect(await screen.findByRole("heading", { name: "Needs you" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Pending action" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Fill in my availabilities for Project meeting" }).getAttribute("href")).toBe("/poll/pending/mine");
     expect(screen.getByRole("link", { name: "Fill in my availabilities for Project meeting" })).toBeTruthy();
     expect(screen.queryByText("Already answered")).toBeNull();
@@ -74,20 +81,20 @@ describe("group page", () => {
   it("hides pending action once the member has submitted availability", async () => {
     show({ ...base, polls: [{ id: "answered", title: "Project meeting", status: "COLLECTING", duration_minutes: 60, joined: 2, joined_by_me: true, organiser: false, availability_submitted: true, deadline_at: null, min_joined: 3 }] });
     await screen.findByText("Attendance history");
-    expect(screen.queryByRole("heading", { name: "Needs you" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Pending action" })).toBeNull();
     expect(screen.queryByText("Project meeting")).toBeNull();
   });
 
   it("keeps ready results actionable for the organiser even after submitting availability", async () => {
     show({ ...base, polls: [{ id: "results", title: "Project meeting", status: "OPEN", duration_minutes: 60, joined: 3, joined_by_me: true, organiser: true, availability_submitted: true, deadline_at: null, min_joined: 3 }] });
-    expect(await screen.findByRole("heading", { name: "Needs you" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Pending action" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Choose a time for Project meeting" }).getAttribute("href")).toBe("/poll/results");
     expect(screen.getByRole("link", { name: "Choose a time for Project meeting" })).toBeTruthy();
   });
 
   it("still asks a new organiser to submit availability after starting a poll", async () => {
     show({ ...base, polls: [{ id: "started", title: "Project meeting", status: "COLLECTING", duration_minutes: 60, joined: 1, joined_by_me: true, organiser: true, availability_submitted: false, deadline_at: null, min_joined: 3 }] });
-    expect(await screen.findByRole("heading", { name: "Needs you" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Pending action" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Fill in my availabilities for Project meeting" }).getAttribute("href")).toBe("/poll/started/mine");
   });
 
@@ -106,19 +113,56 @@ describe("group page", () => {
 });
 
 describe("first visit", () => {
-  it("asks whether the time is known, and shows a one-time intro", async () => {
+  it("shows the two-feature welcome modal, then dismisses it for this visit", async () => {
     localStorage.clear();
     show(base);
-    expect(await screen.findByText("Plan something")).toBeTruthy();
+    expect(await screen.findByRole("navigation", { name: "Group planning" })).toBeTruthy();
+    expect(screen.queryByText("Plan something")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Pending action" })).toBeNull();
     expect(screen.getByRole("link", { name: /Schedule an event/ }).getAttribute("href")).toBe("/g/n100500/new");
-    expect(screen.getByRole("link", { name: /Find a time that works/ }).getAttribute("href")).toBe("/g/n100500/find");
+    expect(screen.getByRole("link", { name: /Find a time/ }).getAttribute("href")).toBe("/g/n100500/find");
     expect(screen.getByText(/Nothing planned yet/)).toBeTruthy();
+    const guide = screen.getByRole("dialog", { name: "Welcome to the AmIFree Mini App" });
+    expect(within(guide).getByText("Schedule an event").tagName).toBe("STRONG");
+    expect(within(guide).getByText("Find a time").tagName).toBe("STRONG");
+    expect(within(guide).queryByText(/Asked for your availability/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
-    expect(screen.queryByText("How it works")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(localStorage.getItem("amifree.group-guide-hidden")).toBeNull();
     cleanup();
     show(base);
-    await screen.findByText("Plan something");
-    expect(screen.queryByText("How it works")).toBeNull();
+    await screen.findByRole("navigation", { name: "Group planning" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    sessionStorage.clear();
+    cleanup();
+    show(base);
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+
+  it("remembers the hide preference and still lets users reopen the guide", async () => {
+    show(base);
+    const guide = await screen.findByRole("dialog");
+    fireEvent.click(within(guide).getByRole("checkbox", { name: "Don’t show this again" }));
+    fireEvent.click(within(guide).getByRole("button", { name: "Got it" }));
+    expect(localStorage.getItem("amifree.group-guide-hidden")).toBe("1");
+    cleanup();
+    sessionStorage.clear();
+    show(base);
+    fireEvent.click(await screen.findByRole("button", { name: "Quick guide" }));
+    const reopened = screen.getByRole("dialog");
+    expect((within(reopened).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(within(reopened).getByRole("checkbox"));
+    fireEvent.click(within(reopened).getByRole("button", { name: "Got it" }));
+    expect(localStorage.getItem("amifree.group-guide-hidden")).toBeNull();
+  });
+
+  it("closes on Escape and restores page scrolling", async () => {
+    show(base);
+    const guide = await screen.findByRole("dialog");
+    expect(document.body.style.overflow).toBe("hidden");
+    fireEvent(guide, new Event("cancel", { cancelable: true }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.body.style.overflow).toBe("");
   });
 });
 

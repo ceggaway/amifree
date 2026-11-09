@@ -231,13 +231,28 @@ async def test_choosing_announces_the_time_with_calendar_buttons(service_factory
     announced = transport.sent[sent_before]
     assert int(announced["chat_id"]) == CHAT
     text = announced["text"]
-    assert "<b>project meeting is confirmed</b>" in text and announced["parse_mode"] == "HTML"
-    assert "📅 05/10/2026 (Mon)" in text and "🕑 08:00–10:00" in text
-    # A notice, not a card: no buttons.
-    assert not announced.get("reply_markup")
+    assert "<b>Project meeting confirmed</b>" in text and announced["parse_mode"] == "HTML"
+    assert "📅 5 Oct (Mon)" in text and "🕒 8AM–10AM SGT" in text
+    # One shared confirmation; the button opens each member's own response in the Mini App.
+    markup = announced["reply_markup"]
+    markup = json.loads(markup) if isinstance(markup, str) else markup
+    assert markup["inline_keyboard"][0][0]["text"] == "View event"
+    assert "Marked free? You’re added as <b>Going</b>" in text
+    assert "Check or change your response below." in text
+    assert not any(
+        "who filled in are free" in p.get("text", "") for p in transport.sent[sent_before:]
+    )
+    assert any(name == "deleteMessage" for name, _ in transport.calls)
+    assert len([p for p in transport.sent[sent_before:] if int(p["chat_id"]) == CHAT]) == 1
+    assert not any(
+        "the meeting time has been confirmed" in p.get("text", "")
+        for name, p in transport.calls
+        if name == "editMessageText"
+    )
     # Only people free at the chosen time are added as Going (their calendars follow). Someone
     # busy then, or whose times aren't known, is not.
     event = next(iter(repo.group_events.values()))
+    assert markup["inline_keyboard"][0][0]["url"] == service.settings.event_link(event.id)
     going = {e.user_id for e in repo.events.values() if e.group_event_id == event.id}
     assert going == {(await repo.ensure_user(t)).id for t in (1, 2, 3)}
     assert all(
@@ -344,8 +359,8 @@ async def test_organiser_can_choose_any_time_from_the_heatmap(service_factory):
     assert event.start_at == late and event.end_at == datetime(2026, 10, 5, 21, 30, tzinfo=SG)
     announced = transport.sent[sent_before]
     assert int(announced["chat_id"]) == CHAT
-    assert "📅 05/10/2026 (Mon)" in announced["text"] and "🕑 19:30–21:30" in announced["text"]
-    assert "👥 3 of 3 who filled in are free" in announced["text"]
+    assert "📅 5 Oct (Mon)" in announced["text"] and "🕒 7:30PM–9:30PM SGT" in announced["text"]
+    assert "who filled in are free" not in announced["text"]
     # A second choice changes nothing.
     try:
         await service.polls.finalize_at(organiser, repo.polls[poll.id], late)

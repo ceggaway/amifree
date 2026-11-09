@@ -65,6 +65,7 @@ class PollForm(BaseModel):
     first: date
     last: date
     reply_by: date | None = None
+    selected_dates: list[date] | None = Field(default=None, min_length=1, max_length=14)
 
 
 class RsvpRequest(BaseModel):

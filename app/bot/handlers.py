@@ -609,6 +609,7 @@ def register_handlers(application: Application, service):
                 chat_id=poll.chat_id,
                 message_id=poll.message_id,
                 reply_markup=card.keyboard,
+                parse_mode=card.parse_mode,
             )
         except RetryAfter:
             raise  # CardRefresher tries again when Telegram allows
@@ -652,6 +653,10 @@ def register_handlers(application: Application, service):
     async def chat_title(chat_id: int) -> str | None:
         return (await application.bot.get_chat(chat_id)).title
 
+    async def group_member_count(chat_id: int) -> int:
+        # Telegram includes AmIFree in the count; the bot cannot submit availability.
+        return max(0, (await application.bot.get_chat_member_count(chat_id)) - 1)
+
     async def check_admin(chat_id: int, telegram_id: int) -> bool:
         """Whether this person is an admin of the group. Network errors are raised."""
         try:
@@ -668,6 +673,7 @@ def register_handlers(application: Application, service):
     service.check_chat_admin = check_admin
     service.send_private = dm
     service.chat_title = chat_title
+    service.group_member_count = group_member_count
 
     async def refund_stars(telegram_id: int, charge_id: str):
         await application.bot.refund_star_payment(telegram_id, charge_id)

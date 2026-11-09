@@ -177,3 +177,61 @@ def test_a_poll_starting_today_still_gets_time_to_reply_and_says_where_times_sta
     # Replies closing at 9:53am: the first half-hour slot is 10am.
     odd = datetime(2026, 10, 5, 9, 53, tzinfo=SG)
     assert "📅 05/10/2026 (Mon) (from 10am)" in card_for(reference, end, odd)
+
+
+async def test_app_poll_invitation_counts_submissions_and_preserves_html_on_refresh(
+    service_factory, reference
+):
+    service, repo = service_factory(
+        bot_username="AmIFreeTestBot", mini_app_short_name="app", card_edit_interval_seconds=0
+    )
+    await with_schedule(repo, 1, 2)
+    bot, transport = make_bot(service)
+    async with bot:
+        owner = await repo.ensure_user(1)
+        member = await repo.ensure_user(2)
+        poll = await repo.create_poll(
+            owner.id,
+            -500,
+            210,
+            "project <meeting> & friends",
+            60,
+            datetime(2026, 11, 11, tzinfo=SG),
+            datetime(2026, 11, 18, tzinfo=SG),
+            datetime(2026, 11, 10, 23, 59, tzinfo=SG),
+        )
+        await repo.set_poll_message(poll.id, 101)
+        poll = await repo.get_poll(poll.id)
+        initial = await service.polls.render(poll)
+        assert initial.parse_mode == "HTML"
+        assert initial.text.startswith(
+            "🕒 <b>Find a time · Project &lt;meeting&gt; &amp; friends (1 hour)</b>"
+        )
+        assert (
+            "📅 11 Nov (Wed) – 17 Nov (Tue)\n⏰ <b>Reply by:</b> 10 Nov (Tue) · 11:59PM SGT"
+            in initial.text
+        )
+        assert "Click the button below to fill in your availability." in initial.text
+        assert "<b>0/8 responses</b>" in initial.text
+        assert "minimum" not in initial.text.lower() and "organiser picks" not in initial.text
+        # Empty submissions count; a calendar or joining on its own does not.
+        await service.polls.save_grid(owner.id, poll.id, [])
+        await service.polls.save_grid(owner.id, poll.id, [])
+        assert "<b>1/8 responses</b>" in (await service.polls.render(poll)).text
+        await repo.poll_join(poll.id, member.id)
+        assert "<b>1/8 responses</b>" in (await service.polls.render(poll)).text
+        await service.polls.save_grid(member.id, poll.id, [])
+        assert "<b>2/8 responses</b>" in (await service.polls.render(poll)).text
+        edits = [params for endpoint, params in transport.calls if endpoint == "editMessageText"]
+        assert edits and edits[-1]["parse_mode"] == "HTML"
+        assert "2/8 responses" in edits[-1]["text"]
+        # The denominator is refreshed from Telegram, not frozen when the poll was posted.
+        transport.member_count = 10
+        assert "<b>2/9 responses</b>" in (await service.polls.render(poll)).text
+
+        async def unavailable(_chat):
+            raise RuntimeError("temporarily unavailable")
+
+        service.group_member_count = unavailable
+        fallback = await service.polls.render(poll)
+        assert "<b>2 responses</b>" in fallback.text and "2/" not in fallback.text

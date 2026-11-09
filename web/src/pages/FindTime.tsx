@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, refusal } from "../api";
 import { day, shiftKey, startOfDay, todayKey } from "../format";
+import { MultiDatePicker } from "../components/MultiDatePicker";
 import { haptic } from "../telegram";
 import { forget } from "../useLoad";
 
@@ -10,25 +11,12 @@ const LENGTHS = [
   [60, "1 hour"],
   [90, "1.5 hours"],
   [120, "2 hours"],
-  [180, "3 hours"],
 ] as const;
-
-/** 30 min to 8 hours in half-hour steps: the grid works in half hours and the server allows 8 hours. */
-const CUSTOM_LENGTHS = Array.from({ length: 16 }, (_, index) => (index + 1) * 30);
-
-const lengthLabel = (minutes: number) => {
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  if (!hours) return `${rest} min`;
-  return `${hours} hour${hours === 1 ? "" : "s"}${rest ? ` ${rest} min` : ""}`;
-};
 
 const RANGES = [
   ["next 7 days", "Next 7 days"],
-  ["this week", "This week"],
-  ["next week", "Next week"],
   ["weekend", "This weekend"],
-  ["custom", "Pick dates"],
+  ["custom", "Choose dates"],
 ] as const;
 
 /** Monday (as a date key) of the week holding `key`. */
@@ -58,10 +46,21 @@ export function FindTime() {
   const navigate = useNavigate();
   const [requestId] = useState(() => crypto.randomUUID());
   const [choice, setChoice] = useState("next 7 days");
-  const [[first, last], setRange] = useState(() => range("next 7 days"));
+  const [[rangeFirst, rangeLast], setRange] = useState(() => range("next 7 days"));
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  const first = choice === "custom" && selectedDates.length ? selectedDates[0] : rangeFirst;
+  const last = choice === "custom" && selectedDates.length ? selectedDates[selectedDates.length - 1] : rangeLast;
   const [title, setTitle] = useState("");
   const [minutes, setMinutes] = useState(60);
   const [customLength, setCustomLength] = useState(false);
+  const [customHours, setCustomHours] = useState("1");
+  const [customMinutes, setCustomMinutes] = useState("0");
+  const hours = Number(customHours);
+  const remainder = Number(customMinutes);
+  const customTotal = hours * 60 + remainder;
+  const customInvalid = !Number.isInteger(hours) || !Number.isInteger(remainder)
+    || hours < 0 || hours > 8 || remainder < 0 || remainder > 59
+    || customTotal < 30 || customTotal > 480;
   const [replyBy, setReplyBy] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -75,15 +74,21 @@ export function FindTime() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (customLength && customInvalid) return;
+    if (choice === "custom" && !selectedDates.length) {
+      setError("Select at least one date.");
+      return;
+    }
     setBusy(true);
     try {
       const made = await api.createPoll(code, {
         request_id: requestId,
         title: title.trim(),
-        minutes,
+        minutes: customLength ? customTotal : minutes,
         first,
         last,
         reply_by: chosenReply || null,
+        ...(choice === "custom" ? { selected_dates: selectedDates } : {}),
       });
       haptic("success");
       forget(`group:${code}`);
@@ -99,14 +104,14 @@ export function FindTime() {
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>Find a time that works</h1>
+      <h1 className="feature-heading"><span className="feature-heading-icon" aria-hidden="true">🕒</span><span>Find a time</span></h1>
       <label>
-        What for
+        Purpose
         <input value={title} maxLength={200} required placeholder="Project meeting" onChange={(e) => setTitle(e.target.value)} />
       </label>
       <fieldset>
-        <legend>How long?</legend>
-        <div className="row">
+        <legend>Estimated time</legend>
+        <div className="row duration-options">
           {LENGTHS.map(([value, label]) => {
             const on = !customLength && minutes === value;
             return (
@@ -128,27 +133,41 @@ export function FindTime() {
             type="button"
             className={`chip-button${customLength ? " on" : ""}`}
             aria-pressed={customLength}
-            onClick={() => setCustomLength(true)}
+            onClick={() => {
+              if (!customLength) {
+                setCustomHours(String(Math.floor(minutes / 60)));
+                setCustomMinutes(String(minutes % 60));
+              }
+              setCustomLength(true);
+            }}
           >
             Custom
           </button>
         </div>
         {customLength && (
-          <label>
-            Length
-            <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
-              {CUSTOM_LENGTHS.map((value) => (
-                <option key={value} value={value}>
-                  {lengthLabel(value)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="card custom-duration" role="group" aria-label="Custom duration">
+            <div className="pair">
+              <label>
+                Hours
+                <input type="number" inputMode="numeric" min={0} max={8} step={1}
+                  value={customHours} onChange={(event) => setCustomHours(event.target.value)}
+                  aria-describedby="custom-duration-help" />
+              </label>
+              <label>
+                Minutes
+                <input type="number" inputMode="numeric" min={0} max={59} step={1}
+                  value={customMinutes} onChange={(event) => setCustomMinutes(event.target.value)}
+                  aria-describedby="custom-duration-help" />
+              </label>
+            </div>
+            <p id="custom-duration-help" className="hint">Total duration: 30 minutes to 8 hours.</p>
+            {customInvalid && <p className="error" role="alert">Enter whole hours and minutes totalling 30 minutes to 8 hours.</p>}
+          </div>
         )}
       </fieldset>
       <fieldset>
         <legend>Which days?</legend>
-        <div className="row">
+        <div className="row date-options">
           {RANGES.map(([name, label]) => (
             <button
               key={name}
@@ -165,16 +184,7 @@ export function FindTime() {
           ))}
         </div>
         {choice === "custom" ? (
-          <div className="pair">
-            <label>
-              From
-              <input type="date" value={first} min={todayKey()} required onChange={(e) => setRange([e.target.value, last < e.target.value ? e.target.value : last])} />
-            </label>
-            <label>
-              To
-              <input type="date" value={last} min={first} max={shiftKey(first, 13)} required onChange={(e) => setRange([first, e.target.value])} />
-            </label>
-          </div>
+          <MultiDatePicker value={selectedDates} onChange={setSelectedDates} />
         ) : (
           <p className="hint">
             {first === last ? day(startOfDay(first)) : `${day(startOfDay(first))} to ${day(startOfDay(last))}`}
@@ -196,7 +206,7 @@ export function FindTime() {
       )}
       {error && <p className="error">{error}</p>}
       <button type="submit" className="on big" disabled={busy}>
-        {busy ? "Posting…" : "Post the poll to the group"}
+        {busy ? "Posting…" : "Post to group"}
       </button>
     </form>
   );

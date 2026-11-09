@@ -273,3 +273,44 @@ async def test_retired_creation_commands_do_not_parse_or_create_plans(service_fa
     assert not repo.group_events and not repo.polls and not service.extractor.calls
     assert all("in the app" in message["text"] for message in transport.sent)
     assert "in the app" in (await service.command(1, "event"))[0].text
+
+
+async def test_app_rsvp_card_matches_the_new_layout_and_updates_in_place(service_factory):
+    service, repo = service_factory(
+        extraction(title="project <meeting> & friends", location="Room <A>"),
+        bot_username="AmIFreeTestBot",
+        mini_app_short_name="app",
+        card_edit_interval_seconds=0,
+    )
+    bot, transport = make_bot(service)
+    async with bot:
+        await seed_event_card(bot, TEXT)
+        original = transport.sent[-1]
+        markup = (
+            json.loads(original["reply_markup"])
+            if isinstance(original["reply_markup"], str)
+            else original["reply_markup"]
+        )
+        assert original["parse_mode"] == "HTML"
+        assert "<b>Project &lt;meeting&gt; &amp; friends</b>" in original["text"]
+        assert "7PM–9PM SGT" in original["text"]
+        assert "📍 Room &lt;A&gt;" in original["text"]
+        assert "👥 <b>0 going · 0 can’t</b>" in original["text"]
+        assert [b["text"] for row in markup["inline_keyboard"] for b in row] == [
+            "Going",
+            "Can't",
+            "View event",
+        ]
+        posted = len(transport.sent)
+        go, no = [button["callback_data"] for button in markup["inline_keyboard"][0]]
+        for index, data in enumerate([go, go, no]):
+            await bot.process_update(
+                Update.de_json(group_tap(data, 2, update_id=99001 + index), bot.bot)
+            )
+        edits = [params for method, params in transport.calls if method == "editMessageText"]
+        assert edits and all(edit.get("parse_mode") == "HTML" for edit in edits)
+        assert "👥 <b>0 going · 1 can’t</b>" in edits[-1]["text"]
+        assert "Let the group know if you’re coming." in edits[-1]["text"]
+        assert len(transport.sent) == posted
+        event = next(iter(repo.group_events.values()))
+        assert markup["inline_keyboard"][1][0]["url"] == service.settings.event_link(event.id)

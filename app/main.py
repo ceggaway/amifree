@@ -1,6 +1,7 @@
 import asyncio
 import hmac
 import logging
+import os
 import re
 from collections import OrderedDict
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -371,7 +372,12 @@ def create_app(
         )
 
     @app.get("/healthz")
-    async def health():
+    async def health(response: Response):
+        # Render supplies the deployed SHA; expose only a validated public revision, never secrets.
+        revision = os.environ.get("RENDER_GIT_COMMIT", "")
+        if re.fullmatch(r"[0-9a-fA-F]{40,64}", revision):
+            response.headers["X-AmIFree-Commit"] = revision
+        response.headers["Cache-Control"] = "no-store"
         return {"status": "ok", "service": "amifree", "bot_mode": settings.bot_mode}
 
     @app.get("/readyz")

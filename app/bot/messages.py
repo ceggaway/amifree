@@ -218,13 +218,31 @@ def group_card(
         when = f"{display_date(event.start_at)} · {time_range(event.start_at, event.end_at)}"
         return Reply(f"📣 {event.title} · ended\n{when} · {count}")
     if app_url:
-        series = "\n🔁 Repeats. Details lets you say Going to every session." * bool(
-            event.series_id
-        )
-        tip = "\nDetails: check if you're free (only you see it) and who's going."
-    else:
-        series = "\n🔁 Recurring event. Going to all adds every session." * bool(event.series_id)
-        tip = "\nAm I free? shows a private check that only you can see."
+        start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
+        title = event.title[:1].upper() + event.title[1:]
+        when = f"📅 {start.day} {start:%b (%a)} · {personal_time(start)}"
+        if start.date() != end.date():
+            when += f" – {end.day} {end:%b (%a)} · {personal_time(end)} SGT"
+        else:
+            when += f"–{personal_time(end)} SGT"
+        lines = [f"<b>{escape(title)}</b>", when]
+        if event.location:
+            lines.append(f"📍 {escape(event.location)}")
+        if event.notes:
+            lines.append(escape(event.notes[:500]))
+        if event.assumed_duration:
+            lines.append("End time estimated.")
+        if event.series_id:
+            lines.append("🔁 Repeats. Open View event to respond to every session.")
+        lines += [
+            "",
+            "Let the group know if you’re coming.",
+            "",
+            f"👥 <b>{counts.get('GOING', 0)} going · {counts.get('DECLINED', 0)} can’t</b>",
+        ]
+        return Reply("\n".join(lines), group_keyboard(event, app_url), parse_mode="HTML")
+    series = "\n🔁 Recurring event. Going to all adds every session." * bool(event.series_id)
+    tip = "\nAm I free? shows a private check that only you can see."
     body = (
         details(event)
         + series

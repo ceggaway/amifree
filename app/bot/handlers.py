@@ -318,7 +318,11 @@ async def deliver_group(update: Update, service, result):
             await service.groups.posted(result.adopt_event_id, query.message.message_id)
         if result.card:
             try:
-                await query.edit_message_text(result.card.text, reply_markup=result.card.keyboard)
+                await query.edit_message_text(
+                    result.card.text,
+                    reply_markup=result.card.keyboard,
+                    parse_mode=result.card.parse_mode,
+                )
             except RetryAfter:
                 # Telegram's edit limit for this group: the answer is saved, so redraw later.
                 parts = (query.data or "").split(":")
@@ -336,7 +340,7 @@ async def deliver_group(update: Update, service, result):
                 pass
     if result.post:
         sent = await update.effective_message.reply_text(
-            result.post.text, reply_markup=result.post.keyboard
+            result.post.text, reply_markup=result.post.keyboard, parse_mode=result.post.parse_mode
         )
         if result.group_event_id:
             await service.groups.posted(result.group_event_id, sent.message_id)
@@ -592,6 +596,7 @@ def register_handlers(application: Application, service):
                 chat_id=event.chat_id,
                 message_id=event.message_id,
                 reply_markup=card.keyboard,
+                parse_mode=card.parse_mode,
             )
         except RetryAfter:
             raise  # CardRefresher tries again when Telegram allows

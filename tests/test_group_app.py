@@ -125,6 +125,15 @@ async def test_create_an_event_from_the_app_posts_one_card(hub, reference):
     assert again.json() == first.json() and len(posted) == 1  # a retried submit: one card
     chat_id, card = posted[0]
     assert chat_id == CHAT and "Dinner" in card.text
+    assert card.parse_mode == "HTML"
+    assert card.text.startswith("<b>Dinner</b>\n📅 ")
+    assert "Let the group know if you’re coming." in card.text
+    assert "👥 <b>0 going · 0 can’t</b>" in card.text
+    assert [b.text for row in card.keyboard.inline_keyboard for b in row] == [
+        "Going",
+        "Can't",
+        "View event",
+    ]
     # The card opens this event in the app.
     urls = [b.url for row in card.keyboard.inline_keyboard for b in row if b.url]
     assert urls == [f"https://t.me/AmIFreeTestBot/app?startapp=ev_{first.json()['id']}"]

@@ -1,5 +1,7 @@
 # Verification report
 
+> **Update, November 2026:** AmIFree is now deployed on Telegram and has been used by real users since the pilot and at STePS. The sections below are dated test logs. Their "not run against live Telegram" notes describe the automated checks at that date, not the product as it is today.
+
 ## UI and release audit: 19 October 2026
 
 Audited the Mini App redesign against `origin/main` at `9e6cea9`, including the latest calendar changes. Consolidated duplicate styling, strengthened status/link contrast, preserved mobile safe-area spacing, and prevented mobile form zoom. Replaced decorative emoji with SVG icons or plain labels. Updated React Router, Vite, Vitest, and the React plugin to patched releases; the frontend requires Node.js 22.12+ (22.x), 24.x, or 26+.

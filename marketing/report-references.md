@@ -52,7 +52,7 @@ All links checked and open (HTTP 200).
 | §4.4, end of last paragraph | "…actual deployment and real-user reliability require separate evidence. [P7, P9, P10]" | "…actual deployment and real-user reliability are evidenced separately in Section 8 (131 users; 142 of 158 reminders delivered). [P7, P9, P10]" | Section 8 now has the live evidence, so point to it |
 | §5.4, 2nd paragraph | "Removing the separate command reduced…" | "Removing /block from the command menu reduced… (It still works as a hidden shortcut, and busy times can be typed directly, e.g. "busy sat 2-6pm".)" | Code: `/block` still works but is gone from the menu. This settles the "/block discrepancy" item on p.19 |
 | §5.5 | "Schedule an eventand Find a time" | "Schedule an event and Find a time" | Missing space |
-| §8.5 STePS paragraph | "No STePS event is recorded in the data yet… Once its date is known…" | Use 12 Nov (Section 7 gives this date) and report signups on 12–15 Nov | The date is known; §7 and §8.5 currently contradict each other |
+| §8.5 STePS paragraph | "No STePS event is recorded in the data yet… Once its date is known…" | Use the STePS paragraph in `report-fill-ins.md` (11 Nov: 12 signups, 2 connected a calendar) | STePS was 11 Nov; §7 wrongly says 12 Nov |
 | §10 table | "ceggaway (name to confirm)" | "Cedric Tay Shi Han" | GitHub account ceggaway is Cedric. Commit counts checked to 9 Nov: Angel 125, Cedric 57, Goh Rou Shuen 15 (two accounts) ✅ |
 | §10 Libraries | "…python-dateutil and cryptography." | "…python-dateutil, cryptography, openai and posthog." | Both are in `requirements.txt` |
 | §11 Monetisation | "pay 250 Telegram Stars per group" | "pay 250 Telegram Stars per group for 30 days" | `pro_days = 30` in config |

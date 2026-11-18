@@ -23,7 +23,7 @@ There's no Figure 1 or 2; Figures 11 and 12 come first, in §4. **Renumber: Figu
 | 4 (§5.3) | `app/assets/ios/ios_step1.png`–`ios_step4.png` side by side (or `app/assets/google/step5_dialog.png`) | **Figure 4. Revised calendar guide (iPhone).** Each step is its own message with a numbered instruction, a screenshot marking where to tap, and Next/Back buttons. Introduced 19–25 Oct, replacing one long block of text. |
 | 5 (§5.4) | Screenshot of a plan card, then the same card after tapping Save | **Figure 5. Event card before and after saving.** The availability verdict comes first, then the title and details. Saving edits the same message in place instead of sending a new one. |
 | 6 (§5.5) | `marketing/final-poster/shots/home.png` | **Figure 6. Mini App group home.** *Schedule an event* (time known) and *Find a time* (collect availability first) are the two main actions. *Pending* lists anything waiting on the viewer. |
-| 7 (§6.2) | Screenshot of the post as sent in a channel. Text is in `marketing/telegram-post.md` | **Figure 7. Main Telegram promo post (sent around 29–30 Oct [confirm]).** It opens with familiar problems (double-booking, lost venues, "when is everyone free?"), then splits into *Your plans* and *Group plans*, ending with one call to action: open @amifree_devv_bot. |
+| 7 (§6.2) | Screenshot of the post as sent in a channel. Text is in `marketing/telegram-post.md` | **Figure 7. Main Telegram promo post.** It opens with familiar problems (double-booking, lost venues, "when is everyone free?"), then splits into *Your plans* and *Group plans*, ending with one call to action: open @amifree_devv_bot. |
 | 8 (§6.3) | Still from the Instagram reel | **Figure 8. Instagram reel still.** **[Insert reel URL]** |
 | 9 (§6.3) | `marketing/AmIFree-Poster-A3-v2.jpg` beside **[photo of the poster up at Central Library]** | **Figure 9. A3 poster and its placement at Central Library.** A short feature list and a large QR code that opens the bot. |
 | 10 (§6.4) | A frame from `marketing/demo/amifree-demo-split.mp4` (pause it and take a screenshot) | **Figure 10. Demo video shown at the STePS booth.** Split screen: a forwarded invite turned into a checked card on one side, and a group RSVP card updating live on the other. **[Insert video link: upload the mp4 to YouTube (unlisted) or Google Drive]** |
@@ -32,33 +32,33 @@ There's no Figure 1 or 2; Figures 11 and 12 come first, in §4. **Renumber: Figu
 
 ### §8.2: which campaign ran on each spike day?
 
-The repo only partly answers this. Confirm each date with the team, then replace the "Open question" bullet with:
+Replace the "Open question" bullet with:
 
-> Signup spikes line up with campaign dates: **21 Oct** (19 signups) **[campaign]**; **29 Oct** (33), when the Telegram promo post went out to faculty, hall and CCA channels (the post and library posters were finalised on 30 Oct **[confirm send date]**); **2 Nov** (14) **[campaign]**; and **11 Nov** (12) **[campaign: likely posters or the giveaway, which launched around 8 Nov]**. Timing is the only link, so these are associations, not attributions.
+> The first three spikes, **21 Oct** (19 signups), **29 Oct** (33) and **2 Nov** (14), were user-testing rounds, when we sent the bot to friends, project groups and Telegram chats and asked them to try it. The fourth, **11 Nov** (12), was STePS, where the giveaway also launched. Timing is the only link, so these are associations, not attributions.
 
 ### §8.5: STePS
 
-§7 already gives the date (12 Nov), so this can be measured. Run this in the **Supabase SQL Editor** (it's read-only):
+Results from the Supabase query (signups by day, Singapore time; "connected" means NUSMods, a calendar link or Google sharing, as in §8.1):
 
-```sql
--- Signups per day around STePS, and how many connected a calendar
-with u as (
-  select id, (created_at at time zone 'Asia/Singapore')::date as day from public.users
-  where created_at >= '2026-11-09' and created_at < '2026-11-16'
-)
-select day, count(*) as signups,
-  count(*) filter (where
-       exists (select 1 from public.timetable_blocks t where t.user_id = u.id)
-    or exists (select 1 from public.personal_calendars p where p.user_id = u.id)
-    or exists (select 1 from public.google_connections g where g.user_id = u.id)) as connected
-from u group by day order by day;
-```
+| Day | Signups | Connected a calendar |
+|---|---|---|
+| 9 Nov | 2 | 0 |
+| 10 Nov | 2 | 0 |
+| **11 Nov (STePS)** | **12** | **2** |
+| 12 Nov | 1 | 0 |
+| 13–15 Nov | 0 | 0 |
 
-"Connected" uses the same three sources as §8.1 (NUSMods, calendar link, Google sharing). Then replace the STePS paragraph with:
+Replace the STePS paragraph and its "Open question" bullet with:
 
-> **STePS (12 Nov).** **[N]** users started AmIFree on 12–15 Nov, against **[N]** on 9–11 Nov, and **[N]** of them connected a calendar. The 10–11 Nov outage falls just before this window, so the comparison is rough.
+> **STePS (11 Nov).** 12 people started AmIFree on STePS day, against 2 a day on 9–10 Nov, making it the fourth-largest signup day of the pilot. The giveaway launched the same day, so the two effects can't be separated. 2 of the 12 (17%) connected a calendar, the same rate as the pilot overall. The lift did not last: 1 signup followed on 12 Nov and none on 13–15 Nov. STePS also coincided with the outage in §8.6, which ended at 14:07 that day, so visitors who tried a plan before then got no reply.
 
-And for the targets question, replace the bullet with:
+**The STePS date is 11 Nov, not 12 Nov.** Change it in:
+- §7 milestone table: "12 Nov: STePS demonstration and outreach" → "11 Nov".
+- §8.6 outage bullet: add "This overlapped with STePS on 11 Nov."
+
+**One number to check (§8.6):** it says 27 people pressed /start during the outage (10 Nov 14:28 to 11 Nov 14:07). The query found at most 14 new signups across 10–11 Nov combined, so the 27 must include repeat presses or existing users. Reword it to "/start was pressed 27 times", or ask Angel which it counts.
+
+For the targets question, replace the bullet with:
 
 > Targets came from the original proposal: 100 sign-ups, 40 weekly users and five active groups (§7). Results: 131 sign-ups (met), a peak of 33 weekly active users (not met) and 7 group chats with events from 5 organisers (met on count, though driven by a few organisers).
 
@@ -85,7 +85,6 @@ Get it from platform.openai.com → Usage, for 11 Oct–14 Nov. Replace the bull
 | §7 footnote (M1) | The milestone page from the proposal or Progress Report 2, as an appendix image |
 | §9.3 | The STePS contact record: group, role, date, concern and follow-up status. If there isn't one, delete the placeholder; the paragraph above it already says the status is prospective |
 | Fig 3, 5, 7, 8, 9 | Screenshots and photos listed in section 2 |
-| §8.2 | Confirm campaign dates |
 
 ## 5. Already checked in the repo (no change needed)
 

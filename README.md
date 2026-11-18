@@ -15,9 +15,9 @@ One FastAPI backend serves the Telegram bot, a JSON API and a React Telegram Min
 | "Still coming?" answered with one tap | Availability heatmap in the Mini App, attendance list, export and turnout stats |
 | | Optional event detection, switched on by a group admin |
 
-NUSMods is optional. After Save or Going, the bot offers 📅 Google Calendar (a pre-filled link) and 🍎 Apple Calendar (an .ics file, also works in Outlook). No calendar sign-in is needed; AmIFree does not read outside calendars, and cards say so. Change alerts offer the same buttons: the .ics replaces the old entry, a Google link adds a new one. OCR of posters is not supported.
+NUSMods is optional. After Save or Going, the bot offers 📅 Google Calendar (a pre-filled link) and 🍎 Apple Calendar (an .ics file, also works in Outlook). No calendar sign-in is needed. AmIFree reads an outside calendar only if the user connects one (a private iCal link or a shared Google calendar), and then only busy times, never titles, places or attendees. Change alerts offer the same buttons: the .ics replaces the old entry, a Google link adds a new one. Posters and screenshots are read too (see Weekly events and posters).
 
-**Status:** everything above is implemented and covered by the local test suite. None of the new features has been exercised against live Telegram, OpenAI or a hosted Supabase project. See `docs/verification.md`.
+**Status:** everything above is implemented, covered by the local test suite, and deployed on Telegram, where it has been used by real users since the pilot and at STePS. The automated tests use simulated Telegram, OpenAI and Supabase responses; see `docs/verification.md` for what they do and don't cover.
 
 ## Privacy by design
 

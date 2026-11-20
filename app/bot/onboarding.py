@@ -160,7 +160,7 @@ GUIDES = {
     "ios": (
         "🍎 <b>Apple Calendar · iPhone</b> · about 1 minute\n"
         "Do this on your iPhone.\n\n"
-        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Mine's Google</b> below "
+        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Google setup</b> below "
         "to switch to the Google setup guide.\n\n"
         "1. Open the <b>Calendar</b> app.\n"
         "2. Tap the calendar icon at the bottom right.\n"
@@ -177,7 +177,7 @@ GUIDES = {
     "mac": (
         "💻 <b>Apple Calendar · Mac</b> · about 1 minute\n"
         "Do this on your Mac. (iPad? Use the iPhone steps.)\n\n"
-        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Mine's Google</b> below "
+        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Google setup</b> below "
         "to switch to the Google setup guide.\n\n"
         "1. Open the <b>Calendar</b> app.\n"
         "2. In the left list, under <b>iCloud</b>, find your calendar.\n"
@@ -285,7 +285,7 @@ FEED_REFRESH_TIP = (
 APPLE_OTHER_DEVICE = {
     "iphone": (
         "📱 It's on this iPhone. Use a Mac too? Add it there once: open this chat on your Mac "
-        "and tap <b>➕ Add my plans on another device</b>."
+        "and tap <b>➕ Add on another device</b>."
     ),
     "mac": (
         "💻 It's on your Mac. Saved it to <b>iCloud</b>? It's on your iPhone too. Chose "
@@ -306,7 +306,7 @@ def apple_device(user_agent: str) -> str | None:
 
 
 def another_device_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[_button("➕ Add my plans on another device", "apple1")]])
+    return InlineKeyboardMarkup([[_button("➕ Add on another device", "apple1")]])
 
 
 APPLE_ALL_SET = (
@@ -317,7 +317,7 @@ APPLE_ALL_SET = (
 
 
 # Apple part 2, one step per message, each with the picture of that screen
-# (app/assets/ios). "Mine's Google" shows on the step whose text mentions Gmail.
+# (app/assets/ios). "Google setup" shows on the step whose text mentions Gmail.
 APPLE_STEPS = {
     "ios": (
         (
@@ -329,7 +329,7 @@ APPLE_STEPS = {
             "ios_step2.png",
             "Under <b>iCloud</b>, tap the <b>ⓘ</b> next to the calendar you use.\n\n"
             "Only see <b>Gmail</b>, no iCloud? Your calendar is Google: tap "
-            "<b>📅 Mine's Google</b>.",
+            "<b>📅 Google setup</b>.",
         ),
         (
             "ios_step3.png",
@@ -350,7 +350,7 @@ APPLE_STEPS = {
             "In the <b>Calendar</b> app, find your calendar under <b>iCloud</b> on the left. "
             "Hover over it, click the <b>person icon</b>, then tick <b>Public Calendar</b>.\n\n"
             "No list? Click the calendar icon at the top. Only see <b>Gmail</b>? Tap "
-            "<b>📅 Mine's Google</b>.",
+            "<b>📅 Google setup</b>.",
         ),
         (
             "mac_step2.png",
@@ -393,17 +393,17 @@ def apple_step(
     alternatives = []
     if n == 1:
         alternatives.extend(
-            [_button("💻 On a Mac instead?", "apple2mac")]
+            [_button("💻 Mac steps", "apple2mac")]
             if device == "ios"
-            else [_button("📱 On an iPhone instead?", "apple2")]
+            else [_button("📱 iPhone steps", "apple2")]
         )
     if (device, n) in GOOGLE_HINT:
-        alternatives.append(_button("📅 Mine's Google", "google"))
+        alternatives.append(_button("📅 Google setup", "google"))
     if another and n == 1:
-        alternatives.append(_button("➕ Add my plans on another device", "apple1"))
+        alternatives.append(_button("➕ Add on another device", "apple1"))
     if alternatives:
         rows.append(alternatives)
-    rows.append([*nav, _button("⏭ Skip this part", "appleskip")])
+    rows.append([*nav, _button("⏭ Skip for now", "appleskip")])
     return text, photo, InlineKeyboardMarkup(rows)
 
 
@@ -661,7 +661,7 @@ OUTLOOK_STEPS = {
         "Sign in if asked, then click <b>Import</b>.\n\n"
         "⏳ Outlook checks for new plans every few hours, so they can take a while to show "
         "up there. Your reminders here are on time either way.",
-        "Button didn't work? Add it by hand:\n\n"
+        "Manual steps Add it by hand:\n\n"
         "Open <b>outlook.office.com</b> (school or work email) or <b>outlook.live.com</b> "
         "(personal email). Click the <b>calendar icon</b>, then <b>Add calendar</b> → "
         "<b>Subscribe from web</b>.\n\n"
@@ -732,23 +732,23 @@ def outlook_step(
         rows = outlook_subscribe_rows(url)
         rows.append(
             [
-                InlineKeyboardButton("Button didn't work?", callback_data="o:1:2"),
-                InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"),
+                InlineKeyboardButton("Manual steps", callback_data="o:1:2"),
+                InlineKeyboardButton("Next: clash checks", callback_data="o:2:1"),
             ]
         )
     else:
         if n < len(steps):
             nav.append(InlineKeyboardButton("Next ›", callback_data=f"o:{part}:{n + 1}"))
         elif part == 1:
-            nav.append(InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"))
+            nav.append(InlineKeyboardButton("Next: clash checks", callback_data="o:2:1"))
         # Part 2 starts with one tap to Shared calendars, like part 1's subscribe buttons.
         rows = [*outlook_shared_rows(), nav] if (part, n) == (2, 1) else [nav]
     # Provider choices belong together; keep progression and exit controls in one row.
     rows = [row for row in rows if row]
     if rows and len(rows[-1]) < 3:
-        rows[-1].append(_button("« Other calendars", "calendar"))
+        rows[-1].append(_button("‹ Change calendar", "calendar"))
     else:
-        rows.append([_button("« Other calendars", "calendar")])
+        rows.append([_button("‹ Change calendar", "calendar")])
     return text, photo, InlineKeyboardMarkup(rows)
 
 
@@ -764,10 +764,8 @@ OUTLOOK_SHARED = "https://outlook.{host}.com/calendar/options/calendar/SharedCal
 def outlook_shared_rows() -> list[list[InlineKeyboardButton]]:
     return [
         [
-            InlineKeyboardButton(
-                "🏫 School / work Outlook ↗", url=OUTLOOK_SHARED.format(host="office")
-            ),
-            InlineKeyboardButton("📧 Personal Outlook ↗", url=OUTLOOK_SHARED.format(host="live")),
+            InlineKeyboardButton("🏫 School / work ↗", url=OUTLOOK_SHARED.format(host="office")),
+            InlineKeyboardButton("📧 Personal ↗", url=OUTLOOK_SHARED.format(host="live")),
         ],
     ]
 
@@ -778,11 +776,11 @@ def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
     return [
         [
             InlineKeyboardButton(
-                "🏫 School / work Outlook",
+                "🏫 School / work",
                 url=OUTLOOK_SUBSCRIBE.format(host="office", url=webcal),
             ),
             InlineKeyboardButton(
-                "📧 Personal Outlook", url=OUTLOOK_SUBSCRIBE.format(host="live", url=webcal)
+                "📧 Personal", url=OUTLOOK_SUBSCRIBE.format(host="live", url=webcal)
             ),
         ],
     ]
@@ -799,9 +797,9 @@ def apple_part1_keyboard(
     ]
     navigation = []
     if part2 and not again:
-        navigation.append(_button("⏭ Skip to part 2", "apple2"))
+        navigation.append(_button("⏭ Skip this step", "apple2"))
     navigation.append(
-        _button("« Back", "apple") if again else _button("« Other calendars", "calendar")
+        _button("« Back", "apple") if again else _button("‹ Change calendar", "calendar")
     )
     rows.append(navigation)
     return InlineKeyboardMarkup(rows)
@@ -895,7 +893,7 @@ def google_step(
     )
     if n == len(GOOGLE_STEPS):
         text += (
-            "\n\nThen tap <b>Done</b> below.\n\n"
+            "\n\nThen tap <b>Done sharing</b> below.\n\n"
             "🔒 I only read your busy times, and only change events I add."
         )
     try:
@@ -911,18 +909,14 @@ def google_step(
         nav.append(InlineKeyboardButton("Next ›", callback_data=f"gs:phone:{n + 1}"))
     rows = []
     if n == len(GOOGLE_STEPS):
-        rows.insert(0, [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")])
+        nav.append(InlineKeyboardButton("✅ Done sharing", callback_data="gcal:done"))
     if n == 1:
         # Telegram buttons only take web links, so this is Google's address, which phones
         # hand to the app when it's installed.
-        rows.append(
-            [InlineKeyboardButton("📅 Open Google Calendar app ↗", url=GOOGLE_CALENDAR_URL)]
-        )
+        rows.append([InlineKeyboardButton("📅 Open Calendar app ↗", url=GOOGLE_CALENDAR_URL)])
         if computer:
-            nav.insert(
-                0, InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")
-            )
-        nav.append(_button("« Other calendars", "calendar"))
+            nav.insert(0, InlineKeyboardButton("💻 Computer steps", callback_data="gcal:computer"))
+        nav.append(_button("‹ Change calendar", "calendar"))
     if nav:
         rows.append(nav)
     return text, photo, InlineKeyboardMarkup(rows)
@@ -954,7 +948,7 @@ GOOGLE_SHARING_BLOCKED = (
 def google_email_first_keyboard() -> InlineKeyboardMarkup:
     # No phone button here: the email is needed either way, and the next screen offers the
     # phone steps (and sends a phone there by itself).
-    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
+    return InlineKeyboardMarkup([[_button("‹ Change calendar", "calendar")]])
 
 
 def google_share_screen(
@@ -970,7 +964,7 @@ def google_share_screen(
         f"<code>{html.escape(bot_email)}</code>\n\n"
         "<b>4.</b> Permission: <b>Make changes (see private events as free/busy)</b>\n\n"
         "<b>5.</b> Click <b>Send</b>.\n\n"
-        "Then tap <b>Done</b> below.\n\n"
+        "Then tap <b>Done sharing</b> below.\n\n"
         "🔒 I only read your busy times, and only change events I add."
     )
     try:
@@ -984,13 +978,13 @@ def google_share_screen(
             [
                 InlineKeyboardButton(
                     "📅 Open sharing settings ↗", url=google_share_link(email, base_url)
-                )
+                ),
+                InlineKeyboardButton("✅ Done sharing", callback_data="gcal:shared"),
             ],
-            [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:shared")],
             [
                 InlineKeyboardButton("📱 Phone steps", callback_data="gcal:start"),
-                InlineKeyboardButton("✏️ Different email", callback_data="gcal:computer"),
-                _button("« Other calendars", "calendar"),
+                InlineKeyboardButton("✏️ Change email", callback_data="gcal:computer"),
+                _button("‹ Change calendar", "calendar"),
             ],
         ]
     )
@@ -1132,9 +1126,7 @@ def unlink_guide(
             "settings</b> below → your calendar → <b>Integrate calendar</b> → <b>Secret address "
             "in iCal format</b> → <b>Reset</b>."
         )
-        rows.append(
-            [InlineKeyboardButton("📅 Open Google Calendar settings ↗", url=GOOGLE_SETTINGS)]
-        )
+        rows.append([InlineKeyboardButton("📅 Calendar settings ↗", url=GOOGLE_SETTINGS)])
     if icloud:
         sections.append(
             "🍎 <b>iCloud calendar you made public</b>\n"
@@ -1194,7 +1186,7 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("Open NUSMods ↗", url=nusmods_url())],
-                [_button("« Other calendars", "calendar")],
+                [_button("‹ Change calendar", "calendar")],
             ]
         )
     if screen == "export":
@@ -1202,18 +1194,18 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     if screen == "ios":
         return InlineKeyboardMarkup(
             [
-                [_button("💻 On a Mac instead?", "mac"), _button("📅 Mine's Google", "google")],
-                [_button("« Other calendars", "calendar")],
+                [_button("💻 Mac steps", "mac"), _button("📅 Google setup", "google")],
+                [_button("‹ Change calendar", "calendar")],
             ]
         )
     if screen == "mac":
         return InlineKeyboardMarkup(
             [
-                [_button("📱 On an iPhone instead?", "ios"), _button("📅 Mine's Google", "google")],
-                [_button("« Other calendars", "calendar")],
+                [_button("📱 iPhone steps", "ios"), _button("📅 Google setup", "google")],
+                [_button("‹ Change calendar", "calendar")],
             ]
         )
-    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
+    return InlineKeyboardMarkup([[_button("‹ Change calendar", "calendar")]])
 
 
 HTML_SCREENS = frozenset(

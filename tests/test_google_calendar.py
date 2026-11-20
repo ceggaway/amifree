@@ -356,7 +356,7 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     # With it, Google goes straight to sharing, computer first: it asks for the email.
     share = (await service.callback(1, "setup:google"))[0]
     assert "What's your Google email?" in share.text
-    assert labels(share) == ["« Other calendars"]
+    assert labels(share) == ["‹ Change calendar"]
     assert "googlelink" not in str(share.keyboard)
     link = (await service.callback(1, "setup:googlelink"))[0]
     assert "Secret address" in link.text or "link" in link.text.lower()
@@ -376,16 +376,16 @@ async def test_share_steps_are_phone_first_one_part_at_a_time(with_google, refer
         assert len(part.text) <= 1024  # Telegram's caption limit
         pictures.add(part.photo)
         assert ("‹ Back" in labels(part)) == (n > 1)
-        assert ("✅ Done, I've shared it" in labels(part)) == (n == 5)
+        assert ("✅ Done sharing" in labels(part)) == (n == 5)
         if n < 5:
             part = (await service.callback(1, tap(part, "Next ›")))[0]
     assert len(pictures) == 5 and "Make changes" in part.text
     first = (await service.callback(1, "gcal:start"))[0]
-    assert "Google Calendar</b> app" in first.text and "💻 On a computer instead?" in labels(first)
+    assert "Google Calendar</b> app" in first.text and "💻 Computer steps" in labels(first)
     # The phone part says to open the app, and its button says so too.
     [app] = [b for row in first.keyboard.inline_keyboard for b in row if b.url]
-    assert app.text == "📅 Open Google Calendar app ↗" and app.url == "https://calendar.google.com"
-    computer = (await service.callback(1, tap(first, "💻 On a computer instead?")))[0]
+    assert app.text == "📅 Open Calendar app ↗" and app.url == "https://calendar.google.com"
+    computer = (await service.callback(1, tap(first, "💻 Computer steps")))[0]
     assert "What's your Google email?" in computer.text and computer.edit
     for bad in ("gs:phone:6", "gs:phone:0", "gs:tablet:1", "gs:phone", "gs:phone:1:2"):
         assert "isn't valid" in (await service.callback(1, bad))[0].text
@@ -408,11 +408,11 @@ async def test_on_a_computer_the_email_comes_first_and_opens_its_settings(with_g
     )
     # An ordinary message in between doesn't break it; Done then checks and sends the code.
     await service.message(1, 3, "hello", reference)
-    code = (await service.callback(1, tap(share, "✅ Done, I've shared it")))[0]
+    code = (await service.callback(1, tap(share, "✅ Done sharing")))[0]
     assert "Last step" in code.text and google.calls == [("code", "me@gmail.com")]
     assert repo.users[1].pending["stage"] == "gcal_code"
     # Different email starts over.
-    again = (await service.callback(1, tap(share, "✏️ Different email")))[0]
+    again = (await service.callback(1, tap(share, "✏️ Change email")))[0]
     assert "What's your Google email?" in again.text
     # Changed their mind about the computer: the phone steps are one tap away.
     phone = (await service.callback(1, tap(share, "📱 Phone steps")))[0]
@@ -471,8 +471,8 @@ async def test_back_from_the_share_page_on_a_phone_shows_the_phone_steps(with_go
     assert step.text.startswith("📱 You're on your phone") and "1 of 5" in step.text
     assert step.photo and not step.edit and len(step.text) <= 1024
     # Known to be on a phone: no "On a computer instead?".
-    assert "💻 On a computer instead?" not in labels(step)
-    assert "💻 On a computer instead?" in labels((await service.callback(1, "gcal:start"))[0])
+    assert "💻 Computer steps" not in labels(step)
+    assert "💻 Computer steps" in labels((await service.callback(1, "gcal:start"))[0])
 
 
 async def test_done_without_an_email_asks_for_it(with_google, reference):

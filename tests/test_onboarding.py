@@ -128,7 +128,7 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
         assert guide.edit and all(p in guide.text for p in phrases), button
         if button == "🍎 Apple Calendar":
             continue  # its way out is Skip this part, tested on its own
-        back = (await service.callback(1, tap(guide, "« Other calendars")))[0]
+        back = (await service.callback(1, tap(guide, "‹ Change calendar")))[0]
         assert back.text == onboarding.PICK_CALENDAR
     home = (await service.callback(1, tap(picker, "« Back")))[0]
     assert home.text == onboarding.WELCOME
@@ -188,16 +188,16 @@ async def test_guides_say_where_to_do_it_and_how_to_spot_the_right_link(service_
 async def test_iphone_guide_has_a_mac_version_and_back(service_factory):
     service, _ = service_factory()
     iphone = (await service.callback(1, "setup:ios"))[0]
-    assert "💻 On a Mac instead?" in labels(iphone)
-    mac = (await service.callback(1, tap(iphone, "💻 On a Mac instead?")))[0]
+    assert "💻 Mac steps" in labels(iphone)
+    mac = (await service.callback(1, tap(iphone, "💻 Mac steps")))[0]
     assert mac.edit and mac.parse_mode == "HTML"
     assert all(p in mac.text for p in ("Do this on your Mac", "Public Calendar", "webcal://"))
     assert labels(mac) == [
-        "📱 On an iPhone instead?",
-        "📅 Mine's Google",
-        "« Other calendars",
+        "📱 iPhone steps",
+        "📅 Google setup",
+        "‹ Change calendar",
     ]
-    back = (await service.callback(1, tap(mac, "📱 On an iPhone instead?")))[0]
+    back = (await service.callback(1, tap(mac, "📱 iPhone steps")))[0]
     assert "Do this on your iPhone" in back.text
 
 

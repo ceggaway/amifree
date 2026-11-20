@@ -345,7 +345,7 @@ async def test_google_is_one_button_and_the_choice_comes_after(service_factory, 
     pick = (await service.callback(1, "setup:calendar"))[0]
     assert labels(pick) == [
         "📅 Google Calendar",
-        "🍎 Apple / iCloud",
+        "🍎 Apple Calendar",
         "📧 Outlook",
         "« Back",
     ]

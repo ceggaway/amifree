@@ -138,7 +138,7 @@ async def test_apple_part_one_is_one_tap_to_subscribe(service_factory, reference
     token = repo.users[1].calendar_feed_token
     add = part1.keyboard.inline_keyboard[0][0]
     assert add.text == "➕ Add to Calendar ↗" and add.url == f"{BASE}/cal/{token}/add"
-    assert {"Didn't work? Show the manual steps", "⏭ Skip to part 2"} <= set(labels(part1))
+    assert {"Manual steps", "⏭ Skip to part 2"} <= set(labels(part1))
     page = await service.subscribe_page(token)
     assert f'href="webcal://amifree.example/cal/{token}.ics"' in page
     assert await service.subscribe_page("x" * 43) is None

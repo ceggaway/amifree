@@ -112,13 +112,13 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
     picker = (await service.callback(1, tap(welcome, "📅 Connect calendar")))[0]
     assert picker.edit and labels(picker) == [
         "📅 Google Calendar",
-        "🍎 Apple / iCloud",
+        "🍎 Apple Calendar",
         "📧 Outlook",
         "« Back",
     ]
     expected = {
         # No public address in tests, so Apple goes straight to its busy-times part.
-        "🍎 Apple / iCloud": ["Part 2 of 2", "Step 1 of 4", "calendar icon"],
+        "🍎 Apple Calendar": ["Part 2 of 2", "Step 1 of 4", "calendar icon"],
         "📅 Google Calendar": ["calendar.google.com", "Secret address in iCal format"],
         # No public address in tests either, so Outlook goes straight to publishing.
         "📧 Outlook": ["Let me check when you're busy", "Step 1 of 3", "Shared calendars"],
@@ -126,7 +126,7 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
     for button, phrases in expected.items():
         guide = (await service.callback(1, tap(picker, button)))[0]
         assert guide.edit and all(p in guide.text for p in phrases), button
-        if button == "🍎 Apple / iCloud":
+        if button == "🍎 Apple Calendar":
             continue  # its way out is Skip this part, tested on its own
         back = (await service.callback(1, tap(guide, "« Other calendars")))[0]
         assert back.text == onboarding.PICK_CALENDAR
@@ -147,7 +147,7 @@ async def test_picker_asks_where_events_live_and_helps_the_unsure(service_factor
     # Not only iPhone users decide here.
     assert "Android" in unsure.text and "iPhone" in unsure.text and "Computer" in unsure.text
     assert "Exchange or Outlook" in unsure.text
-    assert labels(unsure) == ["📅 Google Calendar", "🍎 Apple / iCloud", "📧 Outlook", "« Back"]
+    assert labels(unsure) == ["📅 Google Calendar", "🍎 Apple Calendar", "📧 Outlook", "« Back"]
     back = (await service.callback(1, tap(unsure, "« Back")))[0]
     assert back.text == onboarding.PICK_CALENDAR
 
@@ -443,8 +443,8 @@ async def test_a_random_link_is_explained(service_factory, reference):
     assert reply.text == onboarding.NOT_A_SCHEDULE_LINK
     assert service.extractor.calls == []  # no LLM call for a bare link
     # One tap to the right guide, instead of "send /start and look again".
-    assert labels(reply) == ["🍎 iPhone / iCloud", "📅 Google", "📧 Outlook", "📚 NUSMods"]
-    guide = (await service.callback(1, tap(reply, "🍎 iPhone / iCloud")))[0]
+    assert labels(reply) == ["🍎 Apple Calendar", "📅 Google", "📧 Outlook", "📚 NUSMods"]
+    guide = (await service.callback(1, tap(reply, "🍎 Apple Calendar")))[0]
     assert guide.edit and "Share Link" in guide.text
 
 

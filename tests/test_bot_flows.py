@@ -196,7 +196,7 @@ async def test_clear_draft_and_unknown_message(service_factory, reference):
 
 async def test_new_user_saves_without_nusmods(service_factory, reference):
     service, repo = service_factory(extraction())
-    assert "forward me any message" in (await service.command(1, "start"))[0].text.lower()
+    assert "forward a message or photo" in (await service.command(1, "start"))[0].text.lower()
     card = (await service.message(1, 2, TEXT, reference))[0]
     assert card.text.startswith("✅ No clashes found")
     assert "Connect your timetable and personal calendar for a fuller clash check." in card.text

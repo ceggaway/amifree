@@ -507,6 +507,24 @@ async def error_handler(update, context):
     )
 
 
+async def report_abandoned(update: Update):
+    """Tell the person when the webhook stops retrying their update, instead of staying silent."""
+    chat = update.effective_chat
+    if chat is None:
+        return
+    if chat.type == ChatType.PRIVATE:
+        text = ERROR
+    elif update.callback_query:
+        return  # a new post in the group for one person's failed tap would only be noise
+    else:
+        text = "Something went wrong. Please try again."
+    try:
+        await update.get_bot().send_message(chat.id, text)
+    except Exception as exc:
+        # Blocked bot, Telegram outage: the update is abandoned either way.
+        log.warning("abandoned_notice_failed error_type=%s", type(exc).__name__)
+
+
 def attach_notifier(application: Application, service) -> Notifier:
     """Give the outbox worker a way to DM users through this bot."""
 

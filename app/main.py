@@ -23,7 +23,7 @@ from app.api.routes import build_router
 from app.bot import onboarding
 from app.bot.concurrency import KeyedLocks, PerUserProcessor, update_keys
 from app.bot.delivery import Delivery, webhook_delivery
-from app.bot.handlers import register_handlers
+from app.bot.handlers import register_handlers, report_abandoned
 from app.config import Settings
 from app.db.supabase import SupabaseRepository
 from app.services import analytics
@@ -36,6 +36,23 @@ from app.services.scheduling import SchedulingService
 from app.services.voice_reader import VoiceReader
 
 log = logging.getLogger(__name__)
+
+# Telegram holds a chat's later updates behind one it is still retrying, and keeps retrying for
+# up to a day. A failure that will not clear by itself (an expired API key) must not cost that.
+MAX_WEBHOOK_ATTEMPTS = 3
+
+
+def out_of_attempts(attempts: OrderedDict, update: Update) -> bool:
+    """Count a failed attempt at this update; True once it should stop being retried."""
+    if update.message and update.message.successful_payment:
+        return False  # The money moved: the record must not be lost to a run of errors.
+    count = attempts.pop(update.update_id, 0) + 1
+    if count >= MAX_WEBHOOK_ATTEMPTS:
+        return True
+    attempts[update.update_id] = count
+    while len(attempts) > 1000:
+        attempts.popitem(last=False)
+    return False
 
 
 def configure_logging(level):
@@ -87,6 +104,7 @@ def create_app(
         app.state.telegram = telegram_application
         app.state.update_locks = KeyedLocks()
         app.state.deliveries = OrderedDict()
+        app.state.update_attempts = OrderedDict()
         if service is not None:
             app.state.ready = True
             yield
@@ -462,6 +480,13 @@ def create_app(
                     await delivery.flush(update)
                 except Exception:
                     delivery.failed = True
+            if delivery.failed and out_of_attempts(app.state.update_attempts, update):
+                log.error("webhook_update_abandoned update_id=%s", update.update_id)
+                analytics.track("error", operation="webhook", error_type="retries_exhausted")
+                if delivery.replies is None:
+                    # With replies in hand the work is done; "try again" would repeat it.
+                    await report_abandoned(update)
+                delivery.failed = False  # Acknowledge it below, so the chat can move on.
             if delivery.replies is not None or not delivery.failed:
                 deliveries[update.update_id] = delivery
                 deliveries.move_to_end(update.update_id)

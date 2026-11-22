@@ -354,6 +354,7 @@ def build_router(settings: Settings) -> APIRouter:
                 body.first,
                 body.last,
                 body.reply_by,
+                body.selected_dates,
             )
         )
 

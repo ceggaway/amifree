@@ -66,7 +66,7 @@ def group_keyboard(event: GroupEvent, app_url: str | None = None) -> InlineKeybo
     if app_url:
         # Everything else (Am I free?, who's going, check-in, every session, organiser tools)
         # is on the event's page in the Mini App, so the card stays three buttons.
-        return InlineKeyboardMarkup([answer, [InlineKeyboardButton("📱 Details", url=app_url)]])
+        return InlineKeyboardMarkup([answer, [InlineKeyboardButton("View event", url=app_url)]])
     # Without the app: the same tools as buttons. Manage opens the organiser's private menu.
     rows = [
         answer,

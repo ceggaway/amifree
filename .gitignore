@@ -16,6 +16,7 @@ node_modules/
 .claude/worktrees/
 
 # Local marketing and pitch files, kept out of the repo
+/output/
 *.pptx
 /mascot-*.png
 /slide*-preview.png

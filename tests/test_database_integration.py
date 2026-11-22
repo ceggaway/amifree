@@ -570,3 +570,43 @@ async def test_deadlines_round_trip():
         assert await repo.enqueue_notification(user.id, "DEADLINE", f"{typed.id}:day", {})
         assert await repo.delete_deadline(user.id, typed.id)
         assert not await repo.delete_deadline(user.id, typed.id)
+
+
+async def test_explicit_poll_dates_persist_through_supabase_rpc(reference):
+    async with (
+        SQLGateway() as db,
+        httpx.AsyncClient(transport=httpx.MockTransport(db.handle)) as http,
+    ):
+        client = await acreate_client(
+            "https://sql-test.supabase.co",
+            "local-schema-test-key",
+            options=AsyncClientOptions(httpx_client=http),
+        )
+        repo = SupabaseRepository(client)
+        owner = await repo.ensure_user(21)
+        first = reference.replace(hour=0, minute=0, second=0, microsecond=0)
+        dates = [first.date(), (first + timedelta(days=2)).date()]
+        poll = await repo.create_poll(
+            owner.id,
+            -21,
+            21,
+            "Consultation",
+            60,
+            first,
+            first + timedelta(days=3),
+            selected_dates=dates,
+        )
+        assert poll.selected_dates == dates
+        assert (await repo.get_poll(poll.id)).selected_dates == dates
+        retry = await repo.create_poll(
+            owner.id,
+            -21,
+            21,
+            "Consultation",
+            60,
+            first,
+            first + timedelta(days=3),
+            selected_dates=[dates[0]],
+        )
+        assert retry.id == poll.id and retry.selected_dates == dates
+        await repo.ping()

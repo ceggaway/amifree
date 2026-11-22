@@ -330,3 +330,90 @@ async def test_an_update_stuck_in_processing_is_retaken_once_stale(service_facto
         repo.stale_updates.add(42)
         await client.post("/telegram/webhook", json=payload)
         assert len(service.extractor.calls) == 1 and repo.updates[42] == "done"
+
+
+async def test_a_failure_that_keeps_happening_stops_blocking_the_chat(service_factory, reference):
+    upstream = TimeoutError("upstream")
+    service, repo = service_factory(upstream, upstream, upstream, extraction())
+    await onboard(service, reference)
+    app, bot, transport = await webhook_app(service)
+    async with (
+        bot,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="https://example.test", headers=HEADERS
+        ) as client,
+    ):
+        stamp = int(reference.timestamp())
+        payload = message_payload(DINNER, 43, forward_timestamp=stamp)
+        codes = [(await client.post("/telegram/webhook", json=payload)).status_code for _ in "abc"]
+        assert codes == [503, 503, 200]
+        assert [r["text"][:15] for r in transport.sent] == ["I couldn't proc"]
+        assert repo.updates[43] == "done"
+        # Whatever Telegram sends next is handled as usual.
+        after = message_payload(DINNER, 44, forward_timestamp=stamp)
+        assert (await client.post("/telegram/webhook", json=after)).status_code == 200
+        assert "No clashes found" in transport.sent[-1]["text"]
+
+
+async def test_a_reply_that_cannot_be_sent_is_dropped_without_saying_try_again(
+    service_factory, reference
+):
+    service, repo = service_factory(extraction())
+    await onboard(service, reference)
+    app, bot, transport = await webhook_app(service)
+    real = transport.do_request
+
+    async def no_sending(url, method, request_data=None, **kwargs):
+        if url.endswith("/sendMessage"):
+            raise TimeoutError("simulated reply outage")
+        return await real(url, method, request_data, **kwargs)
+
+    transport.do_request = no_sending
+    async with (
+        bot,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="https://example.test", headers=HEADERS
+        ) as client,
+    ):
+        payload = message_payload(DINNER, 45, forward_timestamp=int(reference.timestamp()))
+        codes = [(await client.post("/telegram/webhook", json=payload)).status_code for _ in "abc"]
+        assert codes == [503, 503, 200]
+        assert transport.sent == [] and repo.updates[45] == "done"
+        assert len(service.extractor.calls) == 1  # the work was never repeated
+
+
+async def test_a_payment_that_fails_keeps_being_retried(service_factory, monkeypatch):
+    service, repo = service_factory(extraction())
+
+    async def broken(*args):
+        raise TimeoutError("database")
+
+    monkeypatch.setattr(service.pro, "complete", broken)
+    app, bot, _ = await webhook_app(service)
+    payload = {
+        "update_id": 46,
+        "message": {
+            "message_id": 46,
+            "date": 1791100800,
+            "chat": {"id": 1, "type": "private"},
+            "from": {"id": 1, "is_bot": False, "first_name": "Org"},
+            "successful_payment": {
+                "currency": "XTR",
+                "total_amount": 250,
+                "invoice_payload": "pro:-1",
+                "telegram_payment_charge_id": "charge-1",
+                "provider_payment_charge_id": "",
+            },
+        },
+    }
+    async with (
+        bot,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="https://example.test", headers=HEADERS
+        ) as client,
+    ):
+        codes = [(await client.post("/telegram/webhook", json=payload)).status_code for _ in "abcd"]
+        assert codes == [503] * 4

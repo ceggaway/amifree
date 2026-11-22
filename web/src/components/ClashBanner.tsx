@@ -3,7 +3,7 @@ import { span } from "../format";
 import type { Availability } from "../types";
 
 /** Mirrors the first line of the bot's cards, from the same server-side clash engine. */
-export function ClashBanner({ availability }: { availability: Availability }) {
+export function ClashBanner({ availability, freeText = "No clashes found" }: { availability: Availability; freeText?: string }) {
   const { conflicts, possible, busy_day, day_count, covered } = availability;
   return (
     <div className="banner-stack">
@@ -15,7 +15,7 @@ export function ClashBanner({ availability }: { availability: Availability }) {
       ) : busy_day ? (
         <div className="banner info"><Icon name="info" size={16} /> Busy day: {day_count} other plans, no clashes</div>
       ) : (
-        <div className="banner ok"><Icon name="check" size={16} /> No clashes found</div>
+        <div className="banner ok"><Icon name="check" size={16} /> {freeText}</div>
       )}
       {possible.length > 0 && (
         <div className="banner info">

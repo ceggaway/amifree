@@ -49,6 +49,7 @@ RPC_PARAMS = {
         "p_duration",
         "p_window_start",
         "p_window_end",
+        "p_selected_dates",
     ],
     "amifree_poll_join": ["p_poll_id", "p_user_id"],
     "amifree_poll_open": ["p_poll_id", "p_user_id", "p_slots"],
@@ -169,6 +170,7 @@ COLUMNS = {
     "poll_id",
     "window_end",
     "deadline_at",
+    "selected_dates",
     "display_name",
     "username",
     "series_id",
@@ -243,6 +245,8 @@ class SQLGateway:
         body = json.loads(request.content) if request.content else {}
         if "/rpc/" in request.url.path:
             params = RPC_PARAMS[endpoint]
+            if endpoint == "amifree_create_poll" and body.get("p_selected_dates") is not None:
+                body["p_selected_dates"] = "{" + ",".join(body["p_selected_dates"]) + "}"
             placeholders = ",".join(f"${i + 1}" for i in range(len(params)))
             rows = await self.query(
                 f"select * from {endpoint}({placeholders})", [body[p] for p in params]

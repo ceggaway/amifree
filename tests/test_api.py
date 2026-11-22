@@ -388,3 +388,18 @@ async def test_heatmap_refreshes_are_rate_limited(api):
         for _ in range(21)
     ]
     assert codes[:20] == [200] * 20 and codes[20] == 429
+
+
+async def test_health_identifies_the_deployed_revision_without_exposing_other_environment(
+    monkeypatch,
+):
+    app = create_app(Settings(_env_file=None, bot_mode="disabled"))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://test"
+    ) as client:
+        monkeypatch.setenv("RENDER_GIT_COMMIT", "a" * 40)
+        response = await client.get("/healthz")
+        assert response.headers["x-amifree-commit"] == "a" * 40
+        assert response.headers["cache-control"] == "no-store"
+        monkeypatch.setenv("RENDER_GIT_COMMIT", "not-a-commit")
+        assert "x-amifree-commit" not in (await client.get("/healthz")).headers

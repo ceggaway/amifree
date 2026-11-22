@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from supabase import AsyncClient
 
@@ -26,7 +26,7 @@ from app.services.quick_blocks import expand_blocks
 
 MAX_CALENDAR_BLOCKS = 3000
 # The newest migration this code needs; each migration from 008 on records itself.
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 
 def calendar_block(row: dict, titles: dict[str, str]) -> BusyBlock:
@@ -62,7 +62,7 @@ class SupabaseRepository:
             "user_actions": "id",
             "manual_busy_blocks": "id",
             "notification_logs": "id",
-            "polls": "id,deadline_at",
+            "polls": "id,deadline_at,selected_dates",
             "group_members": "chat_id,user_id,display_name,username",
             "group_events": "id,series_id,occurrence_date,edited_alone,ended_at",
             "event_series": "id",
@@ -981,6 +981,7 @@ class SupabaseRepository:
         start: datetime,
         end: datetime,
         deadline: datetime | None = None,
+        selected_dates: list[date] | None = None,
     ) -> Poll:
         result = await self.client.rpc(
             "amifree_create_poll",
@@ -992,6 +993,9 @@ class SupabaseRepository:
                 "p_duration": minutes,
                 "p_window_start": start.isoformat(),
                 "p_window_end": end.isoformat(),
+                "p_selected_dates": [day.isoformat() for day in selected_dates]
+                if selected_dates
+                else None,
             },
         ).execute()
 

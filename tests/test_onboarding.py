@@ -16,9 +16,11 @@ async def test_new_user_gets_the_welcome(service_factory):
     reply = (await service.command(1, "start"))[0]
     assert reply.text == onboarding.WELCOME
     assert reply.parse_mode == "HTML"
-    assert "<b>Try it:</b>" in reply.text
+    assert "<b>Choose below:</b>" in reply.text
     # Privacy stays on the screen that asks for a calendar.
-    assert "only see when you’re busy" in reply.text and "never read your group chats" in reply.text
+    assert (
+        "Your schedule stays private" in reply.text and "never read your group chats" in reply.text
+    )
     assert reply.text.endswith("/help")
     assert labels(reply) == ["▶️ Try an example", "📅 Connect calendar"]
     assert [len(row) for row in reply.keyboard.inline_keyboard] == [2]
@@ -110,45 +112,42 @@ async def test_every_guide_is_reachable_and_comes_back(service_factory):
     picker = (await service.callback(1, tap(welcome, "📅 Connect calendar")))[0]
     assert picker.edit and labels(picker) == [
         "📅 Google Calendar",
-        "🍎 Apple / iCloud",
-        "🤔 I'm not sure",
-        "📚 NUSMods timetable",
+        "🍎 Apple Calendar",
         "📧 Outlook",
         "« Back",
     ]
     expected = {
         # No public address in tests, so Apple goes straight to its busy-times part.
-        "🍎 Apple / iCloud": ["Part 2 of 2", "Step 1 of 4", "calendar icon"],
+        "🍎 Apple Calendar": ["Part 2 of 2", "Step 1 of 4", "calendar icon"],
         "📅 Google Calendar": ["calendar.google.com", "Secret address in iCal format"],
         # No public address in tests either, so Outlook goes straight to publishing.
         "📧 Outlook": ["Let me check when you're busy", "Step 1 of 3", "Shared calendars"],
-        "📚 NUSMods timetable": ["Connect your NUSMods timetable", "Share/Sync"],
     }
     for button, phrases in expected.items():
         guide = (await service.callback(1, tap(picker, button)))[0]
         assert guide.edit and all(p in guide.text for p in phrases), button
-        if button == "🍎 Apple / iCloud":
+        if button == "🍎 Apple Calendar":
             continue  # its way out is Skip this part, tested on its own
-        back = (await service.callback(1, tap(guide, "« Other calendars")))[0]
+        back = (await service.callback(1, tap(guide, "‹ Change calendar")))[0]
         assert back.text == onboarding.PICK_CALENDAR
     home = (await service.callback(1, tap(picker, "« Back")))[0]
     assert home.text == onboarding.WELCOME
     assert home.parse_mode == "HTML"
-    assert picker.parse_mode is None
+    assert picker.parse_mode == "HTML"
 
 
 async def test_picker_asks_where_events_live_and_helps_the_unsure(service_factory):
     service, _ = service_factory()
     welcome = (await service.command(1, "start"))[0]
     picker = (await service.callback(1, tap(welcome, "📅 Connect calendar")))[0]
-    assert "Where do you usually add your events?" in picker.text
+    assert "Connect your calendar" in picker.text
     assert "coming soon" not in picker.text
-    unsure = (await service.callback(1, tap(picker, "🤔 I'm not sure")))[0]
+    unsure = (await service.callback(1, "setup:notsure"))[0]
     assert unsure.edit and unsure.text == onboarding.NOT_SURE
     # Not only iPhone users decide here.
     assert "Android" in unsure.text and "iPhone" in unsure.text and "Computer" in unsure.text
     assert "Exchange or Outlook" in unsure.text
-    assert labels(unsure) == ["📅 Google Calendar", "🍎 Apple / iCloud", "📧 Outlook", "« Back"]
+    assert labels(unsure) == ["📅 Google Calendar", "🍎 Apple Calendar", "📧 Outlook", "« Back"]
     back = (await service.callback(1, tap(unsure, "« Back")))[0]
     assert back.text == onboarding.PICK_CALENDAR
 
@@ -189,16 +188,16 @@ async def test_guides_say_where_to_do_it_and_how_to_spot_the_right_link(service_
 async def test_iphone_guide_has_a_mac_version_and_back(service_factory):
     service, _ = service_factory()
     iphone = (await service.callback(1, "setup:ios"))[0]
-    assert "💻 On a Mac instead?" in labels(iphone)
-    mac = (await service.callback(1, tap(iphone, "💻 On a Mac instead?")))[0]
+    assert "💻 Mac steps" in labels(iphone)
+    mac = (await service.callback(1, tap(iphone, "💻 Mac steps")))[0]
     assert mac.edit and mac.parse_mode == "HTML"
     assert all(p in mac.text for p in ("Do this on your Mac", "Public Calendar", "webcal://"))
     assert labels(mac) == [
-        "📱 On an iPhone instead?",
-        "📅 Mine's Google",
-        "« Other calendars",
+        "📱 iPhone steps",
+        "📅 Google setup",
+        "‹ Change calendar",
     ]
-    back = (await service.callback(1, tap(mac, "📱 On an iPhone instead?")))[0]
+    back = (await service.callback(1, tap(mac, "📱 iPhone steps")))[0]
     assert "Do this on your iPhone" in back.text
 
 
@@ -231,10 +230,30 @@ async def test_picture_guides_announce_and_replace_each_other(service_factory):
 async def test_nusmods_guide_links_to_nusmods(service_factory):
     service, _ = service_factory()
     question = (await service.callback(1, "setup:classes"))[0]
-    guide = (await service.callback(1, tap(question, "📚 Add NUSMods")))[0]
+    guide = (await service.callback(1, tap(question, "NUS · Add NUSMods")))[0]
     assert "Share/Sync" in guide.text and "lectures, tutorials and labs" in guide.text
     open_button = guide.keyboard.inline_keyboard[0][0]
     assert open_button.url == onboarding.nusmods_url()
+
+
+async def test_non_nus_guide_back_and_continue_preserve_calendar(service_factory, reference):
+    service, repo = service_factory()
+    service.calendar_reader = FakeReader(busy=[FRIDAY_DINNER])
+    connected = (await service.message(1, 1, GOOGLE, reference))[0]
+    user = await repo.ensure_user(1)
+    calendars = await repo.list_calendars(user.id)
+    guide = (await service.callback(1, tap(connected, "Non-NUS · Add timetable")))[0]
+    assert guide.edit and guide.parse_mode == "HTML"
+    assert "same calendar" in guide.text and ".ics" in guide.text
+    assert "Don’t upload" in guide.text and "refreshes" in guide.text
+    assert "manually" in guide.text and "NTU" not in guide.text
+    back = (await service.callback(1, tap(guide, "‹ Back")))[0]
+    assert back.text == onboarding.CLASSES_QUESTION
+    guide = (await service.callback(1, tap(back, "Non-NUS · Add timetable")))[0]
+    done = (await service.callback(1, tap(guide, "Continue")))[0]
+    assert done.edit and done.parse_mode == "HTML" and done.keyboard is None
+    assert "ready to send a plan" in done.text and "NUSMods" not in done.text
+    assert await repo.list_calendars(user.id) == calendars
 
 
 @pytest.mark.parametrize(
@@ -281,7 +300,7 @@ async def test_skip_button_and_existing_menu_callbacks_work(service_factory):
 async def test_nusmods_guide_returns_to_classes_question(service_factory):
     service, _ = service_factory()
     question = (await service.callback(1, "setup:classes"))[0]
-    guide = (await service.callback(1, tap(question, "📚 Add NUSMods")))[0]
+    guide = (await service.callback(1, tap(question, "NUS · Add NUSMods")))[0]
     assert labels(guide) == ["Open NUSMods ↗", "‹ Back"]
     assert "It opens this semester" in guide.text and "<b>3. Send it here</b>" in guide.text
     assert "looks empty" in guide.text  # NUSMods keeps it in the browser it was made in
@@ -289,7 +308,7 @@ async def test_nusmods_guide_returns_to_classes_question(service_factory):
     assert "classes and exams" in guide.text
     back = (await service.callback(1, tap(guide, "‹ Back")))[0]
     assert back.text == onboarding.CLASSES_QUESTION and back.edit
-    assert labels(back) == ["📚 Add NUSMods", "Continue"]
+    assert labels(back) == ["NUS · Add NUSMods", "Non-NUS · Add timetable", "Continue"]
 
 
 @pytest.mark.parametrize("add_nusmods", [False, True])
@@ -299,11 +318,11 @@ async def test_calendar_first_flow_keeps_connection_through_classes_step(
     service, repo = service_factory()
     service.calendar_reader = FakeReader(busy=[FRIDAY_DINNER])
     connected = (await service.message(1, 1, GOOGLE, reference))[0]
-    assert labels(connected) == ["📚 Add NUSMods", "Continue"]
+    assert labels(connected) == ["NUS · Add NUSMods", "Non-NUS · Add timetable", "Continue"]
     if add_nusmods:
-        guide = (await service.callback(1, tap(connected, "📚 Add NUSMods")))[0]
+        guide = (await service.callback(1, tap(connected, "NUS · Add NUSMods")))[0]
         back = (await service.callback(1, tap(guide, "‹ Back")))[0]
-        await service.callback(1, tap(back, "📚 Add NUSMods"))
+        await service.callback(1, tap(back, "NUS · Add NUSMods"))
         prompt = (
             await service.message(
                 1, 2, "https://nusmods.com/timetable/sem-1/share?CS3216=LEC:1", reference
@@ -424,8 +443,8 @@ async def test_a_random_link_is_explained(service_factory, reference):
     assert reply.text == onboarding.NOT_A_SCHEDULE_LINK
     assert service.extractor.calls == []  # no LLM call for a bare link
     # One tap to the right guide, instead of "send /start and look again".
-    assert labels(reply) == ["🍎 iPhone / iCloud", "📅 Google", "📧 Outlook", "📚 NUSMods"]
-    guide = (await service.callback(1, tap(reply, "🍎 iPhone / iCloud")))[0]
+    assert labels(reply) == ["🍎 Apple Calendar", "📅 Google", "📧 Outlook", "📚 NUSMods"]
+    guide = (await service.callback(1, tap(reply, "🍎 Apple Calendar")))[0]
     assert guide.edit and "Share Link" in guide.text
 
 
@@ -433,7 +452,7 @@ async def test_first_calendar_offers_a_one_tap_try(service_factory, reference):
     service, _ = service_factory()
     service.calendar_reader = FakeReader(busy=[FRIDAY_DINNER])
     reply = (await service.message(1, 1, GOOGLE, reference))[0]
-    assert labels(reply) == ["📚 Add NUSMods", "Continue"]
+    assert labels(reply) == ["NUS · Add NUSMods", "Non-NUS · Add timetable", "Continue"]
     prompt = (await service.callback(1, tap(reply, "Continue")))[0]
     assert prompt.edit and prompt.text == onboarding.SEND_PLAN
     assert "Are your classes included" in reply.text
@@ -444,7 +463,7 @@ async def test_an_empty_calendar_offers_the_other_guides(service_factory, refere
     service.calendar_reader = FakeReader()  # connects fine, but has no events
     reply = (await service.message(1, 1, GOOGLE, reference))[0]
     assert "don’t see any events" in reply.text
-    assert labels(reply) == ["📚 Add NUSMods", "Continue"]
+    assert labels(reply) == ["NUS · Add NUSMods", "Non-NUS · Add timetable", "Continue"]
 
 
 async def test_group_card_deep_links_still_work(service_factory):

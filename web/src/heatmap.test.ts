@@ -25,7 +25,7 @@ describe("heatmap helpers", () => {
 
   it("labels rows and days in Singapore time, whatever the phone's time zone", () => {
     expect(rowTimes([{ cells: [{ start_at: "2026-10-13T08:00:00+08:00" }] }])).toEqual(["08:00"]);
-    expect(dayLabel("2026-10-13")).toMatch(/Tue.*13.*Oct/);
+    expect(dayLabel("2026-10-13")).toBe("13 Oct (Tue)");
   });
 
   it("shades from nobody to everybody and survives an empty group", () => {

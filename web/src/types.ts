@@ -65,6 +65,7 @@ export type MyGrid = {
   closed: boolean;
   deadline_at: string | null;
   known: boolean;
+  schedule_connected?: boolean;
   submitted: boolean;
   from_usual?: boolean;
   days: { date: string; cells: { start_at: string; state: CellState }[] }[];
@@ -165,6 +166,7 @@ export type PollForm = {
   first: string;
   last: string;
   reply_by: string | null;
+  selected_dates?: string[];
 };
 
 export type PollAnswer = "FREE" | "BUSY";

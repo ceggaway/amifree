@@ -653,12 +653,20 @@ class GroupHub:
         first: date,
         last: date,
         reply_by: date | None,
+        selected_dates: list[date] | None = None,
     ) -> dict:
         await self.require_member(user, chat_id)
         if not self.create_limit.allow(user.id):
             raise Refused("You're creating a lot very quickly. Give it a minute.")
         message_id = request_message_id(request_id)
         now = self.clock()
+        if selected_dates is not None:
+            selected_dates = sorted(set(selected_dates))
+            if not selected_dates or len(selected_dates) > POLL_DAYS:
+                raise Refused(f"Choose between 1 and {POLL_DAYS} dates.")
+            first, last = selected_dates[0], selected_dates[-1]
+        if first < now.astimezone(SG).date():
+            raise Refused("Choose dates from today on.")
         start = max(datetime.combine(first, time.min, SG), now)
         end = datetime.combine(last + timedelta(days=1), time.min, SG)
         if last < first or end <= now:
@@ -667,7 +675,15 @@ class GroupHub:
             raise Refused(f"Choose at most {POLL_DAYS} days.")
         deadline = reply_deadline(start, end, minutes, now, reply_by)
         poll = await self.repo.create_poll(
-            user.id, chat_id, message_id, title.strip()[:200], minutes, start, end, deadline
+            user.id,
+            chat_id,
+            message_id,
+            title.strip()[:200],
+            minutes,
+            start,
+            end,
+            deadline,
+            selected_dates=selected_dates,
         )
         if poll.message_id:
             return {"id": poll.id}

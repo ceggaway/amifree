@@ -46,16 +46,26 @@ EVERYDAY_HELP = (
     "To add an event, send its details, forward a message or photo, or send a voice message."
 )
 
-# Short on purpose: one thing to do (try it), and the privacy promise next to the buttons
-# that ask for a calendar. Everything else is in /help or shows up when it's relevant.
+# Explain the core workflow and both entry buttons before users begin setup.
 WELCOME = (
-    "👋 <b>Hi! I’m AmIFree.</b> I check if you’re free for plans people send you, and save "
-    "them for you.\n\n"
-    "📩 <b>Try it:</b> forward me any message with a plan, send a 📸 photo or 🎙 voice note, "
-    "or tap <b>Try an example</b> to see what I do.\n\n"
-    "🔒 I only see when you’re busy, never your event names or details. I never read your "
-    "group chats.\n\n"
-    "💡 Everything else I can do: /help"
+    "👋 <b>Hi! I’m AmIFree—your personal and group planning assistant on Telegram.</b>\n\n"
+    "<b>1. Send an event</b>\n"
+    "Forward a message or photo, type the details, or send a voice note. I’ll create an "
+    "event card for you to review and edit.\n\n"
+    "<b>2. Check for clashes</b>\n"
+    "Connect your personal calendar to check against your schedule. Classes missing? "
+    "Add NUSMods separately. Without a connection, I only check plans saved with me.\n\n"
+    "<b>3. Save with a tap</b>\n"
+    "Tap <b>Add to plans</b>. With syncing enabled, I’ll add it to your personal calendar. "
+    "View plans with /plans and customise reminders with /settings.\n\n"
+    "👥 <b>Plan together</b>\n"
+    "Add me to your group and open the mini app to schedule events, collect RSVPs or "
+    "find a common time—with automatic nudges.\n\n"
+    "🔒 Your schedule stays private. I never read your group chats.\n\n"
+    "<b>Choose below:</b>\n"
+    "▶️ <b>Try an example</b> — Sample clash check; no setup or saving.\n"
+    "📅 <b>Connect calendar</b> — Guided setup for your own schedule.\n\n"
+    "More features and instructions: /help"
 )
 
 # The example: a friend's message, and the card it would get against a made-up timetable.
@@ -76,13 +86,14 @@ DEADLINE_DEMO_OUTRO = (
 )
 
 PICK_CALENDAR = (
-    "📅 Where do you usually add your events?\n\n"
-    "I'll put your plans there by themselves, warn you about clashes, and help your groups "
-    "find a time you're free.\n\n"
-    "🎓 At NTU? Export your timetable from ntumods.com as a calendar file (.ics) and import "
-    "it into the calendar you connect here, so I can check your classes too.\n\n"
-    "I only see when you're busy, never what your events are called, where they are "
-    "or who's going."
+    "📅 <b>Connect your calendar</b>\n\n"
+    "Choose your personal calendar below to enable clash checks and automatically add "
+    "saved plans when syncing is set up.\n\n"
+    "<b>Classes missing from your calendar?</b>\n"
+    "• <b>NUS:</b> After connecting, you can add NUSMods separately.\n"
+    "• <b>Non-NUS:</b> Import your school timetable into your personal calendar so I can "
+    "check your classes too.\n\n"
+    "🔒 Your schedule stays private and is never shared with your group."
 )
 
 # Device-neutral on purpose: not everyone deciding is on an iPhone.
@@ -147,9 +158,9 @@ GUIDES = {
         "Timetable changed? Send me the updated link."
     ),
     "ios": (
-        "🍎 <b>iPhone · iCloud Calendar</b> · about 1 minute\n"
+        "🍎 <b>Apple Calendar · iPhone</b> · about 1 minute\n"
         "Do this on your iPhone.\n\n"
-        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Mine's Google</b> below "
+        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Google setup</b> below "
         "to switch to the Google setup guide.\n\n"
         "1. Open the <b>Calendar</b> app.\n"
         "2. Tap the calendar icon at the bottom right.\n"
@@ -164,9 +175,9 @@ GUIDES = {
         "🗂 More than one calendar (Classes, CCA)? Paste each link one by one, up to 5." + PASTE_NEXT
     ),
     "mac": (
-        "💻 <b>Mac · iCloud Calendar</b> · about 1 minute\n"
+        "💻 <b>Apple Calendar · Mac</b> · about 1 minute\n"
         "Do this on your Mac. (iPad? Use the iPhone steps.)\n\n"
-        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Mine's Google</b> below "
+        "Calendar listed under <b>Gmail</b>? Tap <b>📅 Google setup</b> below "
         "to switch to the Google setup guide.\n\n"
         "1. Open the <b>Calendar</b> app.\n"
         "2. In the left list, under <b>iCloud</b>, find your calendar.\n"
@@ -274,7 +285,7 @@ FEED_REFRESH_TIP = (
 APPLE_OTHER_DEVICE = {
     "iphone": (
         "📱 It's on this iPhone. Use a Mac too? Add it there once: open this chat on your Mac "
-        "and tap <b>➕ Add my plans on another device</b>."
+        "and tap <b>➕ Add on another device</b>."
     ),
     "mac": (
         "💻 It's on your Mac. Saved it to <b>iCloud</b>? It's on your iPhone too. Chose "
@@ -295,7 +306,7 @@ def apple_device(user_agent: str) -> str | None:
 
 
 def another_device_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[_button("➕ Add my plans on another device", "apple1")]])
+    return InlineKeyboardMarkup([[_button("➕ Add on another device", "apple1")]])
 
 
 APPLE_ALL_SET = (
@@ -306,7 +317,7 @@ APPLE_ALL_SET = (
 
 
 # Apple part 2, one step per message, each with the picture of that screen
-# (app/assets/ios). "Mine's Google" shows on the step whose text mentions Gmail.
+# (app/assets/ios). "Google setup" shows on the step whose text mentions Gmail.
 APPLE_STEPS = {
     "ios": (
         (
@@ -318,7 +329,7 @@ APPLE_STEPS = {
             "ios_step2.png",
             "Under <b>iCloud</b>, tap the <b>ⓘ</b> next to the calendar you use.\n\n"
             "Only see <b>Gmail</b>, no iCloud? Your calendar is Google: tap "
-            "<b>📅 Mine's Google</b>.",
+            "<b>📅 Google setup</b>.",
         ),
         (
             "ios_step3.png",
@@ -339,7 +350,7 @@ APPLE_STEPS = {
             "In the <b>Calendar</b> app, find your calendar under <b>iCloud</b> on the left. "
             "Hover over it, click the <b>person icon</b>, then tick <b>Public Calendar</b>.\n\n"
             "No list? Click the calendar icon at the top. Only see <b>Gmail</b>? Tap "
-            "<b>📅 Mine's Google</b>.",
+            "<b>📅 Google setup</b>.",
         ),
         (
             "mac_step2.png",
@@ -378,18 +389,21 @@ def apple_step(
         nav.append(InlineKeyboardButton("‹ Back", callback_data=f"a2:{device}:{n - 1}"))
     if n < len(steps):
         nav.append(InlineKeyboardButton("Next ›", callback_data=f"a2:{device}:{n + 1}"))
-    rows = [nav] if nav else []
+    rows = []
+    alternatives = []
     if n == 1:
-        rows.append(
-            [_button("💻 On a Mac instead?", "apple2mac")]
+        alternatives.extend(
+            [_button("💻 Mac steps", "apple2mac")]
             if device == "ios"
-            else [_button("📱 On an iPhone instead?", "apple2")]
+            else [_button("📱 iPhone steps", "apple2")]
         )
     if (device, n) in GOOGLE_HINT:
-        rows.append([_button("📅 Mine's Google", "google")])
+        alternatives.append(_button("📅 Google setup", "google"))
     if another and n == 1:
-        rows.append([_button("➕ Add my plans on another device", "apple1")])
-    rows.append([_button("⏭ Skip this part", "appleskip")])
+        alternatives.append(_button("➕ Add on another device", "apple1"))
+    if alternatives:
+        rows.append(alternatives)
+    rows.append([*nav, _button("⏭ Skip for now", "appleskip")])
     return text, photo, InlineKeyboardMarkup(rows)
 
 
@@ -413,11 +427,20 @@ SEND_PLAN = (
 )
 
 CLASSES_QUESTION = (
-    "<b>Are your classes included in this calendar?</b>\n\n"
-    "Tap <b>Add NUSMods</b> if your classes are missing. Tap <b>Continue</b> if they’re "
-    "already included or you don’t have classes to add.\n\n"
-    "🎓 At NTU? Export your timetable from ntumods.com as a calendar file (.ics), import it "
-    "into this calendar, then tap <b>Continue</b>."
+    "📚 <b>Are your classes included in this calendar?</b>\n\n"
+    "If your timetable is already included, tap <b>Continue</b>. Otherwise, choose "
+    "<b>NUS · Add NUSMods</b> or <b>Non-NUS · Add timetable</b> below.\n\n"
+    "No classes to add? Tap <b>Continue</b>."
+)
+
+NON_NUS_TIMETABLE = (
+    "📚 <b>Add your school timetable</b>\n\n"
+    "1. Export your timetable as a calendar file (<code>.ics</code>), if your school supports it.\n"
+    "2. Import it into the <b>same calendar you connected to AmIFree</b>, not a separate calendar.\n"
+    "3. Return here and tap <b>Continue</b>.\n\n"
+    "I’ll check those classes once your connected calendar refreshes. Don’t upload the file "
+    "to this chat. If your timetable changes, update the imported events too.\n\n"
+    "No calendar export? Add your classes manually to the connected calendar."
 )
 
 SCHEDULE_READY = (
@@ -526,8 +549,7 @@ def demo_screen(today: date) -> tuple[str, InlineKeyboardMarkup]:
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [_button("📌 Next: a deadline", "demo2")],
-            [_button("📅 Connect calendar", "calendar")],
+            [_button("📌 Next: a deadline", "demo2"), _button("📅 Connect calendar", "calendar")],
             [_button("📩 Try my own message", "skip"), _button("« Back", "home")],
         ]
     )
@@ -558,7 +580,10 @@ def deadline_demo_screen(now: datetime) -> tuple[str, InlineKeyboardMarkup]:
 
 def classes_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[_button("📚 Add NUSMods", "nusmods")], [_button("Continue", "sendplan")]]
+        [
+            [_button("NUS · Add NUSMods", "nusmods"), _button("Non-NUS · Add timetable", "nonnus")],
+            [_button("Continue", "sendplan")],
+        ]
     )
 
 
@@ -566,7 +591,7 @@ def link_help_keyboard() -> InlineKeyboardMarkup:
     """After a link that didn't work: one tap to the right guide, no retyping /start."""
     return InlineKeyboardMarkup(
         [
-            [_button("🍎 iPhone / iCloud", "ios"), _button("📅 Google", "google")],
+            [_button("🍎 Apple Calendar", "ios"), _button("📅 Google", "google")],
             [_button("📧 Outlook", "outlook"), _button("📚 NUSMods", "nusmods")],
         ]
     )
@@ -580,10 +605,12 @@ def try_it_keyboard() -> InlineKeyboardMarkup:
 def pick_calendar_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [_button("📅 Google Calendar", "google"), _button("🍎 Apple / iCloud", "apple")],
-            [_button("🤔 I'm not sure", "notsure")],
-            [_button("📚 NUSMods timetable", "nusmodspick")],
-            [_button("📧 Outlook", "outlook"), _button("« Back", "home")],
+            [
+                _button("📅 Google Calendar", "google"),
+                _button("🍎 Apple Calendar", "apple"),
+                _button("📧 Outlook", "outlook"),
+            ],
+            [_button("« Back", "home")],
         ]
     )
 
@@ -591,8 +618,12 @@ def pick_calendar_keyboard() -> InlineKeyboardMarkup:
 def not_sure_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [_button("📅 Google Calendar", "google"), _button("🍎 Apple / iCloud", "apple")],
-            [_button("📧 Outlook", "outlook"), _button("« Back", "calendar")],
+            [
+                _button("📅 Google Calendar", "google"),
+                _button("🍎 Apple Calendar", "apple"),
+                _button("📧 Outlook", "outlook"),
+            ],
+            [_button("« Back", "calendar")],
         ]
     )
 
@@ -630,7 +661,7 @@ OUTLOOK_STEPS = {
         "Sign in if asked, then click <b>Import</b>.\n\n"
         "⏳ Outlook checks for new plans every few hours, so they can take a while to show "
         "up there. Your reminders here are on time either way.",
-        "Button didn't work? Add it by hand:\n\n"
+        "Manual steps Add it by hand:\n\n"
         "Open <b>outlook.office.com</b> (school or work email) or <b>outlook.live.com</b> "
         "(personal email). Click the <b>calendar icon</b>, then <b>Add calendar</b> → "
         "<b>Subscribe from web</b>.\n\n"
@@ -701,18 +732,24 @@ def outlook_step(
         rows = outlook_subscribe_rows(url)
         rows.append(
             [
-                InlineKeyboardButton("Button didn't work?", callback_data="o:1:2"),
-                InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"),
+                InlineKeyboardButton("Manual steps", callback_data="o:1:2"),
+                InlineKeyboardButton("Next: clash checks", callback_data="o:2:1"),
             ]
         )
     else:
         if n < len(steps):
             nav.append(InlineKeyboardButton("Next ›", callback_data=f"o:{part}:{n + 1}"))
         elif part == 1:
-            nav.append(InlineKeyboardButton("Done: part 2 ›", callback_data="o:2:1"))
+            nav.append(InlineKeyboardButton("Next: clash checks", callback_data="o:2:1"))
         # Part 2 starts with one tap to Shared calendars, like part 1's subscribe buttons.
         rows = [*outlook_shared_rows(), nav] if (part, n) == (2, 1) else [nav]
-    return text, photo, InlineKeyboardMarkup([*rows, [_button("« Other calendars", "calendar")]])
+    # Provider choices belong together; keep progression and exit controls in one row.
+    rows = [row for row in rows if row]
+    if rows and len(rows[-1]) < 3:
+        rows[-1].append(_button("‹ Change calendar", "calendar"))
+    else:
+        rows.append([_button("‹ Change calendar", "calendar")])
+    return text, photo, InlineKeyboardMarkup(rows)
 
 
 # Outlook on the web's own "Subscribe from web" screen, with the link and name filled in.
@@ -727,11 +764,9 @@ OUTLOOK_SHARED = "https://outlook.{host}.com/calendar/options/calendar/SharedCal
 def outlook_shared_rows() -> list[list[InlineKeyboardButton]]:
     return [
         [
-            InlineKeyboardButton(
-                "🏫 School / work Outlook ↗", url=OUTLOOK_SHARED.format(host="office")
-            )
+            InlineKeyboardButton("🏫 School / work ↗", url=OUTLOOK_SHARED.format(host="office")),
+            InlineKeyboardButton("📧 Personal ↗", url=OUTLOOK_SHARED.format(host="live")),
         ],
-        [InlineKeyboardButton("📧 Personal Outlook ↗", url=OUTLOOK_SHARED.format(host="live"))],
     ]
 
 
@@ -741,14 +776,12 @@ def outlook_subscribe_rows(feed_url: str) -> list[list[InlineKeyboardButton]]:
     return [
         [
             InlineKeyboardButton(
-                "🏫 School / work Outlook",
+                "🏫 School / work",
                 url=OUTLOOK_SUBSCRIBE.format(host="office", url=webcal),
-            )
-        ],
-        [
+            ),
             InlineKeyboardButton(
-                "📧 Personal Outlook", url=OUTLOOK_SUBSCRIBE.format(host="live", url=webcal)
-            )
+                "📧 Personal", url=OUTLOOK_SUBSCRIBE.format(host="live", url=webcal)
+            ),
         ],
     ]
 
@@ -757,12 +790,18 @@ def apple_part1_keyboard(
     add_url: str, part2: bool = True, again: bool = False
 ) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url)],
-        [InlineKeyboardButton("Didn't work? Show the manual steps", callback_data="cal:feed")],
+        [
+            InlineKeyboardButton("➕ Add to Calendar ↗", url=add_url),
+            InlineKeyboardButton("Manual steps", callback_data="cal:feed"),
+        ]
     ]
+    navigation = []
     if part2 and not again:
-        rows.append([_button("⏭ Skip to part 2", "apple2")])
-    rows.append([_button("« Back", "apple") if again else _button("« Other calendars", "calendar")])
+        navigation.append(_button("⏭ Skip this step", "apple2"))
+    navigation.append(
+        _button("« Back", "apple") if again else _button("‹ Change calendar", "calendar")
+    )
+    rows.append(navigation)
     return InlineKeyboardMarkup(rows)
 
 
@@ -781,7 +820,7 @@ def first_calendar_keyboard(finish_apple: bool = False, feed: bool = False) -> I
         ]
         for row in pick_calendar_keyboard().inline_keyboard
     ]
-    return InlineKeyboardMarkup([*rows, *calendar_home_rows(feed)[1:]])
+    return InlineKeyboardMarkup([*[row for row in rows if row], *calendar_home_rows(feed)[1:]])
 
 
 PHOTOS_CAPTION = "Swipe through the pictures: the red marks show where to tap."
@@ -854,7 +893,7 @@ def google_step(
     )
     if n == len(GOOGLE_STEPS):
         text += (
-            "\n\nThen tap <b>Done</b> below.\n\n"
+            "\n\nThen tap <b>Done sharing</b> below.\n\n"
             "🔒 I only read your busy times, and only change events I add."
         )
     try:
@@ -868,20 +907,18 @@ def google_step(
         nav.append(InlineKeyboardButton("‹ Back", callback_data=f"gs:phone:{n - 1}"))
     if n < len(GOOGLE_STEPS):
         nav.append(InlineKeyboardButton("Next ›", callback_data=f"gs:phone:{n + 1}"))
-    rows = [nav] if nav else []
+    rows = []
     if n == len(GOOGLE_STEPS):
-        rows.insert(0, [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:done")])
+        nav.append(InlineKeyboardButton("✅ Done sharing", callback_data="gcal:done"))
     if n == 1:
         # Telegram buttons only take web links, so this is Google's address, which phones
         # hand to the app when it's installed.
-        rows.append(
-            [InlineKeyboardButton("📅 Open Google Calendar app ↗", url=GOOGLE_CALENDAR_URL)]
-        )
+        rows.append([InlineKeyboardButton("📅 Open Calendar app ↗", url=GOOGLE_CALENDAR_URL)])
         if computer:
-            rows.append(
-                [InlineKeyboardButton("💻 On a computer instead?", callback_data="gcal:computer")]
-            )
-        rows.append([_button("« Other calendars", "calendar")])
+            nav.insert(0, InlineKeyboardButton("💻 Computer steps", callback_data="gcal:computer"))
+        nav.append(_button("‹ Change calendar", "calendar"))
+    if nav:
+        rows.append(nav)
     return text, photo, InlineKeyboardMarkup(rows)
 
 
@@ -911,7 +948,7 @@ GOOGLE_SHARING_BLOCKED = (
 def google_email_first_keyboard() -> InlineKeyboardMarkup:
     # No phone button here: the email is needed either way, and the next screen offers the
     # phone steps (and sends a phone there by itself).
-    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
+    return InlineKeyboardMarkup([[_button("‹ Change calendar", "calendar")]])
 
 
 def google_share_screen(
@@ -927,7 +964,7 @@ def google_share_screen(
         f"<code>{html.escape(bot_email)}</code>\n\n"
         "<b>4.</b> Permission: <b>Make changes (see private events as free/busy)</b>\n\n"
         "<b>5.</b> Click <b>Send</b>.\n\n"
-        "Then tap <b>Done</b> below.\n\n"
+        "Then tap <b>Done sharing</b> below.\n\n"
         "🔒 I only read your busy times, and only change events I add."
     )
     try:
@@ -941,12 +978,14 @@ def google_share_screen(
             [
                 InlineKeyboardButton(
                     "📅 Open sharing settings ↗", url=google_share_link(email, base_url)
-                )
+                ),
+                InlineKeyboardButton("✅ Done sharing", callback_data="gcal:shared"),
             ],
-            [InlineKeyboardButton("✅ Done, I've shared it", callback_data="gcal:shared")],
-            [InlineKeyboardButton("📱 Phone steps", callback_data="gcal:start")],
-            [InlineKeyboardButton("✏️ Different email", callback_data="gcal:computer")],
-            [_button("« Other calendars", "calendar")],
+            [
+                InlineKeyboardButton("📱 Phone steps", callback_data="gcal:start"),
+                InlineKeyboardButton("✏️ Change email", callback_data="gcal:computer"),
+                _button("‹ Change calendar", "calendar"),
+            ],
         ]
     )
     return text, photo, keyboard
@@ -1087,9 +1126,7 @@ def unlink_guide(
             "settings</b> below → your calendar → <b>Integrate calendar</b> → <b>Secret address "
             "in iCal format</b> → <b>Reset</b>."
         )
-        rows.append(
-            [InlineKeyboardButton("📅 Open Google Calendar settings ↗", url=GOOGLE_SETTINGS)]
-        )
+        rows.append([InlineKeyboardButton("📅 Calendar settings ↗", url=GOOGLE_SETTINGS)])
     if icloud:
         sections.append(
             "🍎 <b>iCloud calendar you made public</b>\n"
@@ -1149,7 +1186,7 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("Open NUSMods ↗", url=nusmods_url())],
-                [_button("« Other calendars", "calendar")],
+                [_button("‹ Change calendar", "calendar")],
             ]
         )
     if screen == "export":
@@ -1157,20 +1194,18 @@ def guide_keyboard(screen: str) -> InlineKeyboardMarkup:
     if screen == "ios":
         return InlineKeyboardMarkup(
             [
-                [_button("💻 On a Mac instead?", "mac")],
-                [_button("📅 Mine's Google", "google")],
-                [_button("« Other calendars", "calendar")],
+                [_button("💻 Mac steps", "mac"), _button("📅 Google setup", "google")],
+                [_button("‹ Change calendar", "calendar")],
             ]
         )
     if screen == "mac":
         return InlineKeyboardMarkup(
             [
-                [_button("📱 On an iPhone instead?", "ios")],
-                [_button("📅 Mine's Google", "google")],
-                [_button("« Other calendars", "calendar")],
+                [_button("📱 iPhone steps", "ios"), _button("📅 Google setup", "google")],
+                [_button("‹ Change calendar", "calendar")],
             ]
         )
-    return InlineKeyboardMarkup([[_button("« Other calendars", "calendar")]])
+    return InlineKeyboardMarkup([[_button("‹ Change calendar", "calendar")]])
 
 
 HTML_SCREENS = frozenset(
@@ -1183,6 +1218,9 @@ HTML_SCREENS = frozenset(
         "google",
         "googlelink",
         "classes",
+        "calendar",
+        "nonnus",
+        "nonnusdone",
         "skip",
         "sendplan",
         "demo",
@@ -1209,6 +1247,26 @@ def screen(name: str) -> tuple[str, InlineKeyboardMarkup | None] | None:
         return GUIDES["google"], guide_keyboard("google")
     if name == "classes":
         return CLASSES_QUESTION, classes_keyboard()
+    if name == "nonnus":
+        return NON_NUS_TIMETABLE, InlineKeyboardMarkup(
+            [[_button("Continue", "nonnusdone"), _button("‹ Back", "classes")]]
+        )
+    if name == "nonnusdone":
+        return (
+            "✅ <b>You’re ready to send a plan</b>\n\n"
+            "Forward an event message or photo, send a voice note, or type the details. "
+            "I’ll check your connected calendar and saved plans for clashes.\n\n"
+            + PLAN_ACTIONS
+            + "\n\nImported classes are included once your calendar refreshes.",
+            None,
+        )
+    if name == "nonnusdone":
+        return (
+            "✅ <b>You’re ready to send a plan</b>\n\n"
+            "Forward an event message or photo, send a voice note, or type the details. "
+            "I’ll check your connected calendar and saved plans for clashes.\n\n" + PLAN_ACTIONS,
+            None,
+        )
     if name == "nusmodspick":
         # The same guide, reached from the calendar picker, so Back returns there.
         return GUIDES["nusmods"], guide_keyboard("nusmodspick")

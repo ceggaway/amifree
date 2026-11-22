@@ -96,6 +96,7 @@ class Poll(BaseModel):
     duration_minutes: int
     window_start: datetime
     window_end: datetime
+    selected_dates: list[date] | None = None
     status: Literal["COLLECTING", "OPEN", "CLOSED"] = "COLLECTING"
     slots: list[dict] = []
     # Members are asked to answer by then; slots are suggested automatically when it passes.

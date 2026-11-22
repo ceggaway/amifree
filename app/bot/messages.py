@@ -10,32 +10,32 @@ from app.date_display import display_date
 from app.schemas.event import SG, Event, EventDraft, GroupEvent, Status
 from app.services.availability import Availability
 
-HELP = """<b>AmIFree</b> — forward me a plan, I'll tell you if you're free and save it.
+HELP = """💡 <b>Help · Using AmIFree</b>
 
-<b>How to use me</b>
-📩 Forward or type a plan with a time, like "Dinner Fri 7-9pm at Vivo". I check it, then you tap Add to plans or Skip.
-🎙 Or send a voice note (up to a minute) saying the plan. The card shows what I heard.
-⏰ Forward a deadline, like "report due Fri 11:59pm". Choose when to be reminded in /settings.
-📅 Connect a calendar or NUSMods so I can see your classes and busy times (optional).
+📩 <b>Add a plan</b>
+Send event details as text, a forwarded message, photo or voice note. Review the event card, then <b>add, edit or skip</b>. If it clashes, you can <b>Add anyway</b>.
 
-<i>"No clashes found" only covers what I know about.</i>
+📅 <b>Connect your schedule</b>
+Use /calendar to connect your personal calendar, and add NUSMods if your classes aren’t included. I’ll check for clashes and sync saved plans when enabled. Without a connection, I only check plans saved with me.
 
-<b>Commands</b>
-/plans — what's coming up
-/free — am I free? (/free fri 7-9pm)
-/deadline — save one, or see your list
-/calendar — connect Google, iPhone or Outlook
-/settings — reminders and privacy
-/feedback — tell the team what you think
-/cancel — clear a pending action
-/deletemydata — delete my data
-/start — set up again
+🧭 <b>Your commands</b>
+📋 /plans — View and manage events and deadlines.
+🕒 /free — Check availability for a day or date.
+📌 /deadline — Save or view deadlines.
+⚙️ /settings — Customise reminders.
+💬 /feedback — Suggest an improvement or report an issue.
+↩️ /cancel — Clear a pending action.
+🗑 /deletemydata — Delete your AmIFree data.
+👋 /start — Return to the welcome screen.
 
-<b>In a group</b>
-Reply /event to a plan for a card with Going / Can't and a headcount. /whosfree finds a time for everyone.
+👥 <b>Plan with a group</b>
+Add me to your group and use /app:
+• <b>Schedule an event</b> — Set a time and collect RSVPs.
+• <b>Find a time</b> — Collect availability and choose a slot.
 
-<b>Privacy</b>
-I only act on what you send me, commands and taps. I never read group chats, and your schedule is never shown to a group."""
+Connected schedules block busy slots automatically. Live response counts and automatic nudges reduce follow-up work.
+
+🔒 I never read your group conversations or share your calendar details with the group."""
 
 STATUS_LABELS = {
     Status.PREVIEW: "Not saved yet",
@@ -218,13 +218,31 @@ def group_card(
         when = f"{display_date(event.start_at)} · {time_range(event.start_at, event.end_at)}"
         return Reply(f"📣 {event.title} · ended\n{when} · {count}")
     if app_url:
-        series = "\n🔁 Repeats. Details lets you say Going to every session." * bool(
-            event.series_id
-        )
-        tip = "\nDetails: check if you're free (only you see it) and who's going."
-    else:
-        series = "\n🔁 Recurring event. Going to all adds every session." * bool(event.series_id)
-        tip = "\nAm I free? shows a private check that only you can see."
+        start, end = event.start_at.astimezone(SG), event.end_at.astimezone(SG)
+        title = event.title[:1].upper() + event.title[1:]
+        when = f"📅 {start.day} {start:%b (%a)} · {personal_time(start)}"
+        if start.date() != end.date():
+            when += f" – {end.day} {end:%b (%a)} · {personal_time(end)} SGT"
+        else:
+            when += f"–{personal_time(end)} SGT"
+        lines = [f"<b>{escape(title)}</b>", when]
+        if event.location:
+            lines.append(f"📍 {escape(event.location)}")
+        if event.notes:
+            lines.append(escape(event.notes[:500]))
+        if event.assumed_duration:
+            lines.append("End time estimated.")
+        if event.series_id:
+            lines.append("🔁 Repeats. Open View event to respond to every session.")
+        lines += [
+            "",
+            "Let the group know if you’re coming.",
+            "",
+            f"👥 <b>{counts.get('GOING', 0)} going · {counts.get('DECLINED', 0)} can’t</b>",
+        ]
+        return Reply("\n".join(lines), group_keyboard(event, app_url), parse_mode="HTML")
+    series = "\n🔁 Recurring event. Going to all adds every session." * bool(event.series_id)
+    tip = "\nAm I free? shows a private check that only you can see."
     body = (
         details(event)
         + series

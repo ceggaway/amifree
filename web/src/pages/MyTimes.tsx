@@ -31,6 +31,7 @@ export function MyTimes() {
   }
   if (!grid) return <p className="hint">Loading…</p>;
   const title = capitaliseFirst(grid.title);
+  const scheduleConnected = grid.schedule_connected ?? (grid.known && !grid.from_usual);
   if (grid.closed) {
     return (
       <section>
@@ -109,18 +110,25 @@ export function MyTimes() {
       <h1>{title}</h1>
       {justPosted && <p className="banner ok">Poll posted ✓ Now add your own times.</p>}
       <p className="instruction">
-        {grid.submitted ? (
+        {!scheduleConnected ? (
+          <>Tap or drag to mark when you’re free.</>
+        ) : grid.submitted ? (
           <>Tap or drag to change the times you're <strong>free</strong>.</>
         ) : grid.known && !grid.from_usual ? (
-          <>Times your calendar leaves open are ticked. Tap or drag to untick any you <strong>can't</strong> make.</>
+          <>Busy times from your calendar and timetable are blocked automatically. Tap or drag to untick any other times you can’t make.</>
         ) : (
           <>Tap or drag over the times you're <strong>free</strong>.</>
         )}
       </p>
+      {!scheduleConnected && (
+        <p className="hint">
+          <em>Connect your personal calendar or add your NUSMods timetable to block busy times automatically.</em>
+        </p>
+      )}
       <div className="grid-legend">
         <span><i className="swatch free" aria-hidden="true">✓</i> Free</span>
         <span><i className="swatch off" aria-hidden="true" /> Not free</span>
-        <span><i className="swatch busy" aria-hidden="true" /> Busy (calendar)</span>
+        <span><i className="swatch busy" aria-hidden="true" /> Busy (calendar / timetable)</span>
       </div>
       {grid.from_usual && !grid.submitted && (
         <p className="banner info">Pre-filled from your usual times.</p>
@@ -149,20 +157,12 @@ export function MyTimes() {
       {status && <p className="error" role="alert">{status}</p>}
       {/* Pinned to the bottom: the grid is long, and people missed a Submit below it. */}
       <div className="submit-bar">
-        <p>{freeHours(ticked(grid).length)}</p>
         <button type="button" className="on big" disabled={saving} onClick={save}>
-          {saving ? "Submitting…" : "Submit availabilities"}
+          {saving ? "Submitting…" : "Submit"}
         </button>
       </div>
     </section>
   );
-}
-
-/** "6 hrs free" from a count of ticked half hours. */
-export function freeHours(halves: number): string {
-  if (halves === 0) return "None marked";
-  const hours = halves / 2;
-  return `${hours} hr${hours === 1 ? "" : "s"} free`;
 }
 
 function Row({

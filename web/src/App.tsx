@@ -1,5 +1,5 @@
 import { BackButton } from "./components/BackButton";
-import { Icon } from "./components/Icon";
+import amifreeLogo from "./assets/amifree-logo.jpg";
 import { useEffect, useRef } from "react";
 import { HashRouter, Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { mockMode } from "./api";
@@ -51,7 +51,7 @@ export function App() {
       <header className="app-header">
         <BackButton />
         <Link to="/" className="brand">
-          <span className="brand-mark"><Icon name="calendar" size={19} /></span>
+          <img className="brand-mark" src={amifreeLogo} alt="" width={40} height={40} />
           AmIFree
           <span className="brand-caption">Make time together</span>
         </Link>

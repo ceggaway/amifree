@@ -470,7 +470,16 @@ class MemoryRepository:
                 n["next_attempt_at"] = now
 
     async def create_poll(
-        self, user_id, chat_id, message_id, title, minutes, start, end, deadline=None
+        self,
+        user_id,
+        chat_id,
+        message_id,
+        title,
+        minutes,
+        start,
+        end,
+        deadline=None,
+        selected_dates=None,
     ):
         for p in self.polls.values():
             if (p.chat_id, p.source_message_id) == (chat_id, message_id):
@@ -484,6 +493,7 @@ class MemoryRepository:
             duration_minutes=minutes,
             window_start=start,
             window_end=end,
+            selected_dates=selected_dates,
             deadline_at=deadline,
             created_at=datetime.now(UTC),
         )

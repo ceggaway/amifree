@@ -318,7 +318,11 @@ async def deliver_group(update: Update, service, result):
             await service.groups.posted(result.adopt_event_id, query.message.message_id)
         if result.card:
             try:
-                await query.edit_message_text(result.card.text, reply_markup=result.card.keyboard)
+                await query.edit_message_text(
+                    result.card.text,
+                    reply_markup=result.card.keyboard,
+                    parse_mode=result.card.parse_mode,
+                )
             except RetryAfter:
                 # Telegram's edit limit for this group: the answer is saved, so redraw later.
                 parts = (query.data or "").split(":")
@@ -336,7 +340,7 @@ async def deliver_group(update: Update, service, result):
                 pass
     if result.post:
         sent = await update.effective_message.reply_text(
-            result.post.text, reply_markup=result.post.keyboard
+            result.post.text, reply_markup=result.post.keyboard, parse_mode=result.post.parse_mode
         )
         if result.group_event_id:
             await service.groups.posted(result.group_event_id, sent.message_id)
@@ -503,6 +507,24 @@ async def error_handler(update, context):
     )
 
 
+async def report_abandoned(update: Update):
+    """Tell the person when the webhook stops retrying their update, instead of staying silent."""
+    chat = update.effective_chat
+    if chat is None:
+        return
+    if chat.type == ChatType.PRIVATE:
+        text = ERROR
+    elif update.callback_query:
+        return  # a new post in the group for one person's failed tap would only be noise
+    else:
+        text = "Something went wrong. Please try again."
+    try:
+        await update.get_bot().send_message(chat.id, text)
+    except Exception as exc:
+        # Blocked bot, Telegram outage: the update is abandoned either way.
+        log.warning("abandoned_notice_failed error_type=%s", type(exc).__name__)
+
+
 def attach_notifier(application: Application, service) -> Notifier:
     """Give the outbox worker a way to DM users through this bot."""
 
@@ -592,6 +614,7 @@ def register_handlers(application: Application, service):
                 chat_id=event.chat_id,
                 message_id=event.message_id,
                 reply_markup=card.keyboard,
+                parse_mode=card.parse_mode,
             )
         except RetryAfter:
             raise  # CardRefresher tries again when Telegram allows
@@ -609,6 +632,7 @@ def register_handlers(application: Application, service):
                 chat_id=poll.chat_id,
                 message_id=poll.message_id,
                 reply_markup=card.keyboard,
+                parse_mode=card.parse_mode,
             )
         except RetryAfter:
             raise  # CardRefresher tries again when Telegram allows
@@ -652,6 +676,10 @@ def register_handlers(application: Application, service):
     async def chat_title(chat_id: int) -> str | None:
         return (await application.bot.get_chat(chat_id)).title
 
+    async def group_member_count(chat_id: int) -> int:
+        # Telegram includes AmIFree in the count; the bot cannot submit availability.
+        return max(0, (await application.bot.get_chat_member_count(chat_id)) - 1)
+
     async def check_admin(chat_id: int, telegram_id: int) -> bool:
         """Whether this person is an admin of the group. Network errors are raised."""
         try:
@@ -668,6 +696,7 @@ def register_handlers(application: Application, service):
     service.check_chat_admin = check_admin
     service.send_private = dm
     service.chat_title = chat_title
+    service.group_member_count = group_member_count
 
     async def refund_stars(telegram_id: int, charge_id: str):
         await application.bot.refund_star_payment(telegram_id, charge_id)

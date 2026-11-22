@@ -14,6 +14,7 @@ class TelegramTransport(BaseRequest):
         self.invoices = []
         self.admins = set()  # telegram ids reported as group admins by getChatMember
         self.blocked = set()  # telegram ids the bot cannot message
+        self.member_count = 9  # includes AmIFree; eight possible respondents
 
     @property
     def read_timeout(self):
@@ -39,6 +40,8 @@ class TelegramTransport(BaseRequest):
                 "first_name": "AmIFree",
                 "username": "AmIFreeTestBot",
             }
+        elif endpoint == "getChatMemberCount":
+            result = self.member_count
         elif endpoint == "getChatMember":
             uid = int(params["user_id"])
             result = {

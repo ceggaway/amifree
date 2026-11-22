@@ -94,7 +94,7 @@ async def test_google_is_three_steps(service_factory, reference):
     assert "1 of 5 · " in step1.text and "of 3" not in step1.text  # one counter, not two
     assert "Next ›" in labels(step1)
     last = (await service.callback(1, "gs:phone:5"))[0]
-    step2 = (await service.callback(1, tap(last, "✅ Done, I've shared it")))[0]
+    step2 = (await service.callback(1, tap(last, "✅ Done sharing")))[0]
     assert "Almost done" in step2.text and not step2.edit  # the steps stay readable above
     assert repo.users[1].pending == {"stage": "gcal_email"}
     again = (await service.message(1, 5, "me@gmail", reference))[0]
@@ -138,7 +138,7 @@ async def test_apple_part_one_is_one_tap_to_subscribe(service_factory, reference
     token = repo.users[1].calendar_feed_token
     add = part1.keyboard.inline_keyboard[0][0]
     assert add.text == "➕ Add to Calendar ↗" and add.url == f"{BASE}/cal/{token}/add"
-    assert {"Didn't work? Show the manual steps", "⏭ Skip to part 2"} <= set(labels(part1))
+    assert {"Manual steps", "⏭ Skip this step"} <= set(labels(part1))
     page = await service.subscribe_page(token)
     assert f'href="webcal://amifree.example/cal/{token}.ics"' in page
     assert await service.subscribe_page("x" * 43) is None
@@ -156,7 +156,7 @@ async def test_first_feed_fetch_moves_on_to_part_two(service_factory, reference)
     [(telegram_id, step)] = sent.messages
     assert telegram_id == 1 and step.text.startswith(onboarding.APPLE_PART1_DONE)
     assert "Part 2 of 2" in step.text and "Step 1 of 4" in step.text and step.photo
-    assert "⏭ Skip this part" in labels(step)
+    assert "⏭ Skip for now" in labels(step)
     service.clock = lambda: reference + timedelta(hours=1)
     await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
     assert len(sent.messages) == 1  # only the first fetch announces
@@ -173,7 +173,7 @@ async def test_with_google_apple_is_one_part(service_factory, reference):
     repo.users[1].google_connected = True
     part1 = (await service.callback(1, "setup:apple"))[0]
     assert "Part 1" not in part1.text and "part 2" not in part1.text
-    assert "⏭ Skip to part 2" not in labels(part1) and len(part1.text) <= 1024
+    assert "⏭ Skip this step" not in labels(part1) and len(part1.text) <= 1024
     await service.calendar_feed(repo.users[1].calendar_feed_token, "iOS/18.0")
     [(_, done)] = sent.messages
     # Part 1 already showed the refresh setting: it isn't repeated.
@@ -191,7 +191,7 @@ async def test_feed_after_a_link_says_all_set(service_factory, reference):
     [(_, done)] = sent.messages
     # Synced from an iPhone: a reminder that a Mac needs it added once too.
     assert done.text == onboarding.APPLE_ALL_SET + "\n\n" + onboarding.APPLE_OTHER_DEVICE["iphone"]
-    assert labels(done) == ["➕ Add my plans on another device"]
+    assert labels(done) == ["➕ Add on another device"]
 
 
 @pytest.mark.parametrize(
@@ -212,7 +212,7 @@ async def test_first_sync_reminds_about_the_other_device(service_factory, refere
     assert len(step.text) <= 1024
     if device:
         assert onboarding.APPLE_OTHER_DEVICE[device] in step.text and "Part 2 of 2" in step.text
-        assert "➕ Add my plans on another device" in labels(step)
+        assert "➕ Add on another device" in labels(step)
     else:
         assert not any(note in step.text for note in onboarding.APPLE_OTHER_DEVICE.values())
 
@@ -226,12 +226,12 @@ async def test_part_one_again_on_another_device(service_factory, reference):
     await service.calendar_feed(token, "iOS/18.0 (22A) dataaccessd/1.0")
     part2 = (await service.callback(1, "setup:apple"))[0]
     assert "Part 2 of 2" in part2.text
-    again = (await service.callback(1, tap(part2, "➕ Add my plans on another device")))[0]
+    again = (await service.callback(1, tap(part2, "➕ Add on another device")))[0]
     assert "Another device" in again.text and "Part 1" not in again.text
     assert again.photo and len(again.text) <= 1024
     add = again.keyboard.inline_keyboard[0][0]
     assert add.url == f"{BASE}/cal/{token}/add"  # the same calendar, not a new link
-    assert "⏭ Skip to part 2" not in labels(again)
+    assert "⏭ Skip this step" not in labels(again)
     back = (await service.callback(1, tap(again, "« Back")))[0]
     assert "Part 2 of 2" in back.text
 
@@ -248,7 +248,7 @@ async def test_half_done_apple_setup_shows_in_calendar(service_factory, referenc
     ) in status.text
     part2 = (await service.callback(1, tap(status, "🍎 Finish Apple setup")))[0]
     assert "Part 2 of 2" in part2.text
-    skipped = (await service.callback(1, tap(part2, "⏭ Skip this part")))[0]
+    skipped = (await service.callback(1, tap(part2, "⏭ Skip for now")))[0]
     assert skipped.text == onboarding.APPLE_SKIPPED
 
 
@@ -276,27 +276,27 @@ async def test_outlook_is_one_step_per_screen(service_factory, reference):
     # One tap opens Outlook's own Subscribe from web, with the feed and name filled in.
     links = {b.text: b.url for row in step.keyboard.inline_keyboard for b in row if b.url}
     feed = quote(f"webcal://{BASE.split('://')[1]}/cal/{token}.ics", safe="")
-    for label, host in (("🏫 School / work Outlook", "office"), ("📧 Personal Outlook", "live")):
+    for label, host in (("🏫 School / work", "office"), ("📧 Personal", "live")):
         assert links[label] == (
             f"https://outlook.{host}.com/calendar/0/addfromweb?url={feed}&name=AmIFree"
         )
     first = step.text
     assert step.photo  # the marked-up Subscribe from web screen
     # By hand if the button didn't work: the link is on that step, to copy on the computer.
-    manual = (await service.callback(1, tap(step, "Button didn't work?")))[0]
+    manual = (await service.callback(1, tap(step, "Manual steps")))[0]
     assert "Step 2 of 2" in manual.text and "Subscribe from web" in manual.text
     assert f"<code>{BASE}/cal/{token}.ics</code>" in manual.text
     assert (await service.callback(1, tap(manual, "‹ Back")))[0].text == first
     # Part 2 follows part 1 from either step, and its Back returns to the buttons.
-    step = (await service.callback(1, tap(manual, "Done: part 2 ›")))[0]
+    step = (await service.callback(1, tap(manual, "Next: clash checks")))[0]
     assert "Part 2 of 2" in step.text and "Step 1 of 3" in step.text
     # One tap to Shared calendars in Outlook's settings, instead of finding it by hand.
     shared = {b.text: b.url for row in step.keyboard.inline_keyboard for b in row if b.url}
     assert shared == {
-        "🏫 School / work Outlook ↗": (
+        "🏫 School / work ↗": (
             "https://outlook.office.com/calendar/options/calendar/SharedCalendars"
         ),
-        "📧 Personal Outlook ↗": "https://outlook.live.com/calendar/options/calendar/SharedCalendars",
+        "📧 Personal ↗": "https://outlook.live.com/calendar/options/calendar/SharedCalendars",
     }
     assert "Publish a calendar" in step.text and "Settings ⚙️" in step.text  # and by hand
     assert (await service.callback(1, tap(step, "‹ Part 1")))[0].text == first
@@ -305,7 +305,7 @@ async def test_outlook_is_one_step_per_screen(service_factory, reference):
     assert "Paste the link into this chat" in step.text and "Next ›" not in labels(step)
     back = (await service.callback(1, tap(step, "‹ Back")))[0]
     assert "Step 2 of 3" in back.text
-    assert "« Other calendars" in labels(step)
+    assert "‹ Change calendar" in labels(step)
     # The same link every time: subscribing twice never makes a second feed.
     await service.callback(1, "setup:outlook")
     assert repo.users[1].calendar_feed_token == token
@@ -384,8 +384,8 @@ async def test_apple_part_two_is_one_step_and_picture_at_a_time(service_factory,
         assert len(step.text) <= 1024  # Telegram's caption limit
         pictures.add(step.photo)
         assert ("‹ Back" in labels(step)) == (n > 1)
-        assert ("📅 Mine's Google" in labels(step)) == (n == 2)  # where Gmail is on screen
-        assert "⏭ Skip this part" in labels(step)
+        assert ("📅 Google setup" in labels(step)) == (n == 2)  # where Gmail is on screen
+        assert "⏭ Skip for now" in labels(step)
         if n < 4:
             step = (await service.callback(1, tap(step, "Next ›")))[0]
     assert "Paste the link here" in step.text and "Next ›" not in labels(step)
@@ -393,7 +393,7 @@ async def test_apple_part_two_is_one_step_and_picture_at_a_time(service_factory,
     back = (await service.callback(1, tap(step, "‹ Back")))[0]
     assert "Step 3 of 4" in back.text and "Public Calendar" in back.text
     mac = (await service.callback(1, "setup:apple2mac"))[0]
-    assert "On a Mac · Step 1 of 2" in mac.text and "📱 On an iPhone instead?" in labels(mac)
+    assert "On a Mac · Step 1 of 2" in mac.text and "📱 iPhone steps" in labels(mac)
     last = (await service.callback(1, tap(mac, "Next ›")))[0]
     assert "Step 2 of 2" in last.text and last.photo != mac.photo
     for bad in ("a2:ios:5", "a2:ios:0", "a2:pc:1", "a2:ios"):

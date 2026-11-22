@@ -1,8 +1,16 @@
-import { day as dayText, startOfDay, time } from "./format";
+import { startOfDay, time } from "./format";
 import type { HeatmapDay } from "./types";
 
-/** A poll day's YYYY-MM-DD key as "Tue 13 Oct", in Singapore time like the cells. */
-export const dayLabel = (key: string) => dayText(startOfDay(key));
+const pollDayFormat = new Intl.DateTimeFormat("en-SG", {
+  timeZone: "Asia/Singapore", day: "numeric", month: "short", weekday: "short",
+});
+
+/** A poll day's YYYY-MM-DD key as "13 Oct (Tue)", in Singapore time like the cells. */
+export const dayLabel = (key: string) => {
+  const parts = pollDayFormat.formatToParts(startOfDay(key));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value;
+  return `${part("day")} ${part("month")} (${part("weekday")})`;
+};
 
 /** The time-of-day rows to draw, in order, across every day. */
 export function rowTimes(days: { cells: { start_at: string }[] }[]): string[] {

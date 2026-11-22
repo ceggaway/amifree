@@ -1,6 +1,6 @@
 """First-run setup: the welcome screen and step-by-step guides for finding schedule links.
 
-Every screen edits the same message, so setup never floods the chat (ux-flows.md, /start A).
+Every screen edits the same message, so setup never floods the chat (docs/design/ux-flows.md, /start A).
 """
 
 import base64

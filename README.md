@@ -44,7 +44,7 @@ Create `.env` from `.env.example` if it does not already exist. Preserve an exis
 ### Supabase
 
 1. Create a Supabase project.
-2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `008`). Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
+2. Run the complete `app/db/schema.sql` in its SQL Editor, then each file in `app/db/migrations/` in numeric order (`001` to `021`), or run `app/db/all_migrations.sql`, which bundles them. Together they create the tables, indexes and transaction functions, enable row-level security, and grant access only to the server's service role. Every file preserves existing rows and is safe to reapply. For a project that already holds data, take a backup first. Startup fails with a clear message if a migration is missing.
 3. Copy the project URL and backend `service_role` key into `.env`. Keep the key on the server; use neither the anon key nor a browser session. The SDK also accepts Supabase's newer backend secret key in the same configuration variable. See [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys).
 
 ```dotenv
@@ -279,7 +279,7 @@ python -c 'import secrets; print(secrets.token_hex(32))'
 
 The server registers `/telegram/webhook` with Telegram on startup. Incoming requests must carry the matching `X-Telegram-Bot-Api-Secret-Token`. Never run polling and webhook instances for the same bot simultaneously. Stop the local polling process before deploying. Follow the [Render FastAPI deployment guide](https://render.com/docs/deploy-fastapi) for service creation and [port configuration](https://render.com/docs/web-services#port-binding).
 
-Use one replica and one worker for this MVP. Within that worker, different people are handled at the same time (up to 32 updates), while each person's updates, and each chat's, are processed strictly in order (`app/bot/concurrency.py`); database versions reject stale writes. One slow extraction or picture read therefore delays only the person who sent it. Multiple replicas would require shared locking and a durable update queue. During deployment, stop the old instance before starting a second worker for the same bot. No deployment has been performed by this project setup.
+Use one replica and one worker for this MVP. Within that worker, different people are handled at the same time (up to 32 updates), while each person's updates, and each chat's, are processed strictly in order (`app/bot/concurrency.py`); database versions reject stale writes. One slow extraction or picture read therefore delays only the person who sent it. Multiple replicas would require shared locking and a durable update queue. During deployment, stop the old instance before starting a second worker for the same bot. The live bot runs this way on Render.
 
 ## MVP assumptions
 

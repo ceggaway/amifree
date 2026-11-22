@@ -1,7 +1,7 @@
 # Friends feature: build spec
 
 **For:** whoever builds this into the AmIFree bot (and their coding assistant).
-**Status:** UX agreed by the team. Build Part 1, then Part 2.
+**Status:** Not built. The UX was agreed, but we prioritised refining the core features (final report §2.4). Kept as a spec for a future version.
 **Why:** In our survey (61 NUS students), "none of my friends were going" was the single most common reason for missing an event (33%). In user tests, two of six students asked for a way to send an event to a friend and see if they are going. This feature turns "I'd go if someone came with me" into a plan in a couple of taps.
 
 The feature has two parts:

@@ -1,5 +1,7 @@
 # AmIFree UX Flows
 
+> **Design document, written during development.** It records the planned flows; the shipped bot is described in the README.
+
 This document describes how AmIFree should behave from the user's point of view, based on our two surveys (70 responses) and the professors' feedback. For each feature it gives the flow, the messages and buttons, and **what changes from the current bot**, so the backend can implement it feature by feature.
 
 Each change has a priority:

@@ -1,7 +1,7 @@
 # Group features
 
 What each group feature does, where it lives, and how to run it. Operators should also read
-the Group features table in the README.
+the Group features table in docs/features.md.
 
 ## Where things live
 

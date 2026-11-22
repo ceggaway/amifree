@@ -1,0 +1,183 @@
+# AmIFree: feature and behaviour reference
+
+The detailed behaviour behind the [README](../README.md): commands, group features, calendars, reminders, parsing rules and internals.
+
+## Private chat
+
+Private commands: `/start`, `/help`, `/plans`, `/events`, `/block`, `/blocks`, `/deadline`, `/settings`, `/free`, `/calendar`, `/cancel`, `/deletemydata`. Deletion requires a confirmation.
+
+Send `/deadline <text>` to save a deadline, or `/deadline` alone for one numbered list, grouped into **⚠️ Overdue** and **Coming up** with due times and relative dates. Tap a number to open its card with **Done**, **Edit** and **Remove**. **Edit** asks what to change (**Name**, **Due date & time** or **Notes**), then takes the new value as typed or spoken. A new due time is read with plain rules, not the AI: "sat 5pm", "tmr", "20 oct 2359", "6pm". Whatever isn't mentioned stays the same (a day keeps the time, a time keeps the day), and a bare "5" asks AM or PM. Reminders and synced calendars follow the new time. Lists have ten items per page; Previous/Next updates the same message. Manage deadline reminders in `/settings`.
+
+## Groups
+
+1. In BotFather leave **Group Privacy** turned on (the default). Add the bot to a test group.
+2. Reply `/event` to a message containing a plan, or send `/event Dinner Fri 7-9pm at Vivo`. The bot posts a card.
+3. With two accounts, tap **📱 Details** on the same card. Each sees their own private "Am I free?" check at the top; nothing appears in the group. (Without the Mini App set up, the card has an **Am I free?** button that shows a private popup instead.)
+4. Tap Going / Can't and watch the headcount; tapping again many times still counts you once. The plan appears in each member's `/plans`.
+5. As the organiser tap **📱 Details** (or **⚙️ Manage** without the Mini App, which opens the private chat). Edit, cancel, nudge, "still coming?" and marking who came are there. Edit the time and save: members who kept the plan each receive one message stating what changed.
+6. Send `/whosfree project meeting 2h next week reply by Sun`. Have three accounts tap **✋ Count me in**. Times are suggested when the reply-by time passes; the organiser can also suggest them earlier from **📱 Open**. Each member taps **✅ 1, ✅ 2 or ✅ 3** for the time that works best: one vote each, so tapping another time moves it and tapping theirs again takes it back. The organiser picks a time in **📱 Open**, which posts the event card.
+7. In **📱 Details**, see who's going, and check in with **I'm here** from 30 minutes before the start.
+8. A card is redrawn as "ended · N went" once the event is over (or "N said Going" when nobody checked in).
+
+### Group features
+
+| Feature | How it works |
+| --- | --- |
+| **"Still coming?"** | 4–30 hours before an event starts, each member marked Going gets one private message: Still coming / Not sure / Can't anymore. Can't anymore also sets their RSVP to Can't. The organiser sees, under **⚙️ Manage → Who's confirmed**, "18 confirmed · 4 unsure · 3 dropped · 2 no reply". Members with `/reminders off` are not asked. |
+| **Recurring events** | `/event Training every Tue/Thu 7-9pm at UTSRC until week 13` (also `until 30 Nov`, `for 8 weeks`). Every session is its own card, posted four days before it. Week numbers use the NUS calendar (recess between weeks 6 and 7). Editing a card changes that session only; the organiser is then offered **Apply to all future sessions** or **Cancel all future sessions**. **Going to all** RSVPs to every remaining session. A series is capped at 26 weeks / 60 sessions. |
+| **Auto-chase** | Up to two private nudges per card: a day after posting (or halfway to the deadline, if sooner) and three hours before the deadline. A person is nudged at most once per stage. A poll's deadline is its reply-by time; a card's is its start. |
+| **Heatmap** | The poll card's **📊 Who's free when** opens the Mini App grid of how many participants are free in each half hour. Counts only; shown to poll participants, and only once three schedules are known. Needs `BOT_USERNAME` and `MINI_APP_SHORT_NAME` (create the short name with `/newapp` in BotFather). |
+| **Attendance, turnout and export** | `/attendance` (organiser) sends a private list of everyone who answered or checked in; tap a name to mark who came, or mark everyone who said Going. `/stats` sends turnout and a per-event breakdown, and `/export [days]` sends a CSV (name, RSVP, still coming?, attended), both privately. Turnout counts people who tapped **I'm here** or were ticked by the organiser. All free by default. |
+| **Clubs Pro** | Switched off by default (`EXPORT_REQUIRES_PRO=false`). When on, `/stats` breakdown and `/export` need Pro, and `/pro` in a group sends the buyer a Telegram Stars invoice (`PRO_PRICE_STARS` for `PRO_DAYS`). Payments are recorded once per charge and extend the group's Pro time. `/refund` (private chat) returns the buyer's latest payment within `REFUND_WINDOW_DAYS` and removes the days it bought; a payment that can't be matched to a group is refunded automatically. You can also set a group Pro by hand with a `group_plans` row (`tier='PRO'`) or `PRO_CHAT_IDS`. |
+| **Usual times** | `/usual tue evenings, sat all day` (also `weekdays after 6pm`, `mon-fri 6-9pm`, `/usual clear`) saves standing free times. Poll grids start from them, and in polls you are counted as free only inside them until you change that poll's grid. People with no schedule count as known once they set them. |
+| **Set my own times** | The poll card's **✍️ Set my times** opens a grid pre-filled from your schedule or usual times, with busy times blocked (never explained). Tap, or drag across cells (turn on Paint mode on touch screens) to tick or untick many; then submit; the heatmap and suggested slots use your answer. People with no schedule tick the times they are free, and count as known once they do. |
+| **Event detection** | Off by default. A group admin runs `/detect on` after making the bot a group admin (Telegram only delivers ordinary messages to admin bots). The bot then checks messages that contain a day and a time, reads them once, and offers **Make event card / Ignore**. Nothing is saved without a tap, message text is not stored, and unanswered suggestions delete themselves after 10 minutes. `/detect off` turns it off. |
+
+Members must have opened a private chat with the bot at least once before it can DM them reminders, alerts or nudges. This is a Telegram rule.
+
+## Mini App
+
+Use Node.js 22.12+ (22.x), 24.x, or 26+ for the frontend build and tests. CI uses Node.js 22.
+
+```bash
+cd web
+npm ci
+npm run build      # writes web/dist, which the backend serves at /app/
+npm run dev        # browser-only UI work with mock data, proxied to a local backend
+```
+
+Set `MINI_APP_URL` to the HTTPS address of `/app/` on your deployed backend (for example `https://your-service.onrender.com/app/`). On startup the bot sets its menu button to **Open AmIFree**. Telegram only opens HTTPS Mini Apps, so local testing inside Telegram needs a tunnel or a staging deploy. The Mini App sends Telegram's signed `initData` to `POST /api/auth/telegram`; the server verifies it and returns a one-hour session token. A normal browser has no signature and cannot sign in. Development builds fall back to mock data, which is compiled out of production builds.
+
+### The Mini App in groups
+
+Groups can do everything from the Mini App. `/app` in a group, `/help`, and `/event` or
+`/whosfree` sent with nothing after them reply with one button that opens it (the group page
+leads with **Create an event** and **Find a time**). Cards stay small: an event card is Going /
+Can't plus **📱 Details**, which shows your private clash check, who's going and
+check-in, and for the organiser edit, cancel, nudge, "still coming?" and marking who came. A poll
+card is **✋ Count me in** (or **✅ 1 / ✅ 2 / ✅ 3** once times are suggested) plus **📱 Open**,
+where members vote for one time and the organiser suggests times, nudges and picks one.
+Without the Mini App set up, the cards fall back to the full set of chat buttons. A card made in
+the app is posted in the group like any other.
+
+The group page also has **📊 Turnout and attendance** (turnout for your own events over 30 days,
+4 months or a year, and **Send CSV to my chat**, which sends the attendance file privately, as
+`/export` does), and, for group admins only, a **Spot plans in chat** switch that does what
+`/detect on|off` does, including telling the group. The home page has a **🔔 Reminders** switch,
+which turns every reminder switch in `/settings` on or off together.
+
+Telegram doesn't allow Mini App buttons in groups, so these are `t.me/<bot>/<app>?startapp=…`
+links. A link names the group, and anyone can change a link, so the server asks Telegram
+(`getChatMember`) whether the person is in that group before it shows or posts anything.
+
+To switch it on (once, by whoever runs the bot):
+
+1. In BotFather, send `/newapp`, choose the bot, and give the URL
+   `https://<your-render-service>.onrender.com/app/` and a short name such as `app`.
+2. On Render, set `BOT_USERNAME` (without @), `MINI_APP_SHORT_NAME` (the short name from step 1)
+   and `MINI_APP_URL` (the same URL), then redeploy.
+
+Without these, the group commands and cards work exactly as before, with no app buttons.
+
+## Weekly events and posters
+
+A post that repeats every week ("Saturdays, 9:30am-11:30am", "every Tue 7-8pm", "Tuesdays and Thursdays 7-9pm", "every Mon, Wed & Fri") asks once: **Just the next one** (a normal card for the soonest of those days), **Every Saturday** / **Every Tue & Thu** (one weekly busy block per day, previewed and saved together) or **Neither**. If its end time is missing, the bot asks for that rather than for a date. Any forwarded message is read: text, a caption, a forwarded poll (question and options), and **pictures** (a photo, or an image sent as a file). A picture is read by the OpenAI vision model into plain text, which then goes through the same extractor and the same deterministic date/time checks as typed text, so a poster behaves exactly like its words would. The picture is not stored. `READ_PICTURES=false` turns this off, and `OPENAI_VISION_MODEL` picks a different model. A caption and the picture's text are combined; a picture with no event text, or one that can't be read, falls back to the caption or a short explanation. Pictures are limited to 10 per person per 5 minutes. **Voice notes** sent in a private chat (up to 60 seconds) are turned into text by the OpenAI speech model (`OPENAI_TRANSCRIBE_MODEL`, default `gpt-4o-mini-transcribe`) and read like a typed message; the card starts with "🎙 I heard: …" so a misheard name or time can be caught before saving. The audio is held in memory only for the request and never stored. `READ_VOICE=false` turns this off. Voice notes are limited to 10 per person per 5 minutes, and voice notes in groups are ignored. Videos without a caption and stickers are not read.
+
+Quick messages work with no end time: `dinner 7pm today`, `dinner 7 tonight` (a day part such as tonight or this evening makes a bare 7 mean 7pm) or `breakfast 9 tmr morning` use `DEFAULT_EVENT_DURATION_MINUTES` (120 by default) and the card says the length is assumed. Set it to 0 to ask for the end time instead.
+
+## Two or more times in one message
+
+In private chat, a message with several times gets one picker instead of one card. Separate events ("Training Tue 7-9pm and Thu 6-8pm", "Workshop 10am-12pm, lunch 12-1pm", "Hackathon Sat & Sun 9am-6pm" as two sessions) are listed with a clash line each and **Add both** / **Add all**, **Add 1 · Tue 27 Oct**… or **Neither**. Choices for one event ("Dinner Fri 7pm or Sat 6pm") show **Which one are you going for?** with a button per time; the chosen time opens the usual card. The picker says where added plans go (/plans, and the calendar they sync to); with no calendar connected, it ends with **🍎 Apple Calendar** / **📅 Google Calendar** setup buttons instead of a separate setup prompt. Calendar setup is asked about at most three times, cards and pickers together (after the first plan, at 3 plans and at 6); the third ask says it's the last, and after that nothing suggests it except /calendar itself. Up to five times are read. Every time goes through the same date/time checks as a single event, and a time that fails them is named in the picker ("send it on its own"). One event across days ("Camp Fri 6pm to Sun 12pm") stays one card, and weekly wording ("Tuesdays and Thursdays", "every Tue/Thu") goes to the recurring flows, never the picker. A new message closes the picker. In groups, `/event` with several times makes no card and asks for one time (or `/whosfree` for "or").
+
+## Am I free? (`/free`)
+
+`/free fri 7-9pm` checks that time against everything AmIFree knows; `/free fri 7pm` checks two hours. `/free tomorrow`, `/free 17th` or `/free this weekend` list free gaps of at least 30 minutes between 8am and 11pm; plain `/free` offers Today / Tomorrow / This weekend buttons. It is parsed with the same date/time rules as forwarded plans, with no LLM call, and asks "AM or PM?" when that is unclear.
+
+Partial overlaps are still clashes, but every clash message says how much of the plan is lost: "it ends at 7:30pm, so you'd miss the first 30 min", "you'd need to leave at 8pm (the last 1 hr)", "from 7:30–8pm", or "(the whole time)". This applies to cards, `/free`, change alerts and the private group popup.
+
+## Calendar setup flow
+
+After a user keeps their first plan (Add to plans or Going), the bot asks once: "Want plans like this on your calendar automatically?" **[Set up (1 min)] [Not now]**. It asks once more when they have three plans, then never again, and never once plans already go to a calendar (counted with `calendar_prompt` rows in `user_actions`). **Set up** asks where their events live: Google Calendar, Apple / iCloud, or "I'm not sure" (help for Android, iPhone and computer users). Outlook still says coming soon.
+
+- **Google** (with `GOOGLE_SERVICE_ACCOUNT` set) goes straight to sharing, which does read and write in one setup: Step 1 share the calendar and tap **Done**, Step 2 type the Google email, Step 3 send back the code. The read-only link is only offered when sharing fails (school and work accounts may block it).
+- **Apple** is two parts. Part 1 is an **Add to Calendar** button that opens `APP_BASE_URL/cal/<secret>/add`, a page that hands the browser the `webcal://` feed address so iOS shows Subscribe (Telegram buttons can only open http(s) links). When the calendar app first fetches the feed, the bot messages the user with Part 2, the iCloud public link for busy times, which they can skip. `/calendar` shows a half-done setup with **Finish Apple setup**. Without `APP_BASE_URL`, Apple goes straight to Part 2.
+
+## Calendar sync (`/calendar`)
+
+`/calendar` gives each user a private feed link, `APP_BASE_URL/cal/<secret>.ics`, with iPhone steps (Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add Subscribed Calendar). Their Going and Saved plans then appear in a calendar called AmIFree, and edits and cancellations update on the calendar app's next refresh. Once the feed has been fetched by a calendar app (link previews don't count), cards say "Syncing to your calendar automatically" instead of showing the 🍎/📅 buttons. **New link** and **Turn off** invalidate the old link; `/deletemydata` removes it.
+
+The feed needs a public HTTPS `APP_BASE_URL`, also in polling mode. For a local test, run a tunnel (`cloudflared tunnel --url http://localhost:8000`) and set `APP_BASE_URL` to its address; quick-tunnel addresses change on every run, so re-subscribe after restarting it. The secret is redacted from access logs. Without `APP_BASE_URL`, `/calendar` explains that sync isn't available yet.
+
+## Personal calendar link (busy times)
+
+Sending the bot a private iCal link (Google "Secret address in iCal format", an iCloud public calendar link, or an Outlook published ICS link) connects that calendar. Each link adds a calendar, up to 5 (for example separate iCloud calendars for classes, CCA and events); sending a connected link again just refreshes it. Calendars are labelled with their own name (`X-WR-CALNAME`, e.g. "CCA"), so clashes read "Clashes with CCA calendar". Its busy times then count in clash checks, Am I free? and `/whosfree`, and cards list "personal calendar" under Checked. `/calendar` lists each connected calendar with its status and a **Remove** button, and has step-by-step guides for finding links.
+
+- **Busy times only.** `calendar_busy_blocks` has no title column; cards call them "Personal calendar". All-day, free (transparent) and cancelled events, and AmIFree's own feed, are ignored. Recurring events are expanded for the next 4 months.
+- **The link is encrypted at rest** with `CALENDAR_LINK_KEY` (blank derives a key from the bot token). Changing the key makes stored links unreadable; those users are asked to send their link again.
+- **Only Google, iCloud and Outlook hosts over HTTPS are fetched**, every redirect is re-checked, and responses are capped at 5 MB, so a pasted link can't make the server reach anything else.
+- **Refreshed hourly** by the jobs tick, each calendar on its own. A revoked link clears only that calendar's busy times and `/calendar` marks it ⚠️; a temporary failure keeps the last good copy and retries an hour later. Migration `007` moves a link connected under `006` into the new `personal_calendars` table.
+
+## Share a Google calendar (adds plans for you)
+
+A link can only be read. If `GOOGLE_SERVICE_ACCOUNT` is set, `/calendar` also offers **Share Google Calendar**: the student shares their calendar with AmIFree's own Google account, chooses *Make changes*, and sends their Google email. AmIFree then puts a one-time code event in that calendar (marked free, deleted afterwards), and the student sends the code back, which proves they can open it: without this, anyone who knew the email could claim a calendar shared with AmIFree. One calendar connects to one AmIFree account. Then plans they save or tap Going on are added to that calendar, updated when the plan changes, and removed when they remove or skip it. It also reads their busy times (like a link, refreshed hourly). Migration `015` adds `google_connections` and `google_event_links`.
+
+- **No Google sign-in screen for students**, so Google's app review and the 100-user limit for apps in testing don't apply. Students stop it any time by removing AmIFree from *Shared with*, or **Remove** in `/calendar`.
+- **One sync routine, not a hook per action.** `google_sync.py` compares the student's Going and Saved plans with what was last written (`google_event_links`) and fixes the difference. It runs in the background after the student's own messages and taps, and every 10 minutes from the jobs tick (to catch a group organiser moving the time, and to retry failures).
+- **Only AmIFree's own events are touched.** Each plan gets a fixed Google event id derived from its id, so it can never be added twice, and events are marked so they aren't counted as busy time.
+- **Busy times only are read**: the request asks Google for start and end times, never titles, places or notes.
+- **Setup:** create a Google Cloud project, turn on the Google Calendar API, create a service account and a JSON key, then set `GOOGLE_SERVICE_ACCOUNT` to that JSON (or its base64). Students share with the service account's email, shown in the bot's steps.
+
+## Reminders and alerts
+
+Night-before summaries, change alerts and nudges are rows in `notification_logs`, sent by an idempotent job. The server runs that job every minute while it is awake. Hosts that sleep or restart will miss runs, so also schedule it externally: set `JOBS_SECRET` and call it every ten minutes, for example from Render Cron:
+
+```bash
+curl -fsS -X POST -H "X-Jobs-Secret: $JOBS_SECRET" "$APP_BASE_URL/internal/jobs/run"
+```
+
+Summaries are sent from each person's chosen hour in `/settings` (8, 9 or 10pm; `NIGHTLY_HOUR`, default 20, until they pick one) until midnight, Singapore time. A summary goes to anyone with a plan (Going or still undecided) or a deadline tomorrow. It lists tomorrow's plans, deadlines due tomorrow, and deadlines in the following week ("Coming up"); undecided plans get Going / Not going buttons. On Sunday nights it also lists deadlines due later in the next 30 days ("Later this month"), and goes to anyone with such a deadline even if Monday is empty. Each list shows at most five, then points to /deadline. The **☀️ morning list** goes out at 9am (until noon, if the server slept) on any day with a Going plan or a deadline: the day's plans, then what's due, with a Done button for each deadline. Plans and deadlines added after 9am aren't counted. A **⏰ deadline alert** goes out 3 hours before something is due, except in quiet hours (11pm to 9am) and, for anyone with the morning list on, before noon on the due day, when the 9am list was only a few hours earlier; a deadline due at 1am gets it at 10pm the night before. The day before is the evening summary's "Due tomorrow". A reminder whose time had already passed when the deadline was added is never sent, and the deadline card only promises the ones still to come. A message is marked sent only after Telegram accepts it; failures retry with backoff up to five times.
+
+
+## MVP assumptions
+
+- All event times use Asia/Singapore. Numeric dates are day/month. Dates without a year use the next occurrence. A bare weekday means its next occurrence including today; `next Friday` means Friday in the next calendar week. Cards display the resolved date before RSVP.
+- Forwarded invitations use the original Telegram message timestamp when available, otherwise the received message timestamp. Clarification retains that reference. Edits use the first correction message's timestamp and retain it for further clarification.
+- Date/time evidence must appear in the source text or the existing edit baseline. Missing/ambiguous critical fields prompt clarification. Non-Singapore timezones and multiple-event messages are flagged by the extractor; weekly patterns in groups become a series (see Group features), and in private chat ask once between the next date and a weekly block; the live pilot must validate its handling of these cases.
+- Missing end times prompt clarification by default. Setting `DEFAULT_EVENT_DURATION_MINUTES` to a positive value permits a visibly labelled assumption. Overnight events need an explicit end date. Existing updates preserve duration when no replacement end time is supplied.
+- Overlap uses half-open intervals: an event ending at 19:00 does not clash with one starting at 19:00. Definite clashes are Going plans, NUSMods classes and exams, and busy blocks. A Saved plan is undecided: it is reported as a possible overlap with a choice of which to attend, and never blocks. "Busy day" is a warning, not a clash, shown when `BUSY_DAY_THRESHOLD` (default 3) other Going plans fall on the same day. Conflicts are private.
+- "No clashes found" covers only what AmIFree knows: every card lists what was checked and says when no NUSMods timetable covers the date.
+- Quick blocks are parsed without the LLM. Weekly blocks repeat for 90 days unless `until <date>` is given, cannot cross midnight, and are stored separately from NUSMods blocks so a reimport never removes them.
+- A member's answer on a group card is their own plan linked to the shared card. Only the organiser can edit or cancel a shared plan. Change alerts are sent only for edits made through AmIFree: Telegram does not tell a bot when someone edits a message elsewhere.
+- Bots cannot list group members. Headcounts, nudges and `/whosfree` only involve people who have interacted with AmIFree in that group. Each person is nudged at most once per chase stage (see Group features).
+- NUSMods links normally omit academic year. It is inferred from the message's Singapore timestamp, switching in August. Set `NUSMODS_ACADEMIC_YEAR=2026-2027` to override it for a specific pilot. The imported year is shown in the setup response.
+- Student share-link formats v1/v2/v3 are supported. Missing/stale selections are rejected; the importer does not choose a class. Hidden courses are still imported. TA-specific links are rejected with an explanation.
+- The importer expands listed teaching weeks into dated blocks and accounts for recess after teaching week 6. Special terms and explicit week ranges are supported. Exams require a published duration. Holiday exceptions, ad hoc cancellations and unscheduled classes are only as accurate as NUSMods' published lesson data. Resend a fresh link after timetable changes; reimport replaces old blocks atomically.
+- Coverage spans the imported semester. Outside coverage, or with no timetable imported, cards say that no NUSMods timetable covers the date; Going plans and busy blocks are still checked.
+- Event discovery includes all upcoming events plus events created in the last 30 days. `/events` has pages of 10 cards, with upcoming events first; candidate choices show at most 10 matches. A vague follow-up requires selection. A new clash appearing after an update preview requires another confirmation.
+- Pending clarification/update/delete state survives restarts in Supabase. It expires after `PENDING_TTL_HOURS` (default 24). One pending action per user is supported; `/cancel` clears it.
+- Optional raw extraction auditing is off (`RETAIN_EXTRACTIONS=false`). Pending state temporarily includes source text. With auditing enabled, records expire after `EXTRACTION_RETENTION_DAYS` (default 7). Cleanup runs at startup and hourly while the backend is running, and stale pending data is cleared when its user next interacts. If the backend is offline, cleanup resumes on restart.
+- Users, structured events and aggregate action records remain until `/delete`. Provider-side Telegram/OpenAI/Supabase retention is separate. HTTP client logs are suppressed to avoid URLs containing bot tokens; application logs report error types and update IDs without raw messages or credentials.
+- Analytics are best-effort and can miss activity during database failures. `scripts/analytics.sql` calculates onboarding, forwards per active user, correction rate, clashes, RSVP rate, server processing latency and week-two retention. Latency excludes Telegram delivery; ambiguous drafts do not have a final verdict until clarified. Legacy action rows without message IDs cannot be fully deduplicated.
+
+## Calendar maintenance and development data
+
+The bundled `app/data/academic-calendar.json` covers AY2024/25–2026/27 and comes from the [official NUSMods calendar](https://github.com/nusmodifications/nusmods/blob/master/packages/nusmods-academic-calendar/academic-calendar.json). Before importing another year, update it from that source, preserve `app/data/NUSMODS-LICENSE.txt`, and rerun importer tests. The bot rejects unsupported years rather than guessing semester dates.
+
+`app/db/seed.sql` is optional for a separate development project. It replaces only synthetic users `999000001` and `999000002` and creates one fixed-date class and Going event for 9 October 2026. It is reproducible and not required for a real Telegram account. Do not seed a public pilot project. `scripts/analytics.sql` is read-only and returns aggregate counts.
+
+## Module interfaces
+
+- `NUSModsImporter.import_link(link, reference)` returns normalized `BusyBlock` records, academic year, semester and coverage.
+- `EventExtractor.extract(text, reference, previous)` returns strict `Extraction` fields. Deterministic validation converts them to an aware `EventDraft` or a clarification prompt.
+- `check_availability(candidate, timetable, events, ...)` returns Free, Clash or Unknown; it never calls an LLM.
+- `SchedulingService` manages onboarding, pending state, event previews, versioned RSVP/update actions and Telegram replies. `SupabaseRepository` scopes all event operations to their owner and uses transaction functions for multi-row mutations.
+- `GroupEventService` and `PollService` handle group cards and `/whosfree`; they return a private alert and, separately, the public card to render. `Notifier` (in `app/services/jobs.py`) queues and delivers reminders, change alerts and nudges.
+- FastAPI provides `/healthz`, `/readyz`, the authenticated webhook, `/internal/jobs/run` (shared secret) and `/api/*` (Telegram-signed session). Every `/api` route resolves the user on the server; a request without a valid session gets 401 and another user's IDs get 404. CORS is disabled unless `MINI_APP_DEV_ORIGIN` names one development origin.
+
+## Webhook failure recovery
+
+Failed processing or reply delivery returns HTTP 503 so Telegram can retry. The running worker retains reply progress and completed update IDs for its latest 1,000 handled updates. Retries resume unsent replies without repeating completed business operations; duplicate completed updates are acknowledged without additional replies. This cache is in memory and is lost on restart or eviction, so migration `008` also records each update in `processed_updates`: a retry of a finished update is acknowledged and not repeated even after a restart, a failure before anything was committed releases the claim so the retry runs, and an attempt that crashed is retaken after two minutes. Continue to run one worker. This is not durable exactly-once delivery: replies are not in an outbox. A reply accepted by Telegram before a network timeout may be delivered twice on retry.
+
+Retries are capped at three attempts per update, because Telegram holds a chat's later messages behind one it is still retrying. After the third failure the update is acknowledged and logged as `webhook_update_abandoned`, and if nothing was completed the person is told to try again. Successful payments are exempt and keep retrying so the record is never lost.
+
+Times with a colon and no AM/PM suffix are treated as 24-hour time, including mixed ranges such as `07:00–9pm`. Abbreviated ranges such as `7–9pm` still share the suffix.
